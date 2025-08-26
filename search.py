@@ -426,7 +426,16 @@ def search_cli(query, max_results=100, match_case=False, match_whole_word=False,
                 if full_path.lower().startswith(media_dir.lower()):
                     media_dir_root = media_dir
                     break
-            result['media_dir_root'] = media_dir_root # 添加 media_dir_root 字段
+            result['media_dir_root'] = media_dir_root
+            
+            # 如果 media_dir_root 仍然为空 (例如，在全局搜索中)
+            # 则尝试从 full_path 推断根目录
+            if not media_dir_root and result['full_path']:
+                # 将根目录设置为驱动器号 (例如 "C:")
+                drive = os.path.splitdrive(result['full_path'])[0]
+                if drive:
+                    result['media_dir_root'] = drive
+
             if 'folder_path' in result:
                 folder_parts = result['folder_path'].split('\\')
                 if len(folder_parts) > 1:

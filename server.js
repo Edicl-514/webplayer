@@ -19,7 +19,15 @@ const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
 
 const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url, true);
-    let pathname = decodeURIComponent(parsedUrl.pathname);
+    // 安全地解码路径，处理可能的编码错误
+    let pathname;
+    try {
+        pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (decodeError) {
+        // 如果解码失败，使用原始路径并记录错误
+        console.warn('Failed to decode pathname, using raw pathname:', parsedUrl.pathname);
+        pathname = parsedUrl.pathname;
+    }
 
     // 处理获取媒体目录列表的请求
     if (pathname === '/api/media-dirs') {

@@ -301,12 +301,23 @@
                     if (!mediaDir) return src;
                     
                     try {
-                        const url = new URL(src, window.location.origin);
+                        // 注意：src可能已经包含了查询参数，我们需要避免双重编码
+                        // 先尝试解析src，如果它已经是完整的URL则直接使用，否则基于当前origin构建
+                        let url;
+                        try {
+                            url = new URL(src);
+                        } catch (urlError) {
+                            // 如果src不是完整的URL，则基于当前origin构建
+                            url = new URL(src, window.location.origin);
+                        }
+                        
+                        // 设置mediaDir参数，searchParams.set会自动处理编码
                         url.searchParams.set('mediaDir', mediaDir);
                         return url.toString();
                     } catch (e) {
                         // 如果src不是有效的URL，则直接在后面添加查询参数
                         const separator = src.includes('?') ? '&' : '?';
+                        // 确保mediaDir被正确编码
                         return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
                     }
                 }

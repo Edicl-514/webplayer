@@ -483,8 +483,8 @@
             const encodedFileName = encodeURIComponent(fileName);
             const videoUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/'); // 统一URL斜杠，并编码路径和文件名
             
-            // 在新窗口中打开视频播放页面
-            const videoPageUrl = `video-player.html?src=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(fileName)}`;
+            // 在新窗口中打开视频播放页面，添加mediaDir参数
+            const videoPageUrl = `video-player.html?src=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
             window.open(videoPageUrl, '_blank');
         }
 

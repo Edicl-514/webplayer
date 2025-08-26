@@ -214,6 +214,28 @@
            document.getElementById('errorMessage').style.display = 'block';
        }
 
+       function getRelativePath(fullPath, mediaDirRoot) {
+           let relativePath;
+           // 如果 mediaDirRoot 存在且有效，则计算相对路径
+           if (mediaDirRoot && fullPath.toLowerCase().startsWith(mediaDirRoot.toLowerCase())) {
+               relativePath = fullPath.substring(mediaDirRoot.length);
+           } else {
+               // 否则，从路径中移除驱动器号
+               // 例如 "D:\Movies\file.mp4" -> "/Movies/file.mp4"
+               relativePath = fullPath.substring(fullPath.indexOf(':') + 1);
+           }
+           
+           relativePath = relativePath.replace(/\\/g, '/'); // 统一路径分隔符
+           if (!relativePath.startsWith('/')) {
+               relativePath = '/' + relativePath; // 确保以斜杠开头
+           }
+           return relativePath;
+       }
+
+       function encodePath(path) {
+           return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+       }
+
        // 显示搜索结果
        function displayResults(data) {
            document.getElementById('loadingMessage').style.display = 'none';
@@ -288,8 +310,9 @@
                            img.className = 'thumbnail lazy'; // 添加 lazy 类
                            img.loading = 'lazy'; // 添加 loading="lazy" 属性
                            // 使用服务器端生成的缩略图
-                           const relativePathForThumbnail = result.full_path.substring(result.media_dir_root.length).replace(/\\/g, '/');
-                           img.dataset.src = `/thumbnail${relativePathForThumbnail}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+                           const thumbnailPath = encodePath(relativePath);
+                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
                            img.alt = result.filename;
                            img.onerror = function() {
                                // 如果缩略图加载失败，显示默认图标
@@ -306,8 +329,9 @@
                            img.className = 'thumbnail lazy'; // 添加 lazy 类
                            img.loading = 'lazy'; // 添加 loading="lazy" 属性
                            // 使用服务器端生成的缩略图
-                           const relativePathForThumbnail = result.full_path.substring(result.media_dir_root.length).replace(/\\/g, '/');
-                           img.dataset.src = `/thumbnail${relativePathForThumbnail}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+                           const thumbnailPath = encodePath(relativePath);
+                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
                            img.alt = result.filename;
                            img.onerror = function() {
                                // 如果缩略图加载失败，显示默认视频图标
@@ -380,23 +404,26 @@
        // 导航到文件夹
        function navigateToFolder(fullPath, mediaDirRoot) {
            // 构建新的 URL，模拟进入文件夹
-           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           // index.html的hash路由不需要编码
            const newUrl = `/index.html#${relativePath}`;
            window.open(newUrl, '_blank');
        }
 
        // 播放视频
        function playVideo(fullPath, fileName, mediaDirRoot) {
-           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
-           const videoPageUrl = `video-player.html?src=${encodeURIComponent(relativePath)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedSrc = encodeURIComponent(encodeURIComponent(relativePath));
+           const videoPageUrl = `video-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(mediaDirRoot)}`;
            window.open(videoPageUrl, '_blank');
        }
 
        // 下载文件
        function downloadFile(fullPath, fileName, mediaDirRoot) {
-           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedPath = encodePath(relativePath);
            const a = document.createElement('a');
-           a.href = `${relativePath}?mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           a.href = `${encodedPath}?mediaDir=${encodeURIComponent(mediaDirRoot)}`;
            a.download = fileName; // 强制下载
            document.body.appendChild(a);
            a.click();
