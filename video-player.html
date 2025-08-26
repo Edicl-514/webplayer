@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频播放器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a2a6c, #2c3e50);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .video-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .close-btn {
+            padding: 10px 20px;
+            background: linear-gradient(to right, #ff416c, #ff4b2b);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(255, 75, 43, 0.4);
+        }
+
+        .close-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(255, 75, 43, 0.6);
+            background: linear-gradient(to right, #ff4b2b, #ff416c);
+        }
+
+        .close-btn:active {
+            transform: translateY(0);
+        }
+
+        .video-container {
+            flex: none;
+            width: 90%;
+            aspect-ratio: 16 / 9;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            outline: none;
+        }
+
+        .player-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .video-container:hover .player-controls {
+            opacity: 1;
+        }
+
+        .control-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin: 0 10px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .progress-container {
+            flex: 1;
+            height: 6px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 3px;
+            margin: 0 20px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #00c9ff, #92fe9d);
+            border-radius: 3px;
+            width: 0%;
+        }
+
+        .time-display {
+            font-size: 0.9rem;
+            margin: 0 10px;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .volume-container {
+            display: flex;
+            align-items: center;
+            margin: 0 10px;
+        }
+
+        .volume-slider {
+            width: 0;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            margin: 0 10px;
+            transition: width 0.3s ease;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .volume-container:hover .volume-slider {
+            width: 70px;
+        }
+
+        .volume-bar {
+            height: 100%;
+            background: linear-gradient(to right, #00c9ff, #92fe9d);
+            width: 100%;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #00c9ff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            color: #ff416c;
+            font-size: 1.2rem;
+            text-align: center;
+            padding: 20px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .video-title {
+                font-size: 1.2rem;
+            }
+            
+            .control-btn {
+                width: 35px;
+                height: 35px;
+                margin: 0 5px;
+            }
+            
+            .time-display {
+                font-size: 0.8rem;
+                min-width: 80px;
+            }
+            
+            .video-container {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="video-title" id="videoTitle">加载中...</div>
+        <button class="close-btn" onclick="window.close()">关闭窗口</button>
+    </div>
+    
+    <div class="video-container">
+        <div id="dplayer"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
+    <script>
+        const videoTitle = document.getElementById('videoTitle');
+        const urlParams = new URLSearchParams(window.location.search);
+        const videoSrc = urlParams.get('src');
+        const title = urlParams.get('title') || '未知视频';
+
+        videoTitle.textContent = title;
+
+        if (videoSrc) {
+            const dp = new DPlayer({
+                container: document.getElementById('dplayer'),
+                video: {
+                    url: videoSrc,
+                    pic: urlParams.get('poster') || '', // Optional: Add a poster image if available in URL params
+                    thumbnails: urlParams.get('thumbnails') || '', // Optional: Add thumbnails if available
+                },
+                autoplay: true,
+                theme: '#FADFA3',
+                lang: 'zh-cn',
+                hotkey: true,
+                screenshot: true,
+                playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
+                loop: false,
+            });
+
+            // Handle DPlayer errors
+            dp.on('error', function () {
+                console.error('DPlayer error occurred.');
+                // You can display a custom error message here if needed
+                videoTitle.textContent = '视频加载失败';
+            });
+
+            dp.on('loadedmetadata', function() {
+                const video = dp.video;
+                if (video.videoWidth && video.videoHeight) {
+                    aspect = video.videoWidth / video.videoHeight;
+                    adjustPlayerSize();
+                    dp.resize();
+                }
+            });
+
+            let aspect = 16 / 9;
+            
+            function adjustPlayerSize() {
+                const container = document.querySelector('.video-container');
+                const maxWidth = window.innerWidth * 0.9;
+                const maxHeight = window.innerHeight * 0.8; // 留空间给header和控件
+                let width = maxWidth;
+                let height = width / aspect;
+                if (height > maxHeight) {
+                    height = maxHeight;
+                    width = height * aspect;
+                }
+                container.style.width = `${width}px`;
+                container.style.height = `${height}px`;
+                dp.resize();
+            }
+
+            adjustPlayerSize();
+            window.addEventListener('resize', adjustPlayerSize);
+            window.addEventListener('orientationchange', adjustPlayerSize);
+        } else {
+            videoTitle.textContent = '未找到视频源';
+        }
+    </script>
+</body>
+</html>

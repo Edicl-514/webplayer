@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebPlayer - 媒体浏览器</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1200px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #0056b3; }
+        .path-navigation { margin-bottom: 20px; padding: 10px; background-color: #e9ecef; border-radius: 5px; display: flex; align-items: center; }
+        .path-navigation button { margin-right: 10px; padding: 8px 15px; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; font-size: 1em; }
+        .path-navigation button:hover { background-color: #0056b3; }
+        .path-navigation span { font-size: 1.1em; color: #555; }
+        
+        /* 网格布局样式 */
+        #fileGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 0;
+            list-style: none;
+        }
+        
+        .grid-item {
+            background: #e2e6ea;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            margin: 12px 0;
+        }
+        
+        .grid-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+        
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #d1d8df;
+            overflow: hidden;
+        }
+        
+        .thumbnail {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .icon {
+            font-size: 3em;
+            color: #6c757d;
+        }
+        
+        .file-info {
+            padding: 12px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 8px;
+            word-break: break-word;
+            flex-grow: 1;
+        }
+        
+        .file-size {
+            font-size: 0.85em;
+            color: #6c757d;
+            margin-bottom: 10px;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .actions button {
+            flex: 1;
+            padding: 6px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        
+        .play-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .play-btn:hover {
+            background-color: #218838;
+        }
+        
+        .download-btn {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
+        .download-btn:hover {
+            background-color: #138496;
+        }
+        
+        #videoPlayerContainer {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        #videoPlayer {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebPlayer - 媒体浏览器</h1>
+        <div class="path-navigation">
+            <button id="backButton" class="hidden">返回上一级</button>
+            <button id="homeButton" class="hidden">返回主目录</button>
+            <span id="currentPath">/</span>
+        </div>
+        <div id="rootDirsGrid" class="hidden">
+            <!-- 根目录媒体目录将在此处动态加载 -->
+        </div>
+        <div id="fileGrid">
+            <!-- 文件和文件夹将在此处动态加载 -->
+        </div>
+        <div id="videoPlayerContainer" class="hidden">
+            <h2>正在播放: <span id="playingFileName"></span></h2>
+            <video id="videoPlayer" controls autoplay></video>
+            <button id="closePlayerButton">关闭播放器</button>
+        </div>
+    </div>
+
+    <script>
+        const fileGrid = document.getElementById('fileGrid');
+        const rootDirsGrid = document.getElementById('rootDirsGrid');
+        const currentPathSpan = document.getElementById('currentPath');
+        const backButton = document.getElementById('backButton');
+        const homeButton = document.getElementById('homeButton');
+        const videoPlayerContainer = document.getElementById('videoPlayerContainer');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const playingFileNameSpan = document.getElementById('playingFileName');
+        const closePlayerButton = document.getElementById('closePlayerButton');
+
+        let currentPath = '/';
+        let currentMediaDir = null;
+
+        // 获取根目录媒体目录列表并展示
+        async function fetchRootDirs() {
+            try {
+                const response = await fetch('/api/root-dirs');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const dirs = await response.json();
+                
+                // 显示根目录网格
+                rootDirsGrid.classList.remove('hidden');
+                fileGrid.classList.add('hidden');
+                fileGrid.innerHTML = ''; // 清空文件网格
+                backButton.classList.add('hidden');
+                homeButton.classList.add('hidden');
+                currentPathSpan.textContent = '根目录';
+                
+                // 清空现有内容
+                rootDirsGrid.innerHTML = '';
+                
+                // 展示每个媒体目录
+                dirs.forEach(dir => {
+                    const gridItem = document.createElement('div');
+                    gridItem.className = 'grid-item';
+                    
+                    // 创建缩略图容器
+                    const thumbnailContainer = document.createElement('div');
+                    thumbnailContainer.className = 'thumbnail-container';
+                    
+                    // 创建文件夹图标
+                    const icon = document.createElement('div');
+                    icon.className = 'icon';
+                    icon.innerHTML = '&#128193;'; // 文件夹图标
+                    thumbnailContainer.appendChild(icon);
+                    
+                    // 创建文件信息容器
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'file-info';
+                    
+                    // 创建目录名元素
+                    const dirName = document.createElement('div');
+                    dirName.className = 'file-name';
+                    dirName.textContent = dir.alias || dir.path; // 显示别名或路径
+                    
+                    // 创建路径元素
+                    const dirPath = document.createElement('div');
+                    dirPath.className = 'file-size';
+                    dirPath.textContent = dir.path;
+                    
+                    // 组装文件信息
+                    fileInfo.appendChild(dirName);
+                    fileInfo.appendChild(dirPath);
+                    
+                    // 组装网格项
+                    gridItem.appendChild(thumbnailContainer);
+                    gridItem.appendChild(fileInfo);
+                    
+                    // 添加点击事件
+                    gridItem.onclick = () => switchMediaDir(dir.path);
+                    
+                    // 添加到网格容器
+                    rootDirsGrid.appendChild(gridItem);
+                });
+                history.replaceState({ path: 'root' }, '', '#'); // 确保回到根目录时清除历史记录
+            } catch (error) {
+                console.error('Error fetching root directories:', error);
+                rootDirsGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载目录失败: ${error.message}</div></div>`;
+            }
+        }
+
+        // 切换媒体目录
+        async function switchMediaDir(newDir) {
+            try {
+                const response = await fetch('/api/set-media-dir', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ dir: newDir })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                if (result.success) {
+                    currentMediaDir = result.newMediaDir;
+                    currentPath = '/'; // 切换目录后重置当前路径
+                    updatePathDisplay();
+                    fetchFiles(currentPath);
+                    // 隐藏根目录网格，显示文件网格
+                    rootDirsGrid.classList.add('hidden');
+                    fileGrid.classList.remove('hidden');
+                    console.log(`Switched to media directory: ${result.newMediaDir}`);
+                    
+                    // 更新浏览器历史记录
+                    history.replaceState({ path: '/', mediaDir: newDir }, '', '#/');
+                } else {
+                    console.error('Failed to switch media directory:', result.message);
+                }
+            } catch (error) {
+                console.error('Error switching media directory:', error);
+            }
+        }
+
+        async function fetchFiles(relativePath) {
+            try {
+                // 对路径进行编码以防止特殊字符（如 #）引起的问题
+                const encodedRelativePath = relativePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                const fetchUrl = `/list${encodedRelativePath === '/' ? '' : encodedRelativePath}`;
+                const response = await fetch(fetchUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const files = await response.json();
+                displayFiles(files);
+            } catch (error) {
+                console.error('Error fetching files:', error);
+                fileGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载文件失败: ${error.message}</div></div>`;
+            }
+        }
+
+        function displayFiles(files) {
+            fileGrid.innerHTML = ''; // 清空现有网格
+            videoPlayerContainer.classList.add('hidden'); // 隐藏视频播放器
+
+            // 添加返回上一级按钮和返回主目录按钮
+            if (currentPath !== '/') {
+                backButton.classList.remove('hidden');
+                homeButton.classList.remove('hidden');
+            } else {
+                backButton.classList.add('hidden');
+                homeButton.classList.remove('hidden'); // 在根目录也显示返回主目录按钮
+            }
+
+            files.forEach(file => {
+                // 创建网格项容器
+                const gridItem = document.createElement('div');
+                gridItem.className = 'grid-item';
+
+                // 创建缩略图容器
+                const thumbnailContainer = document.createElement('div');
+                thumbnailContainer.className = 'thumbnail-container';
+
+                // 创建文件信息容器
+                const fileInfo = document.createElement('div');
+                fileInfo.className = 'file-info';
+
+                // 创建文件名元素
+                const fileName = document.createElement('div');
+                fileName.className = 'file-name';
+                fileName.textContent = file.name;
+
+                // 创建文件大小元素
+                const fileSize = document.createElement('div');
+                fileSize.className = 'file-size';
+                fileSize.textContent = file.isDirectory ? '文件夹' : formatBytes(file.size);
+
+                // 创建操作按钮容器
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'actions';
+
+                if (file.isDirectory) {
+                    // 为文件夹创建图标
+                    const icon = document.createElement('div');
+                    icon.className = 'icon';
+                    icon.innerHTML = '&#128193;'; // 文件夹图标
+                    thumbnailContainer.appendChild(icon);
+
+                    // 文件夹点击事件
+                    gridItem.onclick = () => navigateTo(file.name);
+                } else {
+                    // 为文件创建缩略图或图标
+                    const extension = file.name.split('.').pop().toLowerCase();
+                    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                    const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
+
+                    if (isImage) {
+                        // 图片文件显示缩略图
+                        const img = document.createElement('img');
+                        img.className = 'thumbnail lazy'; // 添加 lazy 类
+                        img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                        // 使用服务器端生成的缩略图
+                        const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                        const encodedFileName = encodeURIComponent(file.name);
+                        const thumbnailPath = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+                        img.dataset.src = `/thumbnail${thumbnailPath}`; // 改为 data-src
+                        img.alt = file.name;
+                        img.onerror = function() {
+                            // 如果缩略图加载失败，显示默认图标
+                            thumbnailContainer.innerHTML = '';
+                            const icon = document.createElement('div');
+                            icon.className = 'icon';
+                            icon.innerHTML = '&#128196;'; // 文件图标
+                            thumbnailContainer.appendChild(icon);
+                        };
+                        thumbnailContainer.appendChild(img);
+                    } else if (isVideo) {
+                        // 视频文件显示缩略图
+                        const img = document.createElement('img');
+                        img.className = 'thumbnail lazy'; // 添加 lazy 类
+                        img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                        // 使用服务器端生成的缩略图
+                        const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                        const encodedFileName = encodeURIComponent(file.name);
+                        const thumbnailPath = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+                        img.dataset.src = `/thumbnail${thumbnailPath}`; // 改为 data-src
+                        img.alt = file.name;
+                        img.onerror = function() {
+                            // 如果缩略图加载失败，显示默认视频图标
+                            thumbnailContainer.innerHTML = '';
+                            const icon = document.createElement('div');
+                            icon.className = 'icon';
+                            icon.innerHTML = '&#128249;'; // 视频图标
+                            thumbnailContainer.appendChild(icon);
+                        };
+                        thumbnailContainer.appendChild(img);
+                    } else {
+                        // 其他文件类型显示默认图标
+                        const icon = document.createElement('div');
+                        icon.className = 'icon';
+                        icon.innerHTML = '&#128196;'; // 文件图标
+                        thumbnailContainer.appendChild(icon);
+                    }
+
+                    // 文件点击事件
+                    gridItem.onclick = () => {
+                        if (isVideo) {
+                            playVideo(file.name);
+                        } else {
+                            downloadFile(file.name);
+                        }
+                    };
+
+                    // 如果是视频文件，添加播放按钮
+                    if (isVideo) {
+                        const playButton = document.createElement('button');
+                        playButton.textContent = '播放';
+                        playButton.className = 'play-btn';
+                        playButton.onclick = (e) => {
+                            e.stopPropagation(); // 阻止网格项的点击事件
+                            playVideo(file.name);
+                        };
+                        actionsDiv.appendChild(playButton);
+                    }
+
+                    // 添加下载按钮
+                    const downloadButton = document.createElement('button');
+                    downloadButton.textContent = '下载';
+                    downloadButton.className = 'download-btn';
+                    downloadButton.onclick = (e) => {
+                        e.stopPropagation(); // 阻止网格项的点击事件
+                        downloadFile(file.name);
+                    };
+                    actionsDiv.appendChild(downloadButton);
+                }
+
+                // 组装文件信息
+                fileInfo.appendChild(fileName);
+                fileInfo.appendChild(fileSize);
+                fileInfo.appendChild(actionsDiv);
+
+                // 组装网格项
+                gridItem.appendChild(thumbnailContainer);
+                gridItem.appendChild(fileInfo);
+
+                // 添加到网格容器
+                fileGrid.appendChild(gridItem);
+            });
+        }
+
+        function navigateTo(folderName) {
+            currentPath = path.join(currentPath, folderName);
+            updatePathDisplay();
+            fetchFiles(currentPath);
+            // 将新路径推入浏览器历史记录
+            history.pushState({ path: currentPath }, '', '#' + currentPath);
+        }
+
+        backButton.onclick = async () => {
+            // 在导航前通知后端停止缩略图生成
+            await fetch('/api/stop-thumbnail-generation', { method: 'POST' });
+            // 使用浏览器历史记录的back方法，让onpopstate处理实际导航
+            history.back();
+        };
+
+        homeButton.onclick = async () => {
+            // 在导航前通知后端停止缩略图生成
+            await fetch('/api/stop-thumbnail-generation', { method: 'POST' });
+            fetchRootDirs();
+            // 更新浏览器历史记录
+            history.replaceState({ path: 'root' }, '', '#');
+        };
+
+        function updatePathDisplay() {
+            currentPathSpan.textContent = currentPath === '/' ? '/' : currentPath.replace(/\\/g, '/'); // 统一显示为斜杠
+        }
+
+        function playVideo(fileName) {
+            // 视频URL不再需要 /list 前缀
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const videoUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/'); // 统一URL斜杠，并编码路径和文件名
+            
+            // 在新窗口中打开视频播放页面
+            const videoPageUrl = `video-player.html?src=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(fileName)}`;
+            window.open(videoPageUrl, '_blank');
+        }
+
+        closePlayerButton.onclick = () => {
+            videoPlayer.pause();
+            videoPlayer.src = ''; // 清空 src 停止加载
+            videoPlayerContainer.classList.add('hidden');
+        };
+
+        function downloadFile(fileName) {
+            // 下载URL不再需要 /list 前缀
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const fileUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            const a = document.createElement('a');
+            a.href = fileUrl;
+            a.download = fileName; // 强制下载
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+
+        // 简单的路径拼接和获取目录名函数，因为浏览器环境没有 Node.js 的 path 模块
+        const path = {
+            join: (...segments) => {
+                // 确保所有段都是字符串，并去除多余的斜杠
+                const parts = segments.map(s => String(s).replace(/[/\\]+/g, '/').replace(/^\/|\/$/g, ''));
+                let result = parts.filter(s => s !== '').join('/');
+                // 确保以 '/' 开头
+                if (!result.startsWith('/')) {
+                    result = '/' + result;
+                }
+                return result;
+            },
+            dirname: (p) => {
+                const parts = p.split(/[/\\]/).filter(part => part !== '');
+                if (parts.length <= 1) return '/'; // 根目录或只有一个文件/文件夹时返回根目录
+                parts.pop(); // 移除最后一个部分
+                return '/' + parts.join('/');
+            }
+        };
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+
+        // Intersection Observer for lazy loading
+        const lazyLoadImages = () => {
+            const lazyImages = document.querySelectorAll('img.lazy');
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        img.src = img.dataset.src;
+                        img.classList.remove('lazy');
+                        observer.unobserve(img);
+                    }
+                });
+            }, {
+                rootMargin: '0px 0px 100px 0px' // Load images 100px before they enter viewport
+            });
+
+            lazyImages.forEach(img => {
+                observer.observe(img);
+            });
+        };
+
+        // 重新显示文件时调用懒加载
+        const originalDisplayFiles = displayFiles;
+        displayFiles = (files) => {
+            originalDisplayFiles(files);
+            lazyLoadImages();
+        };
+
+        // 处理浏览器后退按钮
+        window.onpopstate = function(event) {
+            if (event.state) {
+                if (event.state.path === 'root' || !event.state.path) {
+                    // 返回根目录媒体目录展示
+                    fetchRootDirs();
+                } else if (event.state.path === '/' && event.state.mediaDir) {
+                    // 切换到指定的媒体目录（MEDIA_DIRS根路径）
+                    switchMediaDir(event.state.mediaDir);
+                } else if (event.state.mediaDir) {
+                    // 切换到指定的媒体目录
+                    switchMediaDir(event.state.mediaDir);
+                } else {
+                    // 导航到指定路径
+                    currentPath = event.state.path;
+                    updatePathDisplay();
+                    fetchFiles(currentPath);
+                }
+            } else {
+                // 如果没有状态，返回根目录
+                fetchRootDirs();
+            }
+        };
+
+        // 初始加载
+        fetchRootDirs(); // 首先获取根目录媒体目录列表
+        // 设置初始历史状态
+        history.replaceState({ path: 'root' }, '', '#');
+    </script>
+</body>
+</html>
