@@ -3,6 +3,22 @@ from ctypes import wintypes
 import os
 import sys
 import json
+import datetime
+
+class FILETIME(ctypes.Structure):
+    _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                ("dwHighDateTime", wintypes.DWORD)]
+
+def filetime_to_datetime(filetime):
+    """将 Windows FILETIME 结构转换为 Python datetime 对象"""
+    # 转换为一个64位整数，表示自1601-01-01以来的100纳秒间隔数
+    nanoseconds = (filetime.dwHighDateTime << 32) + filetime.dwLowDateTime
+    # 减去 FILETIME epoch (1601-01-01) 和 Unix epoch (1970-01-01) 之间的差值
+    epoch_as_filetime = 116444736000000000
+    nanoseconds -= epoch_as_filetime
+    # 转换为秒
+    seconds = nanoseconds / 10000000
+    return datetime.datetime.fromtimestamp(seconds)
 
 class EverythingSDK:
     """Everything SDK Python 封装类"""
@@ -42,10 +58,16 @@ class EverythingSDK:
     def _setup_functions(self):
         """设置 DLL 函数原型"""
         try:
-            # Everything_SetSearchW
-            
+            # Everything_SetSearchW            
             self.dll.Everything_SetSearchW.argtypes = [wintypes.LPCWSTR]
             self.dll.Everything_SetSearchW.restype = None
+
+            # Everything_GetResultDateModified
+            self.dll.Everything_GetResultDateModified.argtypes = [
+                wintypes.DWORD,      # index
+                ctypes.POINTER(FILETIME) # pointer to a FILETIME struct
+            ]
+            self.dll.Everything_GetResultDateModified.restype = wintypes.BOOL
             
             # Everything_QueryW
             self.dll.Everything_QueryW.argtypes = [wintypes.BOOL]
