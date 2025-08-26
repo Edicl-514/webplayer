@@ -133,6 +133,20 @@
 <body>
     <div class="container">
         <h1>WebPlayer - 媒体浏览器</h1>
+        <!-- 搜索表单 -->
+        <div class="search-container" style="margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px;">
+            <form id="searchForm" style="display: flex; gap: 10px; align-items: center;">
+                <input type="text" id="searchInput" placeholder="输入搜索关键词..." style="flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em;">
+                <button type="submit" id="searchButton" style="padding: 10px 20px; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; font-size: 1em;">搜索</button>
+                <button type="button" id="searchHelpButton" style="padding: 10px 15px; border: none; border-radius: 4px; background-color: #6c757d; color: white; cursor: pointer; font-size: 1em;">?</button>
+            </form>
+            <div id="searchOptions" style="margin-top: 10px; display: none;">
+                <label style="margin-right: 15px;"><input type="checkbox" id="matchCase"> 区分大小写</label>
+                <label style="margin-right: 15px;"><input type="checkbox" id="matchWholeWord"> 全词匹配</label>
+                <label style="margin-right: 15px;"><input type="checkbox" id="useRegex"> 正则表达式</label>
+                <label>最大结果数: <input type="number" id="maxResults" value="100" min="1" max="1000" style="width: 60px;"></label>
+            </div>
+        </div>
         <div class="path-navigation">
             <button id="backButton" class="hidden">返回上一级</button>
             <button id="homeButton" class="hidden">返回主目录</button>
@@ -573,6 +587,47 @@
                 // 如果没有状态，返回根目录
                 fetchRootDirs();
             }
+        };
+
+        // 搜索功能相关代码
+        const searchForm = document.getElementById('searchForm');
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const searchHelpButton = document.getElementById('searchHelpButton');
+        const searchOptions = document.getElementById('searchOptions');
+        const matchCase = document.getElementById('matchCase');
+        const matchWholeWord = document.getElementById('matchWholeWord');
+        const useRegex = document.getElementById('useRegex');
+        const maxResults = document.getElementById('maxResults');
+
+        // 切换搜索选项显示/隐藏
+        searchHelpButton.onclick = () => {
+            searchOptions.style.display = searchOptions.style.display === 'none' ? 'block' : 'none';
+        };
+
+        // 处理搜索表单提交
+        searchForm.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const query = searchInput.value.trim();
+            if (!query) {
+                alert('请输入搜索关键词');
+                return;
+            }
+            
+            // 收集搜索选项
+            const options = {
+                query: query,
+                matchCase: matchCase.checked,
+                matchWholeWord: matchWholeWord.checked,
+                useRegex: useRegex.checked,
+                maxResults: parseInt(maxResults.value) || 100
+            };
+            
+            // 在新标签页中打开搜索结果页面
+            const searchParams = new URLSearchParams(options);
+            const searchUrl = `search-results.html?${searchParams.toString()}`;
+            window.open(searchUrl, '_blank');
         };
 
         // 初始加载

@@ -8,11 +8,11 @@ const crypto = require('crypto');
 const PORT = 3000;
 // 定义媒体目录及其别名
 const MEDIA_DIRS = [
-    { path: 'J:/e/', alias: 'J' }, // 示例：请将此路径更改为您的视频和文件目录
-    { path: 'K:/e/', alias: 'K' },
-    { path: 'L:/e/', alias: 'L' },
-    { path: 'M:/e/', alias: 'M' },
-    { path: 'N:/e/', alias: 'N' }
+    { path: 'J:\\e', alias: 'J' }, // 示例：请将此路径更改为您的视频和文件目录
+    { path: 'K:\\e', alias: 'K' },
+    { path: 'L:\\e', alias: 'L' },
+    { path: 'M:\\e', alias: 'M' },
+    { path: 'N:\\e', alias: 'N' }
 ];
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
@@ -222,6 +222,38 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // 处理搜索请求
+    if (pathname === '/api/search' && req.method === 'GET') {
+        console.log('Received search request:', parsedUrl.query);
+        const query = parsedUrl.query.query;
+        const matchCase = parsedUrl.query.matchCase === 'true';
+        const matchWholeWord = parsedUrl.query.matchWholeWord === 'true';
+        const useRegex = parsedUrl.query.useRegex === 'true';
+        const maxResults = parseInt(parsedUrl.query.maxResults) || 100;
+
+        if (!query) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing search query' }));
+            return;
+        }
+
+        // 调用搜索功能
+        performSearch(query, maxResults, matchCase, matchWholeWord, useRegex)
+            .then(searchResults => {
+                console.log('Search completed successfully, results count:', searchResults.results ? searchResults.results.length : 0);
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                // searchResults是从search.py返回的整个对象，直接发送给客户端
+                res.end(JSON.stringify(searchResults));
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Search failed', error: error.message }));
+            });
+        return;
+    }
+
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
     const fullPath = path.join(currentMediaDir, pathname);
 
@@ -324,6 +356,74 @@ function getContentType(filePath) {
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
 // 缩略图缓存目录
 const THUMBNAIL_DIR = path.join(__dirname, 'thumbnails');
+
+/**
+ * 执行搜索操作
+ * @param {string} query - 搜索查询
+ * @param {number} maxResults - 最大结果数
+ * @param {boolean} matchCase - 是否区分大小写
+ * @param {boolean} matchWholeWord - 是否全词匹配
+ * @param {boolean} useRegex - 是否使用正则表达式
+ * @returns {Promise<object>} 搜索结果
+ */
+function performSearch(query, maxResults, matchCase, matchWholeWord, useRegex) {
+    return new Promise((resolve, reject) => {
+        // 构造Python命令参数
+        const pythonPath = 'python'; // 假设系统PATH中有python命令
+        const scriptPath = path.join(__dirname, 'search.py');
+        
+        // 构造传递给search.py的参数
+        const args = [
+            scriptPath,
+            '--query', query,
+            '--max-results', maxResults.toString()
+        ];
+        
+        if (matchCase) args.push('--match-case');
+        if (matchWholeWord) args.push('--match-whole-word');
+        if (useRegex) args.push('--use-regex');
+        
+        // 添加目录参数
+        const dirs = MEDIA_DIRS.map(dir => dir.path);
+        args.push('--dirs', dirs.join(','));
+        
+        // 执行Python脚本
+        const pythonProcess = spawn(pythonPath, args, {
+            cwd: __dirname,
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+        
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+        
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Python script exited with code ${code}. Stderr: ${stderrData}`));
+                return;
+            }
+            
+            try {
+                // 解析Python脚本的输出
+                const results = JSON.parse(stdoutData);
+                resolve(results);
+            } catch (parseError) {
+                reject(new Error(`Failed to parse search results: ${parseError.message}. Output: ${stdoutData}`));
+            }
+        });
+        
+        pythonProcess.on('error', (error) => {
+            reject(new Error(`Failed to start Python process: ${error.message}`));
+        });
+    });
+}
 
 // 确保缩略图目录存在
 if (!fs.existsSync(THUMBNAIL_DIR)) {

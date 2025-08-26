@@ -2,6 +2,7 @@ import ctypes
 from ctypes import wintypes
 import os
 import sys
+import json
 
 class EverythingSDK:
     """Everything SDK Python 封装类"""
@@ -364,10 +365,103 @@ Everything 搜索语法帮助:
 """
     print(help_text)
 
+def search_cli(query, max_results=100, match_case=False, match_whole_word=False, regex=False, dirs=None):
+    """CLI搜索功能，返回JSON格式的结果"""
+    try:
+        # 初始化 Everything SDK
+        everything = EverythingSDK()
+        
+        # [修改点] 重构路径处理逻辑
+        if dirs:
+            # 分割、清理用户输入的目录列表（例如 "J:\e, D:\My Documents"）
+            search_dirs = [d.strip().rstrip('\\') for d in dirs.split(',') if d.strip()]
+            
+            if search_dirs:
+                dir_part = ""
+                # 如果有多个目录，使用 Everything 的 OR 语法 <"path1"|"path2">
+                if len(search_dirs) > 1:
+                    # 将每个路径用双引号括起来，以处理空格等特殊字符
+                    quoted_paths = [f'"{p}"' for p in search_dirs]
+                    dir_part = "<" + "|".join(quoted_paths) + ">"
+                # 如果只有一个目录，直接用双引号括起来
+                else:
+                    dir_part = f'"{search_dirs[0]}"'
+                
+                # 将路径限制附加到原始查询后面
+                query = f"{query} {dir_part}"
+            
+        # 执行搜索
+        results, num_files, num_folders = everything.search(
+            query, max_results, match_case, match_whole_word, regex
+        )
+        
+        # (函数其余部分保持不变)
+        for result in results:
+            if 'folder_path' in result:
+                folder_parts = result['folder_path'].split('\\')
+                if len(folder_parts) > 1:
+                    result['display_path'] = '\\'.join(folder_parts[1:])
+                else:
+                    result['display_path'] = result['folder_path']
+            
+        return {
+            'success': True,
+            'query_sent_to_everything': query,
+            'results': results,
+            'total_files': num_files,
+            'total_folders': num_folders,
+            'total_results': len(results)
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'results': [],
+            'total_files': 0,
+            'total_folders': 0,
+            'total_results': 0
+        }
+
 if __name__ == "__main__":
-    # 检查是否在 Windows 系统上运行
-    if os.name != 'nt':
-        print("此程序只能在 Windows 系统上运行")
-        sys.exit(1)
-    
-    main()
+    # 检查是否有命令行参数
+    if len(sys.argv) > 1:
+        import argparse
+        parser = argparse.ArgumentParser(description='Everything SDK 文件搜索工具')
+        parser.add_argument('--query', required=True, help='搜索关键词')
+        parser.add_argument('--max-results', type=int, default=100, help='最大结果数')
+        parser.add_argument('--match-case', action='store_true', help='区分大小写')
+        parser.add_argument('--match-whole-word', action='store_true', help='全词匹配')
+        parser.add_argument('--use-regex', action='store_true', help='使用正则表达式')
+        parser.add_argument('--dirs', help='搜索目录列表，用逗号分隔')
+        
+        args = parser.parse_args()
+        
+        # 解析目录参数
+        dirs = args.dirs if args.dirs else None
+        
+        # 执行搜索并输出JSON结果
+        result = search_cli(
+            args.query,
+            args.max_results,
+            args.match_case,
+            args.match_whole_word,
+            args.use_regex,
+            dirs
+        )
+        
+        # 设置标准输出编码为UTF-8
+        import sys
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        
+        # 输出JSON结果
+        print(json.dumps(result, ensure_ascii=False, indent=None, separators=(',', ':')))
+    else:
+        # 检查是否在 Windows 系统上运行
+        if os.name != 'nt':
+            print("此程序只能在 Windows 系统上运行")
+            sys.exit(1)
+        
+        # 交互式模式
+        main()

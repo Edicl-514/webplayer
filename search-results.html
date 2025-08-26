@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜索结果 - WebPlayer</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #f4f4f4; 
+            color: #333; 
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: auto; 
+            background: #fff; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
+        h1 { 
+            text-align: center; 
+            color: #0056b3; 
+        }
+        .search-info {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+        }
+        .search-options {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        .results-summary {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #d1ecf1;
+            border-radius: 5px;
+            color: #0c5460;
+        }
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .result-item {
+            background: #e2e6ea;
+            border-radius: 8px;
+            padding: 15px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .result-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+        .result-name {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        .result-path {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+        .result-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+        .result-type {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .file-type {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        .folder-type {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #6c757d;
+        }
+        .error {
+            padding: 20px;
+            background-color: #f8d7da;
+            border-radius: 5px;
+            color: #721c24;
+            margin-bottom: 20px;
+        }
+        .back-button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-bottom: 20px;
+        }
+        .back-button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="back-button" onclick="window.close()">关闭窗口</button>
+        <h1>搜索结果</h1>
+        <div class="search-info">
+            <div>搜索关键词: <span id="searchQuery"></span></div>
+            <div class="search-options">
+                <span id="matchCaseOption" style="display: none;">区分大小写</span>
+                <span id="matchWholeWordOption" style="display: none;">全词匹配</span>
+                <span id="useRegexOption" style="display: none;">正则表达式</span>
+            </div>
+        </div>
+        <div id="resultsSummary" class="results-summary" style="display: none;"></div>
+        <div id="errorMessage" class="error" style="display: none;"></div>
+        <div id="loadingMessage" class="loading">搜索中，请稍候...</div>
+        <div id="resultsContainer" class="results-grid" style="display: none;"></div>
+    </div>
+
+    <script>
+        // 获取URL参数
+        const urlParams = new URLSearchParams(window.location.search);
+        const query = urlParams.get('query');
+        const matchCase = urlParams.get('matchCase') === 'true';
+        const matchWholeWord = urlParams.get('matchWholeWord') === 'true';
+        const useRegex = urlParams.get('useRegex') === 'true';
+        const maxResults = parseInt(urlParams.get('maxResults')) || 100;
+        const dirs = urlParams.get('dirs'); // 获取目录参数
+
+        // 显示搜索参数
+        document.getElementById('searchQuery').textContent = query;
+        
+        if (matchCase) {
+            document.getElementById('matchCaseOption').style.display = 'inline';
+        }
+        if (matchWholeWord) {
+            document.getElementById('matchWholeWordOption').style.display = 'inline';
+        }
+        if (useRegex) {
+            document.getElementById('useRegexOption').style.display = 'inline';
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            document.getElementById('loadingMessage').style.display = 'none';
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').style.display = 'block';
+        }
+
+        // 显示搜索结果
+        function displayResults(data) {
+            document.getElementById('loadingMessage').style.display = 'none';
+            
+            if (!data.success) {
+                showError(data.error || '搜索失败');
+                return;
+            }
+            
+            const results = data.results;
+            const totalResults = data.total_results;
+            const totalFiles = data.total_files;
+            const totalFolders = data.total_folders;
+            
+            // 显示结果摘要
+            document.getElementById('resultsSummary').innerHTML = `
+                共找到 ${totalResults} 个结果 (文件: ${totalFiles}, 文件夹: ${totalFolders})
+            `;
+            document.getElementById('resultsSummary').style.display = 'block';
+            
+            // 显示结果
+            const resultsContainer = document.getElementById('resultsContainer');
+            resultsContainer.innerHTML = '';
+            
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div class="result-item">未找到匹配的结果</div>';
+            } else {
+                results.forEach(result => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'result-item';
+                    
+                    // 确定类型显示
+                    const typeClass = result.is_file ? 'file-type' : 'folder-type';
+                    const typeText = result.is_file ? '文件' : '文件夹';
+                    
+                    // 格式化大小
+                    const sizeText = result.is_file ? formatFileSize(result.size) : '';
+                    
+                    resultItem.innerHTML = `
+                        <div class="result-name">${result.filename}</div>
+                        <div class="result-path">${result.folder_path}</div>
+                        <div class="result-meta">
+                            <span class="result-type ${typeClass}">${typeText}</span>
+                            <span>${sizeText}</span>
+                        </div>
+                    `;
+                    
+                    resultsContainer.appendChild(resultItem);
+                });
+            }
+            
+            resultsContainer.style.display = 'grid';
+        }
+
+        // 执行搜索
+        async function performSearch() {
+            try {
+                // 构造API URL
+                let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+                if (matchCase) apiUrl += '&matchCase=true';
+                if (matchWholeWord) apiUrl += '&matchWholeWord=true';
+                if (useRegex) apiUrl += '&useRegex=true';
+                if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
+                
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                console.error('Search error:', error);
+                showError(`搜索过程中发生错误: ${error.message}`);
+            }
+        }
+
+        // 页面加载完成后执行搜索
+        window.addEventListener('DOMContentLoaded', () => {
+            performSearch();
+        });
+    </script>
+</body>
+</html>
