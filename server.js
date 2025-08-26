@@ -66,6 +66,33 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // 处理临时设置媒体目录的请求 (用于视频播放器等)
+    if (pathname === '/api/set-temp-media-dir' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const { dir } = JSON.parse(body);
+                // 仅验证 dir 是否在 MEDIA_DIRS 中，不改变 currentMediaDir
+                const mediaDirExists = MEDIA_DIRS.some(md => md.path === dir || md.alias === dir);
+                if (mediaDirExists) {
+                    // 成功，但不需要改变服务器的 currentMediaDir，因为它是通过 URL 参数传递的
+                    res.statusCode = 200;
+                    res.end(JSON.stringify({ success: true, message: 'Temporary media directory validated.' }));
+                } else {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Invalid MEDIA_DIR for temporary setting.' }));
+                }
+            } catch (e) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+            }
+        });
+        return;
+    }
+ 
     // 防止目录遍历攻击
     if (pathname.includes('..')) {
         res.statusCode = 403;
@@ -162,8 +189,10 @@ const server = http.createServer((req, res) => {
     if (pathname.startsWith('/thumbnail')) {
         // 从 /thumbnail 后面获取实际的路径，例如 /thumbnail/folder1/video.mp4 -> /folder1/video.mp4
         const targetPath = pathname.substring('/thumbnail'.length);
-        const fullPath = path.join(currentMediaDir, targetPath);
-        const thumbnailName = crypto.createHash('md5').update(targetPath).digest('hex') + '.jpg';
+        // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
+        const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
+        const fullPath = path.join(requestedMediaDir, targetPath);
+        const thumbnailName = crypto.createHash('md5').update(targetPath + requestedMediaDir).digest('hex') + '.jpg'; // 缩略图名称包含 mediaDir，避免不同盘符下同名文件冲突
         const thumbnailPath = path.join(THUMBNAIL_DIR, thumbnailName);
 
         // 检查缩略图是否已存在
@@ -238,7 +267,7 @@ const server = http.createServer((req, res) => {
         }
 
         // 调用搜索功能
-        performSearch(query, maxResults, matchCase, matchWholeWord, useRegex)
+        performSearch(query, maxResults, matchCase, matchWholeWord, useRegex, parsedUrl.query.dirs) // 传递 dirs 参数
             .then(searchResults => {
                 console.log('Search completed successfully, results count:', searchResults.results ? searchResults.results.length : 0);
                 res.statusCode = 200;
@@ -255,8 +284,10 @@ const server = http.createServer((req, res) => {
     }
 
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
-    const fullPath = path.join(currentMediaDir, pathname);
-
+    // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
+    const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
+    const fullPath = path.join(requestedMediaDir, pathname);
+ 
     fs.stat(fullPath, (err, stats) => {
         if (err) {
             // 如果在 MEDIA_DIR 中找不到，尝试从 WEB_ROOT 提供静态文件 (如 index.html 本身)
@@ -366,7 +397,7 @@ const THUMBNAIL_DIR = path.join(__dirname, 'thumbnails');
  * @param {boolean} useRegex - 是否使用正则表达式
  * @returns {Promise<object>} 搜索结果
  */
-function performSearch(query, maxResults, matchCase, matchWholeWord, useRegex) {
+function performSearch(query, maxResults, matchCase, matchWholeWord, useRegex, dirs) { // 接收 dirs 参数
     return new Promise((resolve, reject) => {
         // 构造Python命令参数
         const pythonPath = 'python'; // 假设系统PATH中有python命令
@@ -384,8 +415,9 @@ function performSearch(query, maxResults, matchCase, matchWholeWord, useRegex) {
         if (useRegex) args.push('--use-regex');
         
         // 添加目录参数
-        const dirs = MEDIA_DIRS.map(dir => dir.path);
-        args.push('--dirs', dirs.join(','));
+        // 如果 dirs 参数存在，则使用它，否则使用 MEDIA_DIRS
+        const searchDirs = dirs ? dirs : MEDIA_DIRS.map(dir => dir.path).join(',');
+        args.push('--dirs', searchDirs);
         
         // 执行Python脚本
         const pythonProcess = spawn(pythonPath, args, {

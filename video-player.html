@@ -267,62 +267,112 @@
 
         videoTitle.textContent = title;
 
-        if (videoSrc) {
-            const dp = new DPlayer({
-                container: document.getElementById('dplayer'),
-                video: {
-                    url: videoSrc,
-                    pic: urlParams.get('poster') || '', // Optional: Add a poster image if available in URL params
-                    thumbnails: urlParams.get('thumbnails') || '', // Optional: Add thumbnails if available
-                },
-                autoplay: true,
-                theme: '#FADFA3',
-                lang: 'zh-cn',
-                hotkey: true,
-                screenshot: true,
-                playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
-                loop: false,
-            });
+        const mediaDir = urlParams.get('mediaDir'); // 获取 mediaDir 参数
 
-            // Handle DPlayer errors
-            dp.on('error', function () {
-                console.error('DPlayer error occurred.');
-                // You can display a custom error message here if needed
-                videoTitle.textContent = '视频加载失败';
-            });
-
-            dp.on('loadedmetadata', function() {
-                const video = dp.video;
-                if (video.videoWidth && video.videoHeight) {
-                    aspect = video.videoWidth / video.videoHeight;
-                    adjustPlayerSize();
-                    dp.resize();
+        // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
+        async function setTempMediaDirAndPlay() {
+            if (mediaDir) {
+                try {
+                    const response = await fetch('/api/set-temp-media-dir', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ dir: mediaDir })
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    if (!result.success) {
+                        throw new Error(result.message || 'Failed to set temporary media directory.');
+                    }
+                    console.log('Temporary media directory set:', mediaDir);
+                } catch (error) {
+                    console.error('Error setting temporary media directory:', error);
+                    videoTitle.textContent = `视频加载失败: ${error.message}`;
+                    return; // 如果设置失败，则不播放视频
                 }
-            });
-
-            let aspect = 16 / 9;
-            
-            function adjustPlayerSize() {
-                const container = document.querySelector('.video-container');
-                const maxWidth = window.innerWidth * 0.9;
-                const maxHeight = window.innerHeight * 0.8; // 留空间给header和控件
-                let width = maxWidth;
-                let height = width / aspect;
-                if (height > maxHeight) {
-                    height = maxHeight;
-                    width = height * aspect;
-                }
-                container.style.width = `${width}px`;
-                container.style.height = `${height}px`;
-                dp.resize();
             }
 
-            adjustPlayerSize();
-            window.addEventListener('resize', adjustPlayerSize);
-            window.addEventListener('orientationchange', adjustPlayerSize);
-        } else {
-            videoTitle.textContent = '未找到视频源';
+            if (videoSrc) {
+                // 构建包含mediaDir参数的完整视频URL
+                function buildVideoUrl(src, mediaDir) {
+                    if (!mediaDir) return src;
+                    
+                    try {
+                        const url = new URL(src, window.location.origin);
+                        url.searchParams.set('mediaDir', mediaDir);
+                        return url.toString();
+                    } catch (e) {
+                        // 如果src不是有效的URL，则直接在后面添加查询参数
+                        const separator = src.includes('?') ? '&' : '?';
+                        return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                    }
+                }
+                
+                // 构建包含mediaDir参数的视频URL
+                const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
+                
+                const dp = new DPlayer({
+                    container: document.getElementById('dplayer'),
+                    video: {
+                        url: fullVideoUrl,
+                        pic: urlParams.get('poster') || '', // Optional: Add a poster image if available in URL params
+                        thumbnails: urlParams.get('thumbnails') || '', // Optional: Add thumbnails if available
+                    },
+                    autoplay: true,
+                    theme: '#FADFA3',
+                    lang: 'zh-cn',
+                    hotkey: true,
+                    screenshot: true,
+                    playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
+                    loop: false,
+                });
+
+                // Handle DPlayer errors
+                dp.on('error', function () {
+                    console.error('DPlayer error occurred.');
+                    // You can display a custom error message here if needed
+                    videoTitle.textContent = '视频加载失败';
+                });
+
+                dp.on('loadedmetadata', function() {
+                    const video = dp.video;
+                    if (video.videoWidth && video.videoHeight) {
+                        aspect = video.videoWidth / video.videoHeight;
+                        adjustPlayerSize();
+                        dp.resize();
+                    }
+                });
+
+                let aspect = 16 / 9;
+                
+                function adjustPlayerSize() {
+                    const container = document.querySelector('.video-container');
+                    const maxWidth = window.innerWidth * 0.9;
+                    const maxHeight = window.innerHeight * 0.8; // 留空间给header和控件
+                    let width = maxWidth;
+                    let height = width / aspect;
+                    if (height > maxHeight) {
+                        height = maxHeight;
+                        width = height * aspect;
+                    }
+                    container.style.width = `${width}px`;
+                    container.style.height = `${height}px`;
+                    dp.resize();
+                }
+
+                adjustPlayerSize();
+                window.addEventListener('resize', adjustPlayerSize);
+                window.addEventListener('orientationchange', adjustPlayerSize);
+            } else {
+                videoTitle.textContent = '未找到视频源';
+            }
         }
+
+        // 页面加载完成后执行
+        setTempMediaDirAndPlay();
     </script>
 </body>
 </html>

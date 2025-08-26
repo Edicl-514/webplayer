@@ -419,6 +419,14 @@ def search_cli(query, max_results=100, match_case=False, match_whole_word=False,
         
         # (函数其余部分保持不变)
         for result in results:
+            full_path = result['full_path']
+            media_dir_root = ''
+            # 遍历 search_dirs 列表，找到匹配的根目录
+            for media_dir in search_dirs:
+                if full_path.lower().startswith(media_dir.lower()):
+                    media_dir_root = media_dir
+                    break
+            result['media_dir_root'] = media_dir_root # 添加 media_dir_root 字段
             if 'folder_path' in result:
                 folder_parts = result['folder_path'].split('\\')
                 if len(folder_parts) > 1:

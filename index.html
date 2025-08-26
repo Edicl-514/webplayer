@@ -250,7 +250,8 @@
         }
 
         // 切换媒体目录
-        async function switchMediaDir(newDir) {
+        // 增加 currentPath 参数，允许在切换媒体目录后直接导航到指定路径
+        async function switchMediaDir(newDir, targetPath = '/') {
             try {
                 const response = await fetch('/api/set-media-dir', {
                     method: 'POST',
@@ -265,7 +266,7 @@
                 const result = await response.json();
                 if (result.success) {
                     currentMediaDir = result.newMediaDir;
-                    currentPath = '/'; // 切换目录后重置当前路径
+                    currentPath = targetPath; // 切换目录后设置为目标路径
                     updatePathDisplay();
                     fetchFiles(currentPath);
                     // 隐藏根目录网格，显示文件网格
@@ -274,7 +275,7 @@
                     console.log(`Switched to media directory: ${result.newMediaDir}`);
                     
                     // 更新浏览器历史记录
-                    history.replaceState({ path: '/', mediaDir: newDir }, '', '#/');
+                    history.replaceState({ path: currentPath, mediaDir: newDir }, '', `#${currentPath}`);
                 } else {
                     console.error('Failed to switch media directory:', result.message);
                 }
@@ -454,7 +455,7 @@
             updatePathDisplay();
             fetchFiles(currentPath);
             // 将新路径推入浏览器历史记录
-            history.pushState({ path: currentPath }, '', '#' + currentPath);
+            history.pushState({ path: currentPath, mediaDir: currentMediaDir }, '', '#' + currentPath);
         }
 
         backButton.onclick = async () => {
@@ -571,12 +572,9 @@
                 if (event.state.path === 'root' || !event.state.path) {
                     // 返回根目录媒体目录展示
                     fetchRootDirs();
-                } else if (event.state.path === '/' && event.state.mediaDir) {
-                    // 切换到指定的媒体目录（MEDIA_DIRS根路径）
-                    switchMediaDir(event.state.mediaDir);
                 } else if (event.state.mediaDir) {
-                    // 切换到指定的媒体目录
-                    switchMediaDir(event.state.mediaDir);
+                    // 切换到指定的媒体目录，并导航到相应的路径
+                    switchMediaDir(event.state.mediaDir, event.state.path);
                 } else {
                     // 导航到指定路径
                     currentPath = event.state.path;
@@ -631,9 +629,20 @@
         };
 
         // 初始加载
-        fetchRootDirs(); // 首先获取根目录媒体目录列表
-        // 设置初始历史状态
-        history.replaceState({ path: 'root' }, '', '#');
+        // 检查URL参数，看是否从搜索结果页面跳转过来
+        const initialUrlParams = new URLSearchParams(window.location.search);
+        const initialMediaDir = initialUrlParams.get('mediaDir');
+        const initialPath = initialUrlParams.get('path') || '/';
+
+        if (initialMediaDir) {
+            // 如果有 mediaDir 参数，说明是从搜索结果页跳转过来，直接切换媒体目录并导航到指定路径
+            switchMediaDir(initialMediaDir, initialPath);
+        } else {
+            // 否则，正常加载根目录媒体目录列表
+            fetchRootDirs();
+            // 设置初始历史状态
+            history.replaceState({ path: 'root' }, '', '#');
+        }
     </script>
 </body>
 </html>

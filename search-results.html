@@ -134,125 +134,302 @@
     </div>
 
     <script>
-        // 获取URL参数
-        const urlParams = new URLSearchParams(window.location.search);
-        const query = urlParams.get('query');
-        const matchCase = urlParams.get('matchCase') === 'true';
-        const matchWholeWord = urlParams.get('matchWholeWord') === 'true';
-        const useRegex = urlParams.get('useRegex') === 'true';
-        const maxResults = parseInt(urlParams.get('maxResults')) || 100;
-        const dirs = urlParams.get('dirs'); // 获取目录参数
+       // 获取URL参数
+       const urlParams = new URLSearchParams(window.location.search);
+       const query = urlParams.get('query');
+       const matchCase = urlParams.get('matchCase') === 'true';
+       const matchWholeWord = urlParams.get('matchWholeWord') === 'true';
+       const useRegex = urlParams.get('useRegex') === 'true';
+       const maxResults = parseInt(urlParams.get('maxResults')) || 100;
+       const dirs = urlParams.get('dirs'); // 获取目录参数
 
-        // 显示搜索参数
-        document.getElementById('searchQuery').textContent = query;
-        
-        if (matchCase) {
-            document.getElementById('matchCaseOption').style.display = 'inline';
-        }
-        if (matchWholeWord) {
-            document.getElementById('matchWholeWordOption').style.display = 'inline';
-        }
-        if (useRegex) {
-            document.getElementById('useRegexOption').style.display = 'inline';
-        }
+       // 显示搜索参数
+       document.getElementById('searchQuery').textContent = query;
+       
+       if (matchCase) {
+           document.getElementById('matchCaseOption').style.display = 'inline';
+       }
+       if (matchWholeWord) {
+           document.getElementById('matchWholeWordOption').style.display = 'inline';
+       }
+       if (useRegex) {
+           document.getElementById('useRegexOption').style.display = 'inline';
+       }
 
-        // 格式化文件大小
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+       // 格式化文件大小 (从 index.html 复制)
+       function formatBytes(bytes, decimals = 2) {
+           if (bytes === 0) return '0 Bytes';
+           const k = 1024;
+           const dm = decimals < 0 ? 0 : decimals;
+           const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+           const i = Math.floor(Math.log(bytes) / Math.log(k));
+           return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+       }
 
-        // 显示错误消息
-        function showError(message) {
-            document.getElementById('loadingMessage').style.display = 'none';
-            document.getElementById('errorMessage').textContent = message;
-            document.getElementById('errorMessage').style.display = 'block';
-        }
+       // 简单的路径拼接和获取目录名函数，因为浏览器环境没有 Node.js 的 path 模块 (从 index.html 复制)
+       const path = {
+           join: (...segments) => {
+               // 确保所有段都是字符串，并去除多余的斜杠
+               const parts = segments.map(s => String(s).replace(/[/\\]+/g, '/').replace(/^\/|\/$/g, ''));
+               let result = parts.filter(s => s !== '').join('/');
+               // 确保以 '/' 开头
+               if (!result.startsWith('/')) {
+                   result = '/' + result;
+               }
+               return result;
+           },
+           dirname: (p) => {
+               const parts = p.split(/[/\\]/).filter(part => part !== '');
+               if (parts.length <= 1) return '/'; // 根目录或只有一个文件/文件夹时返回根目录
+               parts.pop(); // 移除最后一个部分
+               return '/' + parts.join('/');
+           }
+       };
 
-        // 显示搜索结果
-        function displayResults(data) {
-            document.getElementById('loadingMessage').style.display = 'none';
-            
-            if (!data.success) {
-                showError(data.error || '搜索失败');
-                return;
-            }
-            
-            const results = data.results;
-            const totalResults = data.total_results;
-            const totalFiles = data.total_files;
-            const totalFolders = data.total_folders;
-            
-            // 显示结果摘要
-            document.getElementById('resultsSummary').innerHTML = `
-                共找到 ${totalResults} 个结果 (文件: ${totalFiles}, 文件夹: ${totalFolders})
-            `;
-            document.getElementById('resultsSummary').style.display = 'block';
-            
-            // 显示结果
-            const resultsContainer = document.getElementById('resultsContainer');
-            resultsContainer.innerHTML = '';
-            
-            if (results.length === 0) {
-                resultsContainer.innerHTML = '<div class="result-item">未找到匹配的结果</div>';
-            } else {
-                results.forEach(result => {
-                    const resultItem = document.createElement('div');
-                    resultItem.className = 'result-item';
-                    
-                    // 确定类型显示
-                    const typeClass = result.is_file ? 'file-type' : 'folder-type';
-                    const typeText = result.is_file ? '文件' : '文件夹';
-                    
-                    // 格式化大小
-                    const sizeText = result.is_file ? formatFileSize(result.size) : '';
-                    
-                    resultItem.innerHTML = `
-                        <div class="result-name">${result.filename}</div>
-                        <div class="result-path">${result.folder_path}</div>
-                        <div class="result-meta">
-                            <span class="result-type ${typeClass}">${typeText}</span>
-                            <span>${sizeText}</span>
-                        </div>
-                    `;
-                    
-                    resultsContainer.appendChild(resultItem);
-                });
-            }
-            
-            resultsContainer.style.display = 'grid';
-        }
+       // Intersection Observer for lazy loading (从 index.html 复制)
+       const lazyLoadImages = () => {
+           const lazyImages = document.querySelectorAll('img.lazy');
+           const observer = new IntersectionObserver((entries, observer) => {
+               entries.forEach(entry => {
+                   if (entry.isIntersecting) {
+                       const img = entry.target;
+                       img.src = img.dataset.src;
+                       img.classList.remove('lazy');
+                       observer.unobserve(img);
+                   }
+               });
+           }, {
+               rootMargin: '0px 0px 100px 0px' // Load images 100px before they enter viewport
+           });
 
-        // 执行搜索
-        async function performSearch() {
-            try {
-                // 构造API URL
-                let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
-                if (matchCase) apiUrl += '&matchCase=true';
-                if (matchWholeWord) apiUrl += '&matchWholeWord=true';
-                if (useRegex) apiUrl += '&useRegex=true';
-                if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
-                
-                const response = await fetch(apiUrl);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                displayResults(data);
-            } catch (error) {
-                console.error('Search error:', error);
-                showError(`搜索过程中发生错误: ${error.message}`);
-            }
-        }
+           lazyImages.forEach(img => {
+               observer.observe(img);
+           });
+       };
 
-        // 页面加载完成后执行搜索
-        window.addEventListener('DOMContentLoaded', () => {
-            performSearch();
-        });
-    </script>
+       // 显示错误消息
+       function showError(message) {
+           document.getElementById('loadingMessage').style.display = 'none';
+           document.getElementById('errorMessage').textContent = message;
+           document.getElementById('errorMessage').style.display = 'block';
+       }
+
+       // 显示搜索结果
+       function displayResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+           
+           if (!data.success) {
+               showError(data.error || '搜索失败');
+               return;
+           }
+           
+           const results = data.results;
+           const totalResults = data.total_results;
+           const totalFiles = data.total_files;
+           const totalFolders = data.total_folders;
+           
+           // 显示结果摘要
+           document.getElementById('resultsSummary').innerHTML = `
+               共找到 ${totalResults} 个结果 (文件: ${totalFiles}, 文件夹: ${totalFolders})
+           `;
+           document.getElementById('resultsSummary').style.display = 'block';
+           
+           // 显示结果
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+           
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的结果</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   // 创建缩略图容器
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+                   
+                   // 创建文件信息容器
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   // 创建文件名元素
+                   const fileName = document.createElement('div');
+                   fileName.className = 'file-name';
+                   fileName.textContent = result.filename;
+
+                   // 创建文件大小元素
+                   const fileSize = document.createElement('div');
+                   fileSize.className = 'file-size';
+                   fileSize.textContent = result.is_folder ? '文件夹' : formatBytes(result.size);
+
+                   // 创建操作按钮容器
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+                   
+                   if (result.is_folder) {
+                       // 为文件夹创建图标
+                       const icon = document.createElement('div');
+                       icon.className = 'icon';
+                       icon.innerHTML = '&#128193;'; // 文件夹图标
+                       thumbnailContainer.appendChild(icon);
+
+                       // 文件夹点击事件
+                       resultItem.onclick = () => navigateToFolder(result.full_path, result.media_dir_root);
+                   } else {
+                       // 为文件创建缩略图或图标
+                       const extension = result.filename.split('.').pop().toLowerCase();
+                       const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                       const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
+
+                       if (isImage) {
+                           // 图片文件显示缩略图
+                           const img = document.createElement('img');
+                           img.className = 'thumbnail lazy'; // 添加 lazy 类
+                           img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                           // 使用服务器端生成的缩略图
+                           const relativePathForThumbnail = result.full_path.substring(result.media_dir_root.length).replace(/\\/g, '/');
+                           img.dataset.src = `/thumbnail${relativePathForThumbnail}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           img.alt = result.filename;
+                           img.onerror = function() {
+                               // 如果缩略图加载失败，显示默认图标
+                               thumbnailContainer.innerHTML = '';
+                               const icon = document.createElement('div');
+                               icon.className = 'icon';
+                               icon.innerHTML = '&#128196;'; // 文件图标
+                               thumbnailContainer.appendChild(icon);
+                           };
+                           thumbnailContainer.appendChild(img);
+                       } else if (isVideo) {
+                           // 视频文件显示缩略图
+                           const img = document.createElement('img');
+                           img.className = 'thumbnail lazy'; // 添加 lazy 类
+                           img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                           // 使用服务器端生成的缩略图
+                           const relativePathForThumbnail = result.full_path.substring(result.media_dir_root.length).replace(/\\/g, '/');
+                           img.dataset.src = `/thumbnail${relativePathForThumbnail}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           img.alt = result.filename;
+                           img.onerror = function() {
+                               // 如果缩略图加载失败，显示默认视频图标
+                               thumbnailContainer.innerHTML = '';
+                               const icon = document.createElement('div');
+                               icon.className = 'icon';
+                               icon.innerHTML = '&#128249;'; // 视频图标
+                               thumbnailContainer.appendChild(icon);
+                           };
+                           thumbnailContainer.appendChild(img);
+                       } else {
+                           // 其他文件类型显示默认图标
+                           const icon = document.createElement('div');
+                           icon.className = 'icon';
+                           icon.innerHTML = '&#128196;'; // 文件图标
+                           thumbnailContainer.appendChild(icon);
+                       }
+
+                       // 文件点击事件
+                       resultItem.onclick = () => {
+                           if (isVideo) {
+                               playVideo(result.full_path, result.filename, result.media_dir_root);
+                           } else {
+                               downloadFile(result.full_path, result.filename, result.media_dir_root);
+                           }
+                       };
+
+                       // 如果是视频文件，添加播放按钮
+                       if (isVideo) {
+                           const playButton = document.createElement('button');
+                           playButton.textContent = '播放';
+                           playButton.className = 'play-btn';
+                           playButton.onclick = (e) => {
+                               e.stopPropagation(); // 阻止网格项的点击事件
+                               playVideo(result.full_path, result.filename, result.media_dir_root);
+                           };
+                           actionsDiv.appendChild(playButton);
+                       }
+
+                       // 添加下载按钮
+                       const downloadButton = document.createElement('button');
+                       downloadButton.textContent = '下载';
+                       downloadButton.className = 'download-btn';
+                       downloadButton.onclick = (e) => {
+                               e.stopPropagation(); // 阻止网格项的点击事件
+                               downloadFile(result.full_path, result.filename, result.media_dir_root);
+                       };
+                       actionsDiv.appendChild(downloadButton);
+                   }
+
+                   // 组装文件信息
+                   fileInfo.appendChild(fileName);
+                   fileInfo.appendChild(fileSize);
+                   fileInfo.appendChild(actionsDiv);
+
+                   // 组装网格项
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           
+           resultsContainer.style.display = 'grid';
+
+           // 懒加载图片
+           lazyLoadImages();
+       }
+
+       // 导航到文件夹
+       function navigateToFolder(fullPath, mediaDirRoot) {
+           // 构建新的 URL，模拟进入文件夹
+           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
+           const newUrl = `/index.html#${relativePath}`;
+           window.open(newUrl, '_blank');
+       }
+
+       // 播放视频
+       function playVideo(fullPath, fileName, mediaDirRoot) {
+           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
+           const videoPageUrl = `video-player.html?src=${encodeURIComponent(relativePath)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           window.open(videoPageUrl, '_blank');
+       }
+
+       // 下载文件
+       function downloadFile(fullPath, fileName, mediaDirRoot) {
+           const relativePath = fullPath.substring(mediaDirRoot.length).replace(/\\/g, '/');
+           const a = document.createElement('a');
+           a.href = `${relativePath}?mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           a.download = fileName; // 强制下载
+           document.body.appendChild(a);
+           a.click();
+           document.body.removeChild(a);
+       }
+
+       // 执行搜索
+       async function performSearch() {
+           try {
+               // 构造API URL
+               let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+               if (matchCase) apiUrl += '&matchCase=true';
+               if (matchWholeWord) apiUrl += '&matchWholeWord=true';
+               if (useRegex) apiUrl += '&useRegex=true';
+               if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
+               
+               const response = await fetch(apiUrl);
+               if (!response.ok) {
+                   throw new Error(`HTTP error! status: ${response.status}`);
+               }
+               
+               const data = await response.json();
+               displayResults(data);
+           } catch (error) {
+               console.error('Search error:', error);
+               showError(`搜索过程中发生错误: ${error.message}`);
+           }
+       }
+
+       // 页面加载完成后执行搜索
+       window.addEventListener('DOMContentLoaded', () => {
+           performSearch();
+       });
+   </script>
 </body>
 </html>
