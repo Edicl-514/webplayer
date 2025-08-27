@@ -366,7 +366,7 @@
                     console.log('Subtitle URL:', fullSubtitleUrl);
                     dpOptions.subtitle = {
                         url: fullSubtitleUrl,
-                        type: subtitleData.subtitles[0].lang || 'webvtt', // Use lang from server, fallback to webvtt
+                        type: 'webvtt', // Always use webvtt as the backend now handles conversion
                         fontSize: '40px',
                         fontfamily: 'Arial, sans-serif',
                         background:'rgba(0, 0, 0, 0.5)',

@@ -177,6 +177,67 @@ class SmartFolderModTimeManager:
         except:
             pass
     
+    def _get_mtime_everything(self, folder_path: str) -> Optional[datetime]:
+        """使用Everything获取修改时间"""
+        try:
+            cmd = [
+                self.everything_path,
+                "-path", folder_path,
+                "-s", "file:",
+                "-sort", "dm",
+                "-max-results", "1"
+            ]
+            
+            # 使用系统默认编码
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, 
+                                      encoding=self.system_encoding, timeout=5)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    latest_file = result.stdout.strip()
+                else:
+                    return None
+                    
+            except UnicodeDecodeError:
+                # 如果系统编码失败，尝试字节模式后手动解码
+                try:
+                    result = subprocess.run(cmd, capture_output=True, timeout=5)
+                    if result.returncode == 0 and result.stdout:
+                        # 按优先级尝试不同编码
+                        encodings = [self.system_encoding, 'gbk', 'cp936', 'utf-8', 'windows-1252']
+                        latest_file = None
+                        
+                        for encoding in encodings:
+                            try:
+                                latest_file = result.stdout.decode(encoding).strip()
+                                if latest_file:
+                                    break
+                            except (UnicodeDecodeError, UnicodeError):
+                                continue
+                        
+                        if not latest_file:
+                            return None
+                    else:
+                        return None
+                except Exception:
+                    return None
+            
+            # 获取文件修改时间
+            if latest_file:
+                try:
+                    mtime = os.path.getmtime(latest_file)
+                    return datetime.fromtimestamp(mtime)
+                except Exception:
+                    # 如果路径有问题，可能是编码导致的，尝试其他方法
+                    return None
+                    
+        except subprocess.TimeoutExpired:
+            print(f"Everything查询超时: {folder_path}")
+            return None
+        except Exception as e:
+            print(f"Everything查询出错: {e}")
+            return None
+
     def _get_mtime_everything_safe(self, folder_path: str) -> Optional[datetime]:
         """使用Everything获取修改时间的安全版本（避免编码问题）"""
         try:
@@ -409,7 +470,7 @@ if __name__ == "__main__":
     manager = SmartFolderModTimeManager()
     
     # 测试单个文件夹
-    folder_path = r"K:\e\RSC\najar"
+    folder_path = r"L:\e\里番合集"
     info = manager.get_folder_real_mtime(folder_path)
     if info:
         print(f"文件夹: {info.path}")
@@ -422,9 +483,9 @@ if __name__ == "__main__":
     
     # 测试批量处理（模拟文件浏览器场景）
     test_folders = [
-        r"J:\e\RSC",
-        r"J:\e\RSC\shaggy SUSU",
-        
+        r"L:\e\里番合集",
+        r"L:\e\za",
+        r"L:\e\RSC",
         # 添加更多测试文件夹
     ]
     

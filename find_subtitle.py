@@ -2,6 +2,66 @@ import sys
 import os
 import json
 import urllib.parse
+import re
+import hashlib
+import subprocess
+
+def convert_to_vtt(input_path, output_path):
+    """
+    Convert subtitle file to VTT format using ffmpeg.
+    
+    Args:
+        input_path (str): Path to input subtitle file
+        output_path (str): Path to output VTT file
+        
+    Returns:
+        bool: True if conversion successful, False otherwise
+    """
+    try:
+        # Use ffmpeg to convert subtitle to VTT format
+        result = subprocess.run([
+            'ffmpeg', '-i', input_path, 
+            '-y',  # Overwrite output file
+            output_path
+        ], capture_output=True, text=True)
+        
+        # Return success status
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Error converting subtitle: {str(e)}", file=sys.stderr)
+        return False
+
+def get_converted_vtt_path(original_path, cache_dir=None):
+    """
+    Generate a path for converted VTT file, ensuring uniqueness.
+    
+    Args:
+        original_path (str): Path to original subtitle file
+        cache_dir (str, optional): Directory to store converted files
+        
+    Returns:
+        str: Path to converted VTT file
+    """
+    if cache_dir is None:
+        cache_dir = os.path.join(os.path.dirname(original_path), '.converted_vtt')
+    
+    # Create cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Generate unique filename based on original path and modification time
+    abs_path = os.path.abspath(original_path)
+    stat = os.stat(abs_path)
+    mtime = stat.st_mtime
+    
+    # Create hash of file path and modification time for unique naming
+    hash_input = f"{abs_path}{mtime}".encode('utf-8')
+    file_hash = hashlib.md5(hash_input).hexdigest()
+    
+    # Get original filename without extension
+    basename = os.path.splitext(os.path.basename(original_path))[0]
+    
+    # Return path to converted VTT file
+    return os.path.join(cache_dir, f"{basename}_{file_hash}.vtt")
 
 def find_subtitles(video_path, media_dir=None):
     """
@@ -36,10 +96,29 @@ def find_subtitles(video_path, media_dir=None):
                 basename, ext = os.path.splitext(filename)
                 # Check if it's a supported subtitle format and matches base name exactly
                 if ext.lower() in ['.vtt', '.ass', '.srt'] and basename == video_basename:
+                    # For non-VTT formats, convert to VTT
+                    if ext.lower() != '.vtt':
+                        # Generate path for converted VTT file
+                        original_path = os.path.join(video_dir, filename)
+                        vtt_path = get_converted_vtt_path(original_path)
+                        
+                        # Convert subtitle to VTT format
+                        if convert_to_vtt(original_path, vtt_path):
+                            # Use converted VTT file
+                            filename = os.path.basename(vtt_path)
+                            filepath = vtt_path
+                        else:
+                            # If conversion fails, skip this subtitle file
+                            print(f"Warning: Failed to convert {filename} to VTT format", file=sys.stderr)
+                            continue
+                    else:
+                        # For VTT files, use as is
+                        filepath = os.path.join(video_dir, filename)
+                    
                     # Construct the URL for the subtitle file
                     if media_dir:
                         # Calculate relative path from media directory
-                        relative_path = os.path.relpath(os.path.join(video_dir, filename), media_dir)
+                        relative_path = os.path.relpath(filepath, media_dir)
                         # URL encode the path, keeping slashes intact
                         encoded_path = urllib.parse.quote(relative_path.replace('\\', '/'), safe='/')
                         # Prepend a slash to make it an absolute path from the server root
@@ -48,15 +127,9 @@ def find_subtitles(video_path, media_dir=None):
                         # This case is unlikely to be hit with current server.js implementation
                         subtitle_url = f"/{urllib.parse.quote(filename)}"
                     
-                    # Map extension to DPlayer compatible type
-                    sub_ext = ext.lower()
-                    sub_type = 'webvtt'
-                    if sub_ext == '.ass':
-                        sub_type = 'ass'
-
                     subtitle_files.append({
                         'url': subtitle_url,
-                        'lang': sub_type,
+                        'lang': 'webvtt',
                         'name': filename
                     })
     except FileNotFoundError:
@@ -98,4 +171,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
