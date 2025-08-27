@@ -246,11 +246,63 @@
                 width: 100%;
             }
         }
+        .subtitle-dropdown {
+            position: relative;
+            margin-top: 10px;
+            width: 100%;
+            max-width: 400px;
+        }
+        .subtitle-select-btn {
+            width: 100%;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            text-align: left;
+            transition: background 0.3s ease;
+        }
+        .subtitle-select-btn:hover {
+            background: rgba(0, 0, 0, 0.7);
+        }
+        .subtitle-dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.9);
+            min-width: 100%;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1;
+            border-radius: 8px;
+            overflow: hidden;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .subtitle-dropdown-content a {
+            color: white;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            cursor: pointer;
+        }
+        .subtitle-dropdown-content a:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .show {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="video-title" id="videoTitle">加载中...</div>
+        <div class="subtitle-dropdown">
+            <button id="subtitleBtn" class="subtitle-select-btn">请手动选择字幕</button>
+            <div id="subtitleDropdownContent" class="subtitle-dropdown-content">
+                <!-- Subtitle options will be inserted here -->
+            </div>
+        </div>
         <button class="close-btn" onclick="window.close()">关闭窗口</button>
     </div>
     
@@ -377,11 +429,82 @@
                 
                 const dp = new DPlayer(dpOptions);
 
+                const subtitleBtn = document.getElementById('subtitleBtn');
+                const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
+
+                if (dpOptions.subtitle) {
+                    const initialSubtitleName = subtitleData.subtitles[0].name;
+                    subtitleBtn.textContent = `当前字幕: ${initialSubtitleName}`;
+                }
+
+                // Toggle dropdown
+                subtitleBtn.onclick = () => {
+                    subtitleDropdownContent.classList.toggle("show");
+                };
+
+                // Close dropdown if clicked outside
+                window.onclick = function(event) {
+                    if (!event.target.matches('.subtitle-select-btn')) {
+                        if (subtitleDropdownContent.classList.contains('show')) {
+                            subtitleDropdownContent.classList.remove('show');
+                        }
+                    }
+                }
+
+                async function loadAllSubtitles() {
+                    try {
+                        const response = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}&all=true`);
+                        const data = await response.json();
+                        if (data.success && data.subtitles.length > 0) {
+                            subtitleDropdownContent.innerHTML = ''; // Clear list
+                            data.subtitles.forEach(sub => {
+                                const link = document.createElement('a');
+                                link.textContent = sub.name;
+                                link.onclick = () => {
+                                    let fullSubtitleUrl;
+                                    if (mediaDir) {
+                                        const separator = sub.url.includes('?') ? '&' : '?';
+                                        fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                                    } else {
+                                        fullSubtitleUrl = sub.url;
+                                    }
+                                    console.log(`Switching to subtitle: ${fullSubtitleUrl}`);
+                                    dp.subtitle.switch(fullSubtitleUrl, {
+                                        type: 'webvtt',
+                                        fontSize: '40px',
+                                        fontfamily: 'Arial, sans-serif',
+                                        background:'rgba(0, 0, 0, 0.5)',
+                                        bottom: '10%',
+                                        color: '#FFFFFF'
+                                    });
+                                    subtitleBtn.textContent = `当前字幕: ${sub.name}`;
+                                    subtitleDropdownContent.classList.remove('show');
+                                };
+                                subtitleDropdownContent.appendChild(link);
+                            });
+                        } else {
+                            subtitleBtn.textContent = '没有找到可用字幕';
+                            subtitleBtn.disabled = true;
+                        }
+                    } catch (error) {
+                        console.error('Error loading all subtitles:', error);
+                        subtitleBtn.textContent = '加载字幕列表失败';
+                        subtitleBtn.disabled = true;
+                    }
+                }
+                
+                loadAllSubtitles();
+
                 // Handle DPlayer errors
                 dp.on('error', function () {
                     console.error('DPlayer error occurred:', arguments); // 打印DPlayer错误详情
                     // You can display a custom error message here if needed
                     videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
+                });
+
+                dp.on('subtitle_error', function () {
+                    console.error('DPlayer subtitle error occurred:', arguments);
+                    videoTitle.textContent = '字幕加载失败，请尝试从下方列表手动选择。';
                 });
 
                 dp.on('loadedmetadata', function() {

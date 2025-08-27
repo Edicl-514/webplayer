@@ -63,14 +63,17 @@ def get_converted_vtt_path(original_path, cache_dir=None):
     # Return path to converted VTT file
     return os.path.join(cache_dir, f"{basename}_{file_hash}.vtt")
 
-def find_subtitles(video_path, media_dir=None):
+def find_subtitles(video_path, media_dir=None, find_all=False):
     """
-    Finds subtitle files with the same base name as the video file.
+    Finds subtitle files. If find_all is False, it looks for subtitles with the
+    same base name as the video file. If find_all is True, it finds all subtitles
+    in the video's directory.
     Supported extensions: .vtt, .ass, .srt
     
     Args:
         video_path (str): Path to the video file
         media_dir (str, optional): Media directory path
+        find_all (bool): If True, find all subtitles in the directory
         
     Returns:
         list: List of subtitle dictionaries with url, lang, and name
@@ -91,11 +94,12 @@ def find_subtitles(video_path, media_dir=None):
     try:
         # List files in the video directory
         for filename in os.listdir(video_dir):
-            # Check if filename starts with the video base name
-            if filename.startswith(video_basename):
-                basename, ext = os.path.splitext(filename)
-                # Check if it's a supported subtitle format and matches base name exactly
-                if ext.lower() in ['.vtt', '.ass', '.srt'] and basename == video_basename:
+            original_filename = filename # Keep original filename for display
+            basename, ext = os.path.splitext(filename)
+            # Check if it's a supported subtitle format
+            if ext.lower() in ['.vtt', '.ass', '.srt']:
+                # If not find_all, we need an exact match, otherwise we take all subs
+                if find_all or basename == video_basename:
                     # For non-VTT formats, convert to VTT
                     if ext.lower() != '.vtt':
                         # Generate path for converted VTT file
@@ -105,7 +109,6 @@ def find_subtitles(video_path, media_dir=None):
                         # Convert subtitle to VTT format
                         if convert_to_vtt(original_path, vtt_path):
                             # Use converted VTT file
-                            filename = os.path.basename(vtt_path)
                             filepath = vtt_path
                         else:
                             # If conversion fails, skip this subtitle file
@@ -125,12 +128,12 @@ def find_subtitles(video_path, media_dir=None):
                         subtitle_url = f"/{encoded_path}"
                     else:
                         # This case is unlikely to be hit with current server.js implementation
-                        subtitle_url = f"/{urllib.parse.quote(filename)}"
+                        subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
                     
                     subtitle_files.append({
                         'url': subtitle_url,
                         'lang': 'webvtt',
-                        'name': filename
+                        'name': original_filename
                     })
     except FileNotFoundError:
         # If the directory doesn't exist, return empty list
@@ -156,9 +159,10 @@ def main():
     # 解码视频路径参数，避免双重编码问题
     video_file_path = sys.argv[1]
     media_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    find_all = '--all' in sys.argv
     
     try:
-        subtitles = find_subtitles(video_file_path, media_dir)
+        subtitles = find_subtitles(video_file_path, media_dir, find_all=find_all)
         result = {
             'success': True,
             'subtitles': subtitles,

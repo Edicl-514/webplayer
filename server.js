@@ -293,7 +293,8 @@ const server = http.createServer((req, res) => {
 
     if (pathname === '/api/find-subtitles' && req.method === 'GET') {
         const videoSrc = parsedUrl.query.src;
-        console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}`);
+        const findAll = parsedUrl.query.all === 'true';
+        console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}, findAll: ${findAll}`);
 
         if (!videoSrc) {
             res.statusCode = 400;
@@ -308,7 +309,7 @@ const server = http.createServer((req, res) => {
         const fullVideoPath = path.join(requestedMediaDir, decodedVideoSrc);
         console.log(`[Subtitles] Searching for subtitles for video path: ${fullVideoPath}`);
 
-        findSubtitles(fullVideoPath, requestedMediaDir)
+        findSubtitles(fullVideoPath, requestedMediaDir, findAll)
             .then(result => {
                 console.log(`[Subtitles] Subtitles found successfully for ${fullVideoPath}. Result:`, JSON.stringify(result, null, 2));
                 res.statusCode = 200;
@@ -445,7 +446,7 @@ function getContentType(filePath) {
 }
 
 // 新增：处理字幕请求的API
-function findSubtitles(videoPath, mediaDir) {
+function findSubtitles(videoPath, mediaDir, findAll = false) {
     return new Promise((resolve, reject) => {
         const pythonPath = 'python';
         const scriptPath = path.join(__dirname, 'find_subtitle.py');
@@ -454,6 +455,10 @@ function findSubtitles(videoPath, mediaDir) {
         // 总是传递 mediaDir 参数给 Python 脚本，确保字幕URL正确构建
         if (mediaDir) {
             args.push(mediaDir);
+        }
+
+        if (findAll) {
+            args.push('--all');
         }
         
         console.log(`[Subtitles] Spawning find_subtitle.py with args: ${args.join(' ')}`);
