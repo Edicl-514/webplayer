@@ -10,6 +10,8 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict
+import json
+import argparse
 import hashlib
 import logging
 
@@ -344,59 +346,86 @@ class SmartFolderModTimeManager:
 # --- 使用示例 ---
 if __name__ == "__main__":
     
-    def process_items_optimized(target_path: str):
+    def process_items_optimized(target_path: str, reverse_sort=True, output_json=False):
         """
         【已优化】处理指定路径下的一级项目（文件和文件夹），使用批量并行处理。
         """
-        print(f"开始处理路径: {target_path}")
-        
+        if not output_json:
+            print(f"开始处理路径: {target_path}")
+
         if not os.path.isdir(target_path):
-            print(f"错误: 路径 '{target_path}' 不是一个有效的目录。")
+            error_message = f"错误: 路径 '{target_path}' 不是一个有效的目录。"
+            if output_json:
+                print(json.dumps({"error": error_message}, ensure_ascii=False, indent=4))
+            else:
+                print(error_message)
             return
-            
+
         try:
-            items = [f.path for f in os.scandir(target_path)]  # 收集所有项目，不再过滤仅文件夹
+            items = [f.path for f in os.scandir(target_path)]
         except OSError as e:
-            print(f"错误: 无法访问路径 '{target_path}'。 {e}")
+            error_message = f"错误: 无法访问路径 '{target_path}'。 {e}"
+            if output_json:
+                print(json.dumps({"error": error_message}, ensure_ascii=False, indent=4))
+            else:
+                print(error_message)
             return
-            
+
         if not items:
-            print(f"路径 '{target_path}' 下没有任何项目。")
+            if not output_json:
+                print(f"路径 '{target_path}' 下没有任何项目。")
             return
-            
-        print(f"找到 {len(items)} 个项目，开始并行计算修改时间...")
+
+        if not output_json:
+            print(f"找到 {len(items)} 个项目，开始并行计算修改时间...")
         
-        # 实际使用时建议启用缓存: SmartFolderModTimeManager(use_database_cache=True)
         manager = SmartFolderModTimeManager(use_database_cache=True)
-        
         start_time = time.time()
         
-        # 【核心优化】直接调用排序函数，它内部会进行高效的批量并行处理
-        sorted_item_infos = manager.sort_folders_by_real_mtime(items)  # 重命名变量以反映处理的是项目
+        sorted_item_infos = manager.sort_folders_by_real_mtime(items, reverse=reverse_sort)
         
         end_time = time.time()
         total_duration = end_time - start_time
-        
-        print("\n" + "-"*20 + " 排序结果 " + "-"*20)
-        for info in sorted_item_infos:
-            mtime_str = info.real_mtime.strftime('%Y-%m-%d %H:%M:%S')
-            item_name = os.path.basename(info.path)
-            method = info.method_used
-            # 判断是文件还是文件夹并在输出中标明
-            item_type = "文件夹" if os.path.isdir(info.path) else "文件  "
-            print(f"{mtime_str} - {item_name:<40} ({item_type}, 方法: {method})")
-            
-        print("-" * 52)
-        print(f"处理 {len(items)} 个项目总耗时: {total_duration:.4f}s")
-        print(f"平均每个项目耗时: {total_duration/len(items):.4f}s")
 
-    # ***************************************************************
-    # ** 请在这里修改为您要测试的实际文件夹路径 **
-    # ***************************************************************
-    target_folder_path = r"J:\e\RSC"
+        if output_json:
+            results_list = []
+            for info in sorted_item_infos:
+                results_list.append({
+                    "path": info.path,
+                    "mtime": info.real_mtime.isoformat(),
+                    "item_type": "folder" if os.path.isdir(info.path) else "file",
+                    "method": info.method_used
+                })
+            print(json.dumps(results_list, ensure_ascii=False, indent=4))
+        else:
+            print("\n" + "-"*20 + " 排序结果 " + "-"*20)
+            for info in sorted_item_infos:
+                mtime_str = info.real_mtime.strftime('%Y-%m-%d %H:%M:%S')
+                item_name = os.path.basename(info.path)
+                method = info.method_used
+                item_type = "文件夹" if os.path.isdir(info.path) else "文件  "
+                print(f"{mtime_str} - {item_name:<40} ({item_type}, 方法: {method})")
+            
+            print("-" * 52)
+            print(f"处理 {len(items)} 个项目总耗时: {total_duration:.4f}s")
+            print(f"平均每个项目耗时: {total_duration/len(items):.4f}s")
+
+    parser = argparse.ArgumentParser(description="按修改时间对文件夹和文件进行排序。")
+    parser.add_argument("-path", dest="target_path", required=True, help="要处理的目标文件夹路径。")
+    parser.add_argument("-s", dest="sort_order", default="desc", choices=["asc", "desc"],
+                        help="排序顺序: 'asc' 表示升序, 'desc' 表示降序 (默认)。")
+    parser.add_argument("-j", dest="json_output", action="store_true",
+                        help="如果指定，则以JSON格式输出结果。")
     
-    if os.path.exists(target_folder_path):
-        process_items_optimized(target_folder_path)
+    args = parser.parse_args()
+    
+    reverse_order = args.sort_order == "desc"
+    
+    if os.path.exists(args.target_path):
+        process_items_optimized(args.target_path, reverse_sort=reverse_order, output_json=args.json_output)
     else:
-        print(f"\n跳过项目处理，因为路径 '{target_folder_path}' 不存在。")
-        print(f"请在 '{__file__}' 文件末尾修改 'target_folder_path' 变量。")
+        error_message = f"\n错误：路径 '{args.target_path}' 不存在。"
+        if args.json_output:
+            print(json.dumps({"error": error_message.strip()}, ensure_ascii=False, indent=4))
+        else:
+            print(error_message)
