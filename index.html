@@ -152,6 +152,21 @@
             <button id="backButton" class="hidden">返回上一级</button>
             <button id="homeButton" class="hidden">返回主目录</button>
             <span id="currentPath">/</span>
+            <div class="sorting-controls" style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+                <label for="sortBy" style="font-weight: bold;">排序方式:</label>
+                <select id="sortBy" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="name">文件名</option>
+                    <option value="type">文件类型</option>
+                    <option value="time">修改时间</option>
+                </select>
+                <select id="sortOrder" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="asc">升序</option>
+                    <option value="desc">降序</option>
+                </select>
+                <label for="mixSort" style="margin-left: 15px;">
+                    <input type="checkbox" id="mixSort"> 混合排序
+                </label>
+            </div>
         </div>
         <div id="rootDirsGrid" class="hidden">
             <!-- 根目录媒体目录将在此处动态加载 -->
@@ -180,6 +195,15 @@
         let currentPath = '/';
         let currentMediaDir = null;
         let currentFiles = []; // 保存当前目录的文件列表
+
+        // 添加排序相关的变量
+        const sortBy = document.getElementById('sortBy');
+        const sortOrder = document.getElementById('sortOrder');
+
+        // 添加事件监听器
+        sortBy.addEventListener('change', sortAndDisplayFiles);
+        sortOrder.addEventListener('change', sortAndDisplayFiles);
+        document.getElementById('mixSort').addEventListener('change', sortAndDisplayFiles);
  
         // 获取根目录媒体目录列表并展示
         async function fetchRootDirs() {
@@ -297,11 +321,68 @@
                 }
                 const files = await response.json();
                 currentFiles = files; // 保存文件列表
-                displayFiles(files);
+                sortAndDisplayFiles(); // 应用当前排序
             } catch (error) {
                 console.error('Error fetching files:', error);
                 fileGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载文件失败: ${error.message}</div></div>`;
             }
+        }
+
+        async function sortAndDisplayFiles() {
+            const sortTypeValue = sortBy.value;
+            const sortOrderValue = sortOrder.value;
+
+            if (sortTypeValue === 'time') {
+                try {
+                    const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const sortedFiles = await response.json();
+                    currentFiles = sortedFiles;
+                    displayFiles(currentFiles);
+                } catch (error) {
+                    console.error('Error sorting by time:', error);
+                }
+                return;
+            }
+
+            // 排序逻辑
+            currentFiles.sort((a, b) => {
+                const mixSort = document.getElementById('mixSort').checked;
+
+                // 如果不混合排序，则文件夹始终排在前面
+                if (!mixSort) {
+                    if (a.isDirectory && !b.isDirectory) return -1;
+                    if (!a.isDirectory && b.isDirectory) return 1;
+                }
+
+                let compareA, compareB;
+
+                switch (sortTypeValue) {
+                    case 'name':
+                        compareA = a.name.toLowerCase();
+                        compareB = b.name.toLowerCase();
+                        break;
+                    case 'type':
+                        compareA = a.isDirectory ? '' : a.name.split('.').pop().toLowerCase();
+                        compareB = b.isDirectory ? '' : b.name.split('.').pop().toLowerCase();
+                        break;
+                    default: // 默认为文件名排序
+                        compareA = a.name.toLowerCase();
+                        compareB = b.name.toLowerCase();
+                }
+
+                if (compareA < compareB) {
+                    return sortOrderValue === 'asc' ? -1 : 1;
+                }
+                if (compareA > compareB) {
+                    return sortOrderValue === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+
+            displayFiles(currentFiles);
         }
 
         function displayFiles(files) {

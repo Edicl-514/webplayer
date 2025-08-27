@@ -291,6 +291,58 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+   if (pathname === '/api/sort-by-time' && req.method === 'GET') {
+       const targetPath = parsedUrl.query.path || '';
+       const sortOrder = parsedUrl.query.order || 'asc';
+       const fullPath = path.join(currentMediaDir, targetPath);
+
+       const pythonProcess = spawn('python', [
+           'concurrent-time-sort.py',
+           '-path', fullPath,
+           '-s', sortOrder,
+           '-j'
+       ], {
+           env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+       });
+
+       let stdoutData = '';
+       let stderrData = '';
+
+       pythonProcess.stdout.on('data', (data) => {
+           stdoutData += data.toString();
+       });
+
+       pythonProcess.stderr.on('data', (data) => {
+           stderrData += data.toString();
+       });
+
+       pythonProcess.on('close', (code) => {
+           if (code !== 0) {
+               console.error(`concurrent-time-sort.py stderr: ${stderrData}`);
+               res.statusCode = 500;
+               res.end(JSON.stringify({ success: false, message: 'Error sorting by time' }));
+               return;
+           }
+           try {
+               const pythonOutput = JSON.parse(stdoutData);
+               const sortedFiles = pythonOutput.map(item => {
+                   const stats = fs.statSync(item.path);
+                   return {
+                       name: path.basename(item.path),
+                       isDirectory: item.item_type === 'folder',
+                       size: item.item_type === 'folder' ? 0 : stats.size
+                   };
+               });
+               res.setHeader('Content-Type', 'application/json');
+               res.end(JSON.stringify(sortedFiles));
+           } catch (e) {
+               res.statusCode = 500;
+               res.end(JSON.stringify({ success: false, message: 'Error parsing sorted file list' }));
+           }
+       });
+       return;
+   }
+
     if (pathname === '/api/find-subtitles' && req.method === 'GET') {
         const videoSrc = parsedUrl.query.src;
         const findAll = parsedUrl.query.all === 'true';
