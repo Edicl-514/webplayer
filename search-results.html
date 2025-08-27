@@ -56,6 +56,25 @@
             transform: translateY(-3px);
             box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         }
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            height: 150px; /* Or any other fixed height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #d1d8df;
+            overflow: hidden;
+        }
+        .thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* This is the key property */
+        }
+        .icon {
+            font-size: 3em;
+            color: #6c757d;
+        }
         .result-name {
             font-weight: bold;
             font-size: 1.1em;
@@ -114,6 +133,8 @@
             background-color: #0056b3;
         }
     </style>
+    <!-- 引入 Fancybox 的 CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css" />
 </head>
 <body>
     <div class="container">
@@ -305,24 +326,25 @@
                        const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
 
                        if (isImage) {
-                           // 图片文件显示缩略图
-                           const img = document.createElement('img');
-                           img.className = 'thumbnail lazy'; // 添加 lazy 类
-                           img.loading = 'lazy'; // 添加 loading="lazy" 属性
-                           // 使用服务器端生成的缩略图
+                           // 图片文件显示缩略图，并用 a 标签包裹以支持 Fancybox
+                           const a = document.createElement('a');
                            const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+                           const imagePath = encodePath(relativePath);
+                           a.href = `${imagePath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
+                           a.dataset.fancybox = 'gallery';
+                           a.dataset.caption = result.filename;
+
+                           const img = document.createElement('img');
+                           img.className = 'thumbnail lazy';
+                           img.loading = 'lazy';
                            const thumbnailPath = encodePath(relativePath);
-                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
                            img.alt = result.filename;
                            img.onerror = function() {
-                               // 如果缩略图加载失败，显示默认图标
-                               thumbnailContainer.innerHTML = '';
-                               const icon = document.createElement('div');
-                               icon.className = 'icon';
-                               icon.innerHTML = '&#128196;'; // 文件图标
-                               thumbnailContainer.appendChild(icon);
+                               a.parentNode.innerHTML = '<div class="icon">&#128196;</div>'; // 替换为图标
                            };
-                           thumbnailContainer.appendChild(img);
+                           a.appendChild(img);
+                           thumbnailContainer.appendChild(a);
                        } else if (isVideo) {
                            // 视频文件显示缩略图
                            const img = document.createElement('img');
@@ -351,11 +373,14 @@
                        }
 
                        // 文件点击事件
-                       resultItem.onclick = () => {
-                           if (isVideo) {
-                               playVideo(result.full_path, result.filename, result.media_dir_root);
-                           } else {
-                               downloadFile(result.full_path, result.filename, result.media_dir_root);
+                       resultItem.onclick = (e) => {
+                           // 如果点击的不是a标签（图片），则执行默认操作
+                           if (e.target.tagName.toLowerCase() !== 'img') {
+                               if (isVideo) {
+                                   playVideo(result.full_path, result.filename, result.media_dir_root);
+                               } else if (!isImage) { // 如果不是图片，则下载
+                                   downloadFile(result.full_path, result.filename, result.media_dir_root);
+                               }
                            }
                        };
 
@@ -405,8 +430,11 @@
        function navigateToFolder(fullPath, mediaDirRoot) {
            // 构建新的 URL，模拟进入文件夹
            const relativePath = getRelativePath(fullPath, mediaDirRoot);
-           // index.html的hash路由不需要编码
-           const newUrl = `/index.html#${relativePath}`;
+           const searchParams = new URLSearchParams({
+               mediaDir: mediaDirRoot,
+               path: relativePath
+           });
+           const newUrl = `index.html?${searchParams.toString()}`;
            window.open(newUrl, '_blank');
        }
 
@@ -458,5 +486,8 @@
            performSearch();
        });
    </script>
+   <!-- 引入 jQuery 和 Fancybox 的 JS -->
+   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+   <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js"></script>
 </body>
 </html>

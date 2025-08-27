@@ -291,6 +291,21 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // 新增：处理 /node_modules 的请求
+    if (pathname.startsWith('/node_modules/')) {
+        const filePath = path.join(__dirname, pathname);
+        fs.readFile(filePath, (err, data) => {
+            if (err) {
+                res.statusCode = 404;
+                res.end(`File not found: ${pathname}`);
+                return;
+            }
+            res.setHeader('Content-Type', getContentType(filePath));
+            res.end(data);
+        });
+        return;
+    }
+
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
     // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
     const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
