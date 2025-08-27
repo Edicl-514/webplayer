@@ -34,19 +34,17 @@ def convert_to_vtt(input_path, output_path):
 def get_converted_vtt_path(original_path, cache_dir=None):
     """
     Generate a path for converted VTT file, ensuring uniqueness.
+    The converted file will be placed in the same directory as the original.
     
     Args:
         original_path (str): Path to original subtitle file
-        cache_dir (str, optional): Directory to store converted files
+        cache_dir (str, optional): This argument is kept for compatibility but is ignored.
         
     Returns:
         str: Path to converted VTT file
     """
-    if cache_dir is None:
-        cache_dir = os.path.join(os.path.dirname(original_path), '.converted_vtt')
-    
-    # Create cache directory if it doesn't exist
-    os.makedirs(cache_dir, exist_ok=True)
+    # The output directory is the same as the original file's directory
+    output_dir = os.path.dirname(original_path)
     
     # Generate unique filename based on original path and modification time
     abs_path = os.path.abspath(original_path)
@@ -60,8 +58,8 @@ def get_converted_vtt_path(original_path, cache_dir=None):
     # Get original filename without extension
     basename = os.path.splitext(os.path.basename(original_path))[0]
     
-    # Return path to converted VTT file
-    return os.path.join(cache_dir, f"{basename}_{file_hash}.vtt")
+    # Return path to the converted VTT file in the same directory
+    return os.path.join(output_dir, f"{basename}_{file_hash}.vtt")
 
 def find_subtitles(video_path, media_dir=None, find_all=False):
     """

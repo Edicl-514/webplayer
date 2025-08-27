@@ -80,7 +80,7 @@
         video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
             outline: none;
         }
 
@@ -390,6 +390,9 @@
                         url: fullVideoUrl,
                         pic: urlParams.get('poster') || '', // Optional: Add a poster image if available in URL params
                         thumbnails: urlParams.get('thumbnails') || '', // Optional: Add thumbnails if available
+                        // --- 解决移动端劫持播放器的问题 ---
+                        playsinline: true,
+                        'webkit-playsinline': true
                     },
                     autoplay: true,
                     theme: '#FADFA3',
@@ -427,7 +430,37 @@
                     };
                 }
                 
-                const dp = new DPlayer(dpOptions);
+                // 创建DPlayer实例的变量，使其在整个作用域内可访问
+                let dp;
+
+                function bindDPlayerEvents(player) {
+                    player.on('error', function () {
+                        console.error('DPlayer error occurred:', arguments);
+                        videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
+                    });
+
+                    player.on('subtitle_error', function () {
+                        console.error('DPlayer subtitle error occurred:', arguments);
+                        videoTitle.textContent = '字幕加载失败，请尝试从下方列表手动选择。';
+                    });
+
+                    player.on('loadedmetadata', function() {
+                        const video = player.video;
+                        if (video.videoWidth && video.videoHeight) {
+                            aspect = video.videoWidth / video.videoHeight;
+                            adjustPlayerSize();
+                            player.resize();
+                        }
+                    });
+                }
+
+                // 初始化DPlayer
+                function initDPlayer() {
+                    dp = new DPlayer(dpOptions);
+                    bindDPlayerEvents(dp);
+                    // 在DPlayer初始化后再加载字幕列表
+                    loadAllSubtitles();
+                }
 
                 const subtitleBtn = document.getElementById('subtitleBtn');
                 const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
@@ -461,23 +494,54 @@
                                 const link = document.createElement('a');
                                 link.textContent = sub.name;
                                 link.onclick = () => {
-                                    let fullSubtitleUrl;
+                                    let fullSubtitleUrl = sub.url;
                                     if (mediaDir) {
-                                        const separator = sub.url.includes('?') ? '&' : '?';
-                                        fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-                                    } else {
-                                        fullSubtitleUrl = sub.url;
+                                        try {
+                                            const url = new URL(sub.url, window.location.origin);
+                                            url.searchParams.set('mediaDir', mediaDir);
+                                            fullSubtitleUrl = url.toString();
+                                        } catch (e) {
+                                            const separator = sub.url.includes('?') ? '&' : '?';
+                                            fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                                        }
                                     }
                                     console.log(`Switching to subtitle: ${fullSubtitleUrl}`);
-                                    dp.subtitle.switch(fullSubtitleUrl, {
+                                    
+                                    const subtitleOptions = {
                                         type: 'webvtt',
                                         fontSize: '40px',
                                         fontfamily: 'Arial, sans-serif',
                                         background:'rgba(0, 0, 0, 0.5)',
                                         bottom: '10%',
                                         color: '#FFFFFF'
-                                    });
-                                    subtitleBtn.textContent = `当前字幕: ${sub.name}`;
+                                    };
+
+                                    if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
+                                        dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
+                                        subtitleBtn.textContent = `当前字幕: ${sub.name}`;
+                                    } else if (dp) {
+                                        console.log('Subtitle object not found, recreating player to add subtitle.');
+                                        const currentTime = dp.video.currentTime;
+                                        const wasPaused = dp.video.paused;
+                                        
+                                        dp.destroy();
+                                        
+                                        dpOptions.subtitle = { ...subtitleOptions, url: fullSubtitleUrl };
+                                        
+                                        dp = new DPlayer(dpOptions);
+                                        bindDPlayerEvents(dp);
+                                        
+                                        dp.on('loadeddata', () => {
+                                            dp.seek(currentTime);
+                                            if (!wasPaused) {
+                                                dp.play();
+                                            }
+                                        });
+                                        subtitleBtn.textContent = `当前字幕: ${sub.name}`;
+                                    } else {
+                                        console.error('DPlayer instance is not available for subtitle switch.');
+                                    }
+                                    
                                     subtitleDropdownContent.classList.remove('show');
                                 };
                                 subtitleDropdownContent.appendChild(link);
@@ -493,28 +557,9 @@
                     }
                 }
                 
-                loadAllSubtitles();
+                // 初始化DPlayer
+                initDPlayer();
 
-                // Handle DPlayer errors
-                dp.on('error', function () {
-                    console.error('DPlayer error occurred:', arguments); // 打印DPlayer错误详情
-                    // You can display a custom error message here if needed
-                    videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
-                });
-
-                dp.on('subtitle_error', function () {
-                    console.error('DPlayer subtitle error occurred:', arguments);
-                    videoTitle.textContent = '字幕加载失败，请尝试从下方列表手动选择。';
-                });
-
-                dp.on('loadedmetadata', function() {
-                    const video = dp.video;
-                    if (video.videoWidth && video.videoHeight) {
-                        aspect = video.videoWidth / video.videoHeight;
-                        adjustPlayerSize();
-                        dp.resize();
-                    }
-                });
 
                 let aspect = 16 / 9;
                 

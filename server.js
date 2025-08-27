@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
                 const mediaDir = MEDIA_DIRS.find(md => md.path === dir || md.alias === dir);
                 if (mediaDir) {
                     currentMediaDir = mediaDir.path;  // 使用实际路径
-                    console.log(`Switched MEDIA_DIR to: ${currentMediaDir}`);
+                    //console.log(`Switched MEDIA_DIR to: ${currentMediaDir}`);
                     res.statusCode = 200;
                     res.end(JSON.stringify({ success: true, newMediaDir: currentMediaDir }));
                 } else {
@@ -307,11 +307,11 @@ const server = http.createServer((req, res) => {
         // 先解码videoSrc，避免双重编码问题
         const decodedVideoSrc = decodeURIComponent(videoSrc);
         const fullVideoPath = path.join(requestedMediaDir, decodedVideoSrc);
-        console.log(`[Subtitles] Searching for subtitles for video path: ${fullVideoPath}`);
+        //console.log(`[Subtitles] Searching for subtitles for video path: ${fullVideoPath}`);
 
         findSubtitles(fullVideoPath, requestedMediaDir, findAll)
             .then(result => {
-                console.log(`[Subtitles] Subtitles found successfully for ${fullVideoPath}. Result:`, JSON.stringify(result, null, 2));
+                //console.log(`[Subtitles] Subtitles found successfully for ${fullVideoPath}. Result:`, JSON.stringify(result, null, 2));
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify(result));
@@ -438,9 +438,9 @@ function getContentType(filePath) {
         '.pdf': 'application/pdf',
         '.doc': 'application/msword',
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        '.srt': 'text/vtt',
+        '.srt': 'application/x-subrip',
         '.vtt': 'text/vtt',
-        '.ass': 'text/x-ass'
+        '.ass': 'text/plain'
     };
     return mimeTypes[extname] || 'application/octet-stream';
 }
@@ -461,7 +461,7 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
             args.push('--all');
         }
         
-        console.log(`[Subtitles] Spawning find_subtitle.py with args: ${args.join(' ')}`);
+        //console.log(`[Subtitles] Spawning find_subtitle.py with args: ${args.join(' ')}`);
 
         const pythonProcess = spawn(pythonPath, args);
 
@@ -719,12 +719,12 @@ function generateImageThumbnail(imagePath, thumbnailPath) {
  * 停止所有活跃的缩略图生成进程并清空队列
  */
 function stopAllThumbnailGenerations() {
-    console.log('Stopping all active FFmpeg processes and clearing thumbnail queue...');
+    //console.log('Stopping all active FFmpeg processes and clearing thumbnail queue...');
     // 终止所有活跃的 ffmpeg 进程
     activeFfmpegProcesses.forEach(ffmpegProcess => {
         try {
             ffmpegProcess.kill('SIGKILL'); // 强制终止进程
-            console.log(`Killed FFmpeg process with PID: ${ffmpegProcess.pid}`);
+            //console.log(`Killed FFmpeg process with PID: ${ffmpegProcess.pid}`);
         } catch (e) {
             console.error(`Error killing FFmpeg process ${ffmpegProcess.pid}:`, e.message);
         }
@@ -733,7 +733,7 @@ function stopAllThumbnailGenerations() {
 
     // 清空缩略图生成队列
     thumbnailQueue.length = 0;
-    console.log('Thumbnail queue cleared.');
+    //console.log('Thumbnail queue cleared.');
 }
 
 // 定期清理过期缩略图的间隔（毫秒）- 默认每6小时清理一次
@@ -769,7 +769,7 @@ function cleanupOldThumbnails(maxAge = 7 * 24 * 60 * 60 * 1000) {
                             console.error(`Error deleting old thumbnail ${filePath}:`, unlinkErr);
                         } else {
                             cleanedCount++;
-                            console.log(`Deleted old thumbnail: ${file}`);
+                            //console.log(`Deleted old thumbnail: ${file}`);
                         }
                     });
                 }

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>网页播放器</title>
+</head>
+<body>
+
+    <h1>点击按钮，使用客户端播放器播放视频</h1>
+
+    <p>这个按钮会尝试在你的设备上打开一个本地播放器，并播放指定的视频。</p>
+
+    <button onclick="playVideo('https://example.com/your-video.mp4')">播放视频</button>
+
+    <script>
+    function playVideo(videoUrl) {
+        // 判断用户代理（User-Agent）字符串，来区分是PC还是Android
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+
+        if (/android/i.test(userAgent)) {
+            // 如果是Android设备，尝试使用Intent
+            const intentUrl = 'intent:' + encodeURIComponent(videoUrl) + '#Intent;' +
+                              'action=android.intent.action.VIEW;' +
+                              'type=video/*;' +
+                              'end;';
+            window.location.href = intentUrl;
+
+        } else if (/win/i.test(userAgent)) {
+            // 如果是Windows设备，尝试使用VLC或PotPlayer
+            // 提示：你可以让用户选择或提供多个备选方案
+            window.location.href = 'potplayer://' + encodeURIComponent(videoUrl);
+
+        } else {
+            // 其他设备（如iOS，浏览器内直接播放）
+            alert('请在支持的设备上使用此功能，或直接在浏览器中播放。');
+            window.location.href = videoUrl; // 在浏览器中直接打开视频URL
+        }
+    }
+    </script>
+
+</body>
+</html>
