@@ -257,6 +257,8 @@
            return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
        }
 
+       let searchResults = []; // 保存搜索结果
+
        // 显示搜索结果
        function displayResults(data) {
            document.getElementById('loadingMessage').style.display = 'none';
@@ -265,7 +267,8 @@
                showError(data.error || '搜索失败');
                return;
            }
-           
+
+           searchResults = data.results; // 保存结果
            const results = data.results;
            const totalResults = data.total_results;
            const totalFiles = data.total_files;
@@ -331,7 +334,7 @@
                            const relativePath = getRelativePath(result.full_path, result.media_dir_root);
                            const imagePath = encodePath(relativePath);
                            a.href = `${imagePath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
-                           a.dataset.fancybox = 'gallery';
+                           // a.dataset.fancybox = 'gallery'; // 移除自动扫描触发器
                            a.dataset.caption = result.filename;
 
                            const img = document.createElement('img');
@@ -372,13 +375,34 @@
                            thumbnailContainer.appendChild(icon);
                        }
 
-                       // 文件点击事件
                        resultItem.onclick = (e) => {
-                           // 如果点击的不是a标签（图片），则执行默认操作
-                           if (e.target.tagName.toLowerCase() !== 'img') {
+                           if (isImage) {
+                               e.preventDefault();
+                               const imageFiles = searchResults.filter(r => {
+                                   const ext = r.filename.split('.').pop().toLowerCase();
+                                   return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
+                               });
+
+                               const gallery = imageFiles.map(imgResult => {
+                                   const relPath = getRelativePath(imgResult.full_path, imgResult.media_dir_root);
+                                   const imgPath = encodePath(relPath);
+                                   return {
+                                       src: `${imgPath}?mediaDir=${encodeURIComponent(imgResult.media_dir_root)}`,
+                                       opts: { caption: imgResult.filename }
+                                   };
+                               });
+
+                               const currentIndex = imageFiles.findIndex(imgResult => imgResult.full_path === result.full_path);
+
+                               $.fancybox.open(gallery, {
+                                   loop: true,
+                                   thumbs: { autoStart: true }
+                               }, currentIndex);
+
+                           } else if (e.target.tagName.toLowerCase() !== 'img') {
                                if (isVideo) {
                                    playVideo(result.full_path, result.filename, result.media_dir_root);
-                               } else if (!isImage) { // 如果不是图片，则下载
+                               } else {
                                    downloadFile(result.full_path, result.filename, result.media_dir_root);
                                }
                            }

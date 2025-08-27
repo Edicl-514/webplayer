@@ -179,7 +179,8 @@
 
         let currentPath = '/';
         let currentMediaDir = null;
-
+        let currentFiles = []; // 保存当前目录的文件列表
+ 
         // 获取根目录媒体目录列表并展示
         async function fetchRootDirs() {
             try {
@@ -295,6 +296,7 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const files = await response.json();
+                currentFiles = files; // 保存文件列表
                 displayFiles(files);
             } catch (error) {
                 console.error('Error fetching files:', error);
@@ -364,9 +366,9 @@
                         const a = document.createElement('a');
                         const imageUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
                         a.href = imageUrl;
-                        a.dataset.fancybox = 'gallery';
+                        // a.dataset.fancybox = 'gallery'; // 移除自动扫描触发器
                         a.dataset.caption = file.name;
-
+ 
                         const img = document.createElement('img');
                         img.className = 'thumbnail lazy';
                         img.loading = 'lazy';
@@ -404,13 +406,35 @@
                         thumbnailContainer.appendChild(icon);
                     }
 
-                    // 文件点击事件（图片由FancyBox处理）
                     gridItem.onclick = (e) => {
-                        // 如果点击的不是a标签（图片），则执行默认操作
-                        if (e.target.tagName.toLowerCase() !== 'img') {
+                        if (isImage) {
+                            e.preventDefault(); // 阻止 a 标签的默认跳转行为
+                            const imageFiles = currentFiles.filter(f => {
+                                const ext = f.name.split('.').pop().toLowerCase();
+                                return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
+                            });
+
+                            const gallery = imageFiles.map(imgFile => {
+                                const imgEncodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                                const imgEncodedFileName = encodeURIComponent(imgFile.name);
+                                const imgUrl = `${imgEncodedPath === '/' ? '' : imgEncodedPath}/${imgEncodedFileName}`.replace(/\\/g, '/');
+                                return {
+                                    src: imgUrl,
+                                    opts: { caption: imgFile.name }
+                                };
+                            });
+
+                            const currentIndex = imageFiles.findIndex(imgFile => imgFile.name === file.name);
+
+                            $.fancybox.open(gallery, {
+                                loop: true,
+                                thumbs: { autoStart: true }
+                            }, currentIndex);
+
+                        } else if (e.target.tagName.toLowerCase() !== 'img') {
                             if (isVideo) {
                                 playVideo(file.name);
-                            } else if (!isImage) { // 如果不是图片，则下载
+                            } else {
                                 downloadFile(file.name);
                             }
                         }
