@@ -62,22 +62,35 @@ class SmartFolderModTimeManager:
         return hashlib.md5(path.encode('utf-8')).hexdigest()
     
     def _get_from_cache(self, folder_path: str) -> Optional[FolderInfo]:
-        """从缓存获取数据"""
+        """
+        从缓存获取数据（已优化）。
+        增加混合检查策略：除了时间过期外，还检查文件夹本身元数据的修改时间。
+        """
         if not self.use_database_cache:
             return None
-            
+
+        # 检查内存缓存
         if folder_path in self.cache:
             info = self.cache[folder_path]
             if datetime.now() - info.cache_time < timedelta(hours=self.CACHE_EXPIRE_HOURS):
-                return info
-        
+                try:
+                    folder_mtime = os.path.getmtime(folder_path)
+                    # 如果文件夹的修改时间晚于缓存时间，则缓存无效
+                    if folder_mtime > info.cache_time.timestamp():
+                        logger.info(f"文件夹元数据已更改，缓存失效: {folder_path}")
+                        return None
+                    return info
+                except FileNotFoundError:
+                    return None # 文件夹不存在，缓存自然无效
+
+        # 检查数据库缓存
         try:
             conn = sqlite3.connect(self.cache_db)
             path_hash = self._get_path_hash(folder_path)
             
             cursor = conn.execute('''
                 SELECT path, real_mtime, cache_time, method_used
-                FROM folder_cache 
+                FROM folder_cache
                 WHERE path_hash = ? AND path = ?
             ''', (path_hash, folder_path))
             
@@ -87,14 +100,22 @@ class SmartFolderModTimeManager:
             if row:
                 cache_time = datetime.fromisoformat(row[2])
                 if datetime.now() - cache_time < timedelta(hours=self.CACHE_EXPIRE_HOURS):
-                    info = FolderInfo(
-                        path=row[0],
-                        real_mtime=datetime.fromisoformat(row[1]),
-                        cache_time=cache_time,
-                        method_used="缓存命中"
-                    )
-                    self.cache[folder_path] = info
-                    return info
+                    try:
+                        folder_mtime = os.path.getmtime(folder_path)
+                        if folder_mtime > cache_time.timestamp():
+                            logger.info(f"文件夹元数据已更改，缓存失效: {folder_path}")
+                            return None
+
+                        info = FolderInfo(
+                            path=row[0],
+                            real_mtime=datetime.fromisoformat(row[1]),
+                            cache_time=cache_time,
+                            method_used="缓存命中"
+                        )
+                        self.cache[folder_path] = info # 同步到内存缓存
+                        return info
+                    except FileNotFoundError:
+                        return None # 文件夹不存在，缓存自然无效
         except Exception as e:
             logger.warning(f"从缓存获取数据时出错 {folder_path}: {e}")
         
@@ -323,9 +344,9 @@ class SmartFolderModTimeManager:
 # --- 使用示例 ---
 if __name__ == "__main__":
     
-    def process_subfolders_optimized(target_path: str):
+    def process_items_optimized(target_path: str):
         """
-        【已优化】处理指定路径下的一级子目录，使用批量并行处理。
+        【已优化】处理指定路径下的一级项目（文件和文件夹），使用批量并行处理。
         """
         print(f"开始处理路径: {target_path}")
         
@@ -334,16 +355,16 @@ if __name__ == "__main__":
             return
             
         try:
-            subfolders = [f.path for f in os.scandir(target_path) if f.is_dir()]
+            items = [f.path for f in os.scandir(target_path)]  # 收集所有项目，不再过滤仅文件夹
         except OSError as e:
             print(f"错误: 无法访问路径 '{target_path}'。 {e}")
             return
             
-        if not subfolders:
-            print(f"路径 '{target_path}' 下没有找到任何子目录。")
+        if not items:
+            print(f"路径 '{target_path}' 下没有任何项目。")
             return
             
-        print(f"找到 {len(subfolders)} 个子目录，开始并行计算修改时间...")
+        print(f"找到 {len(items)} 个项目，开始并行计算修改时间...")
         
         # 实际使用时建议启用缓存: SmartFolderModTimeManager(use_database_cache=True)
         manager = SmartFolderModTimeManager(use_database_cache=True)
@@ -351,29 +372,31 @@ if __name__ == "__main__":
         start_time = time.time()
         
         # 【核心优化】直接调用排序函数，它内部会进行高效的批量并行处理
-        sorted_folder_infos = manager.sort_folders_by_real_mtime(subfolders)
+        sorted_item_infos = manager.sort_folders_by_real_mtime(items)  # 重命名变量以反映处理的是项目
         
         end_time = time.time()
         total_duration = end_time - start_time
         
         print("\n" + "-"*20 + " 排序结果 " + "-"*20)
-        for info in sorted_folder_infos:
+        for info in sorted_item_infos:
             mtime_str = info.real_mtime.strftime('%Y-%m-%d %H:%M:%S')
-            folder_name = os.path.basename(info.path)
+            item_name = os.path.basename(info.path)
             method = info.method_used
-            print(f"{mtime_str} - {folder_name:<40} (方法: {method})")
+            # 判断是文件还是文件夹并在输出中标明
+            item_type = "文件夹" if os.path.isdir(info.path) else "文件  "
+            print(f"{mtime_str} - {item_name:<40} ({item_type}, 方法: {method})")
             
         print("-" * 52)
-        print(f"处理 {len(subfolders)} 个文件夹总耗时: {total_duration:.4f}s")
-        print(f"平均每个文件夹耗时: {total_duration/len(subfolders):.4f}s")
+        print(f"处理 {len(items)} 个项目总耗时: {total_duration:.4f}s")
+        print(f"平均每个项目耗时: {total_duration/len(items):.4f}s")
 
     # ***************************************************************
     # ** 请在这里修改为您要测试的实际文件夹路径 **
     # ***************************************************************
-    target_folder_path = r"J:\e\RSC" 
+    target_folder_path = r"J:\e\RSC"
     
     if os.path.exists(target_folder_path):
-        process_subfolders_optimized(target_folder_path)
+        process_items_optimized(target_folder_path)
     else:
-        print(f"\n跳过子目录处理，因为路径 '{target_folder_path}' 不存在。")
+        print(f"\n跳过项目处理，因为路径 '{target_folder_path}' 不存在。")
         print(f"请在 '{__file__}' 文件末尾修改 'target_folder_path' 变量。")

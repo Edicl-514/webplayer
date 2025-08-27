@@ -2,3 +2,4 @@
 /__pycache__
 folder_cache.db
 /venv
+/.vscode
