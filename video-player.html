@@ -58,6 +58,30 @@
             background: linear-gradient(to right, #ff4b2b, #ff416c);
         }
 
+        .external-play-btn {
+            padding: 10px 20px;
+            background: linear-gradient(to right, #41A0FF, #2B73FF); /* 蓝色渐变 */
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(65, 160, 255, 0.4);
+            margin-left: 15px; /* 与关闭按钮的间距 */
+        }
+
+        .external-play-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(65, 160, 255, 0.6);
+            background: linear-gradient(to right, #2B73FF, #41A0FF);
+        }
+
+        .external-play-btn:active {
+            transform: translateY(0);
+        }
+
         .close-btn:active {
             transform: translateY(0);
         }
@@ -303,7 +327,10 @@
                 <!-- Subtitle options will be inserted here -->
             </div>
         </div>
-        <button class="close-btn" onclick="window.close()">关闭窗口</button>
+        <div style="display: flex; align-items: center;">
+            <button class="close-btn" onclick="window.close()">关闭窗口</button>
+            <button id="externalPlayBtn" class="external-play-btn">外部播放</button>
+        </div>
     </div>
     
     <div class="video-container">
@@ -320,6 +347,7 @@
         videoTitle.textContent = title;
 
         const mediaDir = urlParams.get('mediaDir'); // 获取 mediaDir 参数
+        let dp; // 将dp声明移到这里，使其在整个脚本作用域内可访问
 
         // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
         async function setTempMediaDirAndPlay() {
@@ -431,7 +459,6 @@
                 }
                 
                 // 创建DPlayer实例的变量，使其在整个作用域内可访问
-                let dp;
 
                 function bindDPlayerEvents(player) {
                     player.on('error', function () {
@@ -588,6 +615,41 @@
 
         // 页面加载完成后执行
         setTempMediaDirAndPlay();
+
+        // --- 调用外部播放器 ---
+        const externalPlayBtn = document.getElementById('externalPlayBtn');
+
+        function playVideoExternally(videoUrl) {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+
+            if (/android/i.test(userAgent)) {
+                // 对于Android，我们尝试使用Intent来打开视频
+                const intentUrl = 'intent:' + videoUrl + '#Intent;action=android.intent.action.VIEW;type=video/*;end';
+                window.location.href = intentUrl;
+
+            } else if (/win/i.test(userAgent)) {
+                // 对于Windows，我们尝试使用PotPlayer的URL scheme
+                // 注意：这需要用户已经安装了PotPlayer
+                window.location.href = 'potplayer://' + videoUrl;
+
+            } else {
+                // 对于其他操作系统（如iOS, macOS, Linux），我们弹出一个提示
+                // 或者，我们可以直接在新标签页中打开视频URL
+                alert('此功能目前主要支持Windows和Android设备。您的浏览器将尝试直接打开视频链接。');
+                window.open(videoUrl, '_blank');
+            }
+        }
+
+        externalPlayBtn.addEventListener('click', () => {
+            const fullVideoUrl = dp.video.currentSrc;
+            if (fullVideoUrl) {
+                console.log(`Attempting to play externally: ${fullVideoUrl}`);
+                playVideoExternally(fullVideoUrl);
+            } else {
+                alert('无法获取当前视频的URL。');
+                console.error('Could not get video source for external playback.');
+            }
+        });
     </script>
 </body>
 </html>
