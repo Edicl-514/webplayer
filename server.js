@@ -291,6 +291,38 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (pathname === '/api/find-subtitles' && req.method === 'GET') {
+        const videoSrc = parsedUrl.query.src;
+        console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}`);
+
+        if (!videoSrc) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing video source parameter.' }));
+            return;
+        }
+
+        // 使用与媒体文件流相同的逻辑来确定完整路径
+        const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
+        // 先解码videoSrc，避免双重编码问题
+        const decodedVideoSrc = decodeURIComponent(videoSrc);
+        const fullVideoPath = path.join(requestedMediaDir, decodedVideoSrc);
+        console.log(`[Subtitles] Searching for subtitles for video path: ${fullVideoPath}`);
+
+        findSubtitles(fullVideoPath, requestedMediaDir)
+            .then(result => {
+                console.log(`[Subtitles] Subtitles found successfully for ${fullVideoPath}. Result:`, JSON.stringify(result, null, 2));
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(result));
+            })
+            .catch(error => {
+                console.error(`[Subtitles] Error finding subtitles for ${fullVideoPath}:`, error);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Failed to find subtitles.', error: error.message }));
+            });
+        return;
+    }
+
     // 新增：处理 /node_modules 的请求
     if (pathname.startsWith('/node_modules/')) {
         const filePath = path.join(__dirname, pathname);
@@ -309,7 +341,9 @@ const server = http.createServer((req, res) => {
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
     // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
     const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
-    const fullPath = path.join(requestedMediaDir, pathname);
+    // 如果 pathname 以 / 开头，path.join 会把它当作绝对路径，我们需要移除开头的 /
+    const relativePath = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+    const fullPath = path.join(requestedMediaDir, relativePath);
  
     fs.stat(fullPath, (err, stats) => {
         if (err) {
@@ -402,9 +436,58 @@ function getContentType(filePath) {
         '.mkv': 'video/x-matroska',
         '.pdf': 'application/pdf',
         '.doc': 'application/msword',
-        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.srt': 'text/vtt',
+        '.vtt': 'text/vtt',
+        '.ass': 'text/x-ass'
     };
     return mimeTypes[extname] || 'application/octet-stream';
+}
+
+// 新增：处理字幕请求的API
+function findSubtitles(videoPath, mediaDir) {
+    return new Promise((resolve, reject) => {
+        const pythonPath = 'python';
+        const scriptPath = path.join(__dirname, 'find_subtitle.py');
+        const args = [scriptPath, videoPath];
+        
+        // 总是传递 mediaDir 参数给 Python 脚本，确保字幕URL正确构建
+        if (mediaDir) {
+            args.push(mediaDir);
+        }
+        
+        console.log(`[Subtitles] Spawning find_subtitle.py with args: ${args.join(' ')}`);
+
+        const pythonProcess = spawn(pythonPath, args);
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Python script (find_subtitle.py) exited with code ${code}. Stderr: ${stderrData}`));
+                return;
+            }
+            try {
+                const results = JSON.parse(stdoutData);
+                resolve(results);
+            } catch (parseError) {
+                reject(new Error(`Failed to parse subtitle results: ${parseError.message}. Output: ${stdoutData}`));
+            }
+        });
+
+        pythonProcess.on('error', (error) => {
+            reject(new Error(`Failed to start find_subtitle.py process: ${error.message}`));
+        });
+    });
 }
 
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程

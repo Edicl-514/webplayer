@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@fancyapps/ui": "^6.0.25"
+    "@fancyapps/ui": "^6.0.25",
+    "srt-webvtt": "^2.0.0"
   }
 }

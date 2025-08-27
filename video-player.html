@@ -324,8 +324,15 @@
                 
                 // 构建包含mediaDir参数的视频URL
                 const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
-                
-                const dp = new DPlayer({
+
+                // 获取字幕信息
+                // 先解码videoSrc，然后再编码，避免双重编码
+                const decodedVideoSrc = decodeURIComponent(videoSrc);
+                const subtitleResponse = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
+                const subtitleData = await subtitleResponse.json();
+                console.log('Received subtitle data from server:', subtitleData); // 打印从服务器接收到的完整字幕数据
+
+                const dpOptions = {
                     container: document.getElementById('dplayer'),
                     video: {
                         url: fullVideoUrl,
@@ -339,13 +346,42 @@
                     screenshot: true,
                     playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
                     loop: false,
-                });
+                };
+
+                if (subtitleData.success && subtitleData.subtitles.length > 0) {
+                    const subtitleUrl = subtitleData.subtitles[0].url; // 默认使用第一个找到的字幕
+                    // 构建完整的字幕URL，确保包含正确的mediaDir参数
+                    let fullSubtitleUrl;
+                    if (mediaDir) {
+                        // 如果有mediaDir，构建完整URL
+                        const separator = subtitleUrl.includes('?') ? '&' : '?';
+                        fullSubtitleUrl = `${subtitleUrl}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                        console.log('MediaDir is set. Full Subtitle URL with mediaDir:', fullSubtitleUrl);
+                    } else {
+                        // 如果没有mediaDir，字幕文件应该在当前请求的同一个目录结构下
+                        fullSubtitleUrl = subtitleUrl;
+                        console.log('MediaDir is not set. Using Subtitle URL as is:', fullSubtitleUrl);
+                    }
+                    
+                    console.log('Subtitle URL:', fullSubtitleUrl);
+                    dpOptions.subtitle = {
+                        url: fullSubtitleUrl,
+                        type: subtitleData.subtitles[0].lang || 'webvtt', // Use lang from server, fallback to webvtt
+                        fontSize: '40px',
+                        fontfamily: 'Arial, sans-serif',
+                        background:'rgba(0, 0, 0, 0.5)',
+                        bottom: '10%',
+                        color: '#FFFFFF'
+                    };
+                }
+                
+                const dp = new DPlayer(dpOptions);
 
                 // Handle DPlayer errors
                 dp.on('error', function () {
-                    console.error('DPlayer error occurred.');
+                    console.error('DPlayer error occurred:', arguments); // 打印DPlayer错误详情
                     // You can display a custom error message here if needed
-                    videoTitle.textContent = '视频加载失败';
+                    videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
                 });
 
                 dp.on('loadedmetadata', function() {
