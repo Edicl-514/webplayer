@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebPlayer - 媒体浏览器</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css" />
+    <script>
+        (function() {
+            var userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            // Checks for mobile devices
+            if (/android/i.test(userAgent) || ((/iPad|iPhone|iPod/.test(userAgent)) && !window.MSStream)) {
+                document.documentElement.classList.add('mobile');
+            }
+        })();
+    </script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { max-width: 1200px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -166,6 +175,61 @@
         .sidebar-btn:hover, .sidebar-btn.active {
             background-color: #007bff;
             color: white;
+        }
+
+        /* Mobile Layout Overrides */
+        .mobile body {
+            margin: 0;
+            -webkit-text-size-adjust: 100%; /* Prevent font scaling in landscape */
+        }
+        .mobile .container {
+            max-width: 100%;
+            margin: 0;
+            padding: 10px;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        .mobile h1 {
+            font-size: 1.5em;
+            margin-top: 0;
+        }
+        .mobile .search-container {
+            padding: 10px;
+        }
+        .mobile #searchForm {
+            flex-wrap: wrap;
+        }
+        .mobile #searchInput {
+            flex-basis: 100%; /* Make input take full width */
+            margin-bottom: 10px;
+        }
+        .mobile #searchForm button {
+            flex-grow: 1; /* Make buttons share remaining space */
+        }
+        .mobile #searchOptions label {
+            display: block;
+            margin-right: 0;
+            margin-bottom: 8px;
+        }
+        .mobile .path-navigation {
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .mobile .path-navigation .sorting-controls {
+            margin-left: 0;
+            width: 100%;
+            gap: 5px;
+            justify-content: space-around;
+        }
+        .mobile #fileGrid {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+        .mobile .grid-item {
+            margin: 0;
+        }
+        .mobile .thumbnail-container {
+            height: 120px;
         }
     </style>
 </head>
