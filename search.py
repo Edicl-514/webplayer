@@ -174,7 +174,7 @@ class EverythingSDK:
             regex (bool): 是否使用正则表达式
             
         Returns:
-            tuple: (结果列表, 文件数量, 文件夹数量)
+            tuple: (结果列表, 文件数量, 文件夹数量, 总结果数)
         """
         # 重置搜索状态
         self.reset()
@@ -255,7 +255,7 @@ class EverythingSDK:
                 print(f"处理结果 {i} 时出错: {e}")
                 continue
         
-        return results, num_files, num_folders
+        return results, num_files, num_folders, num_results
 
 def format_file_size(size_bytes):
     """格式化文件大小显示"""
@@ -329,7 +329,7 @@ def main():
             print(f"\n搜索 '{query}' 中...")
             
             # 执行搜索
-            results, num_files, num_folders = everything.search(
+            results, num_files, num_folders, num_results = everything.search(
                 query, max_results, match_case, match_whole_word, regex
             )
             
@@ -413,7 +413,7 @@ def search_cli(query, max_results=100, match_case=False, match_whole_word=False,
                 query = f"{query} {dir_part}"
             
         # 执行搜索
-        results, num_files, num_folders = everything.search(
+        results, num_files, num_folders, num_results = everything.search(
             query, max_results, match_case, match_whole_word, regex
         )
         
@@ -449,7 +449,7 @@ def search_cli(query, max_results=100, match_case=False, match_whole_word=False,
             'results': results,
             'total_files': num_files,
             'total_folders': num_folders,
-            'total_results': len(results)
+            'total_results': num_results
         }
         
     except Exception as e:

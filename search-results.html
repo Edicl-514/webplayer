@@ -271,8 +271,14 @@
            searchResults = data.results; // 保存结果
            const results = data.results;
            const totalResults = data.total_results;
-           const totalFiles = data.total_files;
-           const totalFolders = data.total_folders;
+           let totalFiles = data.total_files;
+           let totalFolders = data.total_folders;
+
+           // 如果服务器返回的文件/文件夹数量为0，但实际上有结果，则在本地重新统计
+           if (results.length > 0 && (totalFiles === 0 && totalFolders === 0)) {
+               totalFolders = results.filter(r => r.is_folder).length;
+               totalFiles = results.length - totalFolders;
+           }
            
            // 显示结果摘要
            document.getElementById('resultsSummary').innerHTML = `
