@@ -136,7 +136,7 @@
         }
         
         .hidden {
-            display: none;
+            display: none !important;
         }
 
         /* 侧边栏样式 */
@@ -201,7 +201,7 @@
         }
         .mobile #searchInput {
             flex-basis: 100%; /* Make input take full width */
-            margin-bottom: 10px;
+            margin-bottom: 0px;
         }
         .mobile #searchForm button {
             flex-grow: 1; /* Make buttons share remaining space */
@@ -226,7 +226,7 @@
             gap: 10px;
         }
         .mobile .grid-item {
-            margin: 0;
+            margin-top: 10px;
         }
         .mobile .thumbnail-container {
             height: 120px;

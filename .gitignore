@@ -3,3 +3,8 @@
 folder_cache.db
 /venv
 /.vscode
+/hls
+/node_modules
+/temp
+/test
+temp.txt
