@@ -15,13 +15,147 @@
         })();
     </script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 1200px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #0056b3; }
-        .path-navigation { margin-bottom: 20px; padding: 10px; background-color: #e9ecef; border-radius: 5px; display: flex; align-items: center; }
-        .path-navigation button { margin-right: 10px; padding: 8px 15px; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; font-size: 1em; }
-        .path-navigation button:hover { background-color: #0056b3; }
-        .path-navigation span { font-size: 1.1em; color: #555; }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #1e1e1e; color: #e0e0e0; }
+        .container { max-width: 1200px; margin: auto; background: #2d2d30; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        h1 { text-align: center; color: #4d9deb; }
+        .path-navigation { margin-bottom: 20px; padding: 10px; background-color: #3a3a3d; border-radius: 5px; display: flex; align-items: center; }
+        .path-navigation span { font-size: 1.1em; color: #a0a0a0; }
+        
+        #backButton, #homeButton {
+            margin-right: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        #backButton:hover, #homeButton:hover {
+            background-color: #0066cc;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        
+        #backButton:active, #homeButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
+        /* 搜索区域样式 */
+        .search-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #3a3a3d;
+            border-radius: 5px;
+        }
+
+        #searchForm {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #searchInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 1em;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+
+        #searchButton {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease,transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        #searchButton:hover {
+            background-color: #0066cc;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        #searchButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #searchHelpButton {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            background:linear-gradient(to right, #cc3c22, #cc3457);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        #searchHelpButton:hover {
+            transform: scale(1.05);
+            background-color: #992d1a;
+            box-shadow: 0 6px 12px rgba(204, 60, 34, 0.6);
+        }
+        #searchHelpButton:active {
+            transform: scale(0.8);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #searchOptions {
+            margin-top: 10px;
+            display: none;
+        }
+
+        .search-option-label {
+            margin-right: 15px;
+            color: #e0e0e0;
+        }
+
+        #maxResults {
+            width: 60px;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+            border: 1px solid #555;
+        }
+        
+        /* 排序控件样式 */
+        .sorting-controls {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label[for="sortBy"] {
+            font-weight: bold;
+        }
+
+        #sortBy {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+
+        #sortOrder {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+
+        label[for="mixSort"] {
+            margin-left: 15px;
+        }
         
         /* 网格布局样式 */
         #fileGrid {
@@ -33,7 +167,7 @@
         }
         
         .grid-item {
-            background: #e2e6ea;
+            background: #3a3d41;
             border-radius: 12px;
             overflow: hidden;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -45,7 +179,7 @@
         
         .grid-item:hover {
             transform: translateY(-5px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5);
         }
         
         .thumbnail-container {
@@ -55,7 +189,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #d1d8df;
+            background-color: #45494f;
             overflow: hidden;
         }
         
@@ -67,7 +201,7 @@
         
         .icon {
             font-size: 3em;
-            color: #6c757d;
+            color: #a0a0a0;
         }
         
         .file-info {
@@ -86,7 +220,7 @@
         
         .file-size {
             font-size: 0.85em;
-            color: #6c757d;
+            color: #a0a0a0;
             margin-bottom: 10px;
         }
         
@@ -105,21 +239,35 @@
         }
         
         .play-btn {
-            background-color: #28a745;
+            background:linear-gradient(to right, #28a745, #218838);
+            transition: all 0.3s ease;
             color: white;
         }
         
         .play-btn:hover {
-            background-color: #218838;
+            background-color: #18662a;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(40, 167, 69, 0.6);
+        }
+        .play-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
         }
         
         .download-btn {
-            background-color: #17a2b8;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            transition: all 0.3s ease;
             color: white;
         }
         
         .download-btn:hover {
-            background-color: #138496;
+            background-color: #0f6d7a;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        .download-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
         }
         
         #videoPlayerContainer {
@@ -145,7 +293,7 @@
             top: 50%;
             right: 10px;
             transform: translateY(-50%);
-            background-color: rgba(0, 0, 0, 0.1);
+            background-color: rgba(60, 60, 60, 0.8);
             border-radius: 10px;
             padding: 10px 5px;
             z-index: 1000;
@@ -163,7 +311,7 @@
         .sidebar-btn {
             background: none;
             border: none;
-            color: #333;
+            color: #e0e0e0;
             cursor: pointer;
             padding: 2px;
             font-size: 10px;
@@ -173,7 +321,7 @@
         }
 
         .sidebar-btn:hover, .sidebar-btn.active {
-            background-color: #007bff;
+            background-color: #0066cc;
             color: white;
         }
 
@@ -237,35 +385,35 @@
     <div class="container">
         <h1>WebPlayer - 媒体浏览器</h1>
         <!-- 搜索表单 -->
-        <div class="search-container" style="margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px;">
-            <form id="searchForm" style="display: flex; gap: 10px; align-items: center;">
-                <input type="text" id="searchInput" placeholder="输入搜索关键词..." style="flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em;">
-                <button type="submit" id="searchButton" style="padding: 10px 20px; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; font-size: 1em;">搜索</button>
-                <button type="button" id="searchHelpButton" style="padding: 10px 15px; border: none; border-radius: 4px; background-color: #6c757d; color: white; cursor: pointer; font-size: 1em;">?</button>
+        <div class="search-container">
+            <form id="searchForm">
+                <input type="text" id="searchInput" placeholder="输入搜索关键词...">
+                <button type="submit" id="searchButton">搜索</button>
+                <button type="button" id="searchHelpButton">?</button>
             </form>
-            <div id="searchOptions" style="margin-top: 10px; display: none;">
-                <label style="margin-right: 15px;"><input type="checkbox" id="matchCase"> 区分大小写</label>
-                <label style="margin-right: 15px;"><input type="checkbox" id="matchWholeWord"> 全词匹配</label>
-                <label style="margin-right: 15px;"><input type="checkbox" id="useRegex"> 正则表达式</label>
-                <label>最大结果数: <input type="number" id="maxResults" value="500" min="1" max="1000" style="width: 60px;"></label>
+            <div id="searchOptions">
+                <label class="search-option-label"><input type="checkbox" id="matchCase"> 区分大小写</label>
+                <label class="search-option-label"><input type="checkbox" id="matchWholeWord"> 全词匹配</label>
+                <label class="search-option-label"><input type="checkbox" id="useRegex"> 正则表达式</label>
+                <label>最大结果数: <input type="number" id="maxResults" value="500" min="1" max="1000"></label>
             </div>
         </div>
         <div class="path-navigation">
-            <button id="backButton" class="hidden">返回上一级</button>
-            <button id="homeButton" class="hidden">返回主目录</button>
+            <button id="backButton">返回上一级</button>
+            <button id="homeButton">返回主目录</button>
             <span id="currentPath">/</span>
-            <div class="sorting-controls" style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
-                <label for="sortBy" style="font-weight: bold;">排序方式:</label>
-                <select id="sortBy" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+            <div class="sorting-controls">
+                <label for="sortBy">排序方式:</label>
+                <select id="sortBy">
                     <option value="name">文件名</option>
                     <option value="type">文件类型</option>
                     <option value="time">修改时间</option>
                 </select>
-                <select id="sortOrder" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                <select id="sortOrder">
                     <option value="asc">升序</option>
                     <option value="desc">降序</option>
                 </select>
-                <label for="mixSort" style="margin-left: 15px;">
+                <label for="mixSort">
                     <input type="checkbox" id="mixSort"> 混合排序
                 </label>
             </div>
@@ -951,7 +1099,8 @@
 
         // 切换搜索选项显示/隐藏
         searchHelpButton.onclick = () => {
-            searchOptions.style.display = searchOptions.style.display === 'none' ? 'block' : 'none';
+            const computedStyle = window.getComputedStyle(searchOptions);
+            searchOptions.style.display = computedStyle.display === 'none' ? 'block' : 'none';
         };
 
         // 处理搜索表单提交

@@ -5,41 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>搜索结果 - WebPlayer</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background-color: #f4f4f4; 
-            color: #333; 
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
         }
-        .container { 
-            max-width: 1200px; 
-            margin: auto; 
-            background: #fff; 
-            padding: 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        .container {
+            max-width: 1200px;
+            margin: auto;
+            background: #2d2d30;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
-        h1 { 
-            text-align: center; 
-            color: #0056b3; 
+        h1 {
+            text-align: center;
+            color: #4d9deb;
         }
         .search-info {
             margin-bottom: 20px;
             padding: 15px;
-            background-color: #e9ecef;
+            background-color: #3a3a3d;
             border-radius: 5px;
         }
         .search-options {
             margin-top: 10px;
             font-size: 0.9em;
-            color: #6c757d;
+            color: #a0a0a0;
         }
         .results-summary {
             margin-bottom: 20px;
             padding: 10px;
-            background-color: #d1ecf1;
+            background-color: #205060;
             border-radius: 5px;
-            color: #0c5460;
+            color: #a0d0e0;
         }
         .results-grid {
             display: grid;
@@ -47,14 +47,14 @@
             gap: 20px;
         }
         .result-item {
-            background: #e2e6ea;
+            background: #3a3d41;
             border-radius: 8px;
             padding: 15px;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
         .result-item:hover {
             transform: translateY(-3px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5);
         }
         .thumbnail-container {
             position: relative;
@@ -63,7 +63,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #d1d8df;
+            background-color: #45494f;
             overflow: hidden;
         }
         .thumbnail {
@@ -73,25 +73,25 @@
         }
         .icon {
             font-size: 3em;
-            color: #6c757d;
+            color: #a0a0a0;
         }
         .result-name {
             font-weight: bold;
             font-size: 1.1em;
-            margin-bottom: 8px;
+            margin-bottom: 14px;
             word-break: break-all;
         }
         .result-path {
-            font-size: 0.9em;
-            color: #6c757d;
-            margin-bottom: 10px;
+            font-size: 1.2em;
+            color: #a0a0a0;
+            margin-top: 12px;
             word-break: break-all;
         }
         .result-meta {
             display: flex;
             justify-content: space-between;
             font-size: 0.85em;
-            color: #6c757d;
+            color: #a0a0a0;
         }
         .result-type {
             padding: 2px 6px;
@@ -99,38 +99,81 @@
             font-weight: bold;
         }
         .file-type {
-            background-color: #d1ecf1;
-            color: #0c5460;
+            background-color: #205060;
+            color: #a0d0e0;
         }
         .folder-type {
-            background-color: #f8d7da;
-            color: #721c24;
+            background-color: #602020;
+            color: #f0a0a0;
         }
         .loading {
             text-align: center;
             padding: 40px;
             font-size: 1.2em;
-            color: #6c757d;
+            color: #a0a0a0;
         }
         .error {
             padding: 20px;
-            background-color: #f8d7da;
+            background-color: #602020;
             border-radius: 5px;
-            color: #721c24;
+            color: #f0a0a0;
             margin-bottom: 20px;
         }
         .back-button {
             padding: 10px 20px;
-            background-color: #007bff;
+            background: linear-gradient(to right, #cc3c22, #cc3457);
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
             font-size: 1em;
             margin-bottom: 20px;
+            transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
         }
         .back-button:hover {
-            background-color: #0056b3;
+            background-color: #0066cc;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(204, 60, 34, 0.6);
+        }
+        .back-button:active {
+            transform: scale(0.85);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        .play-btn {
+            padding: 10px 20px;
+            margin-left: 0px;
+            margin-right: 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color:white;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            transition: all 0.3s ease;
+        }
+        .play-btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        .play-btn:active {
+            transform: scale(0.9);
+        }
+        .download-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color: white;
+            background: linear-gradient(to right, #1e7e34, #18662a);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .download-btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(30, 126, 52, 0.6);
+        }
+        .download-btn:active {
+            transform: scale(0.9);
         }
     </style>
     <!-- 引入 Fancybox 的 CSS -->
