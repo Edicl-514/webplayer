@@ -19,7 +19,7 @@
         .container { max-width: 1200px; margin: auto; background: #2d2d30; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         h1 { text-align: center; color: #4d9deb; }
         .path-navigation { margin-bottom: 20px; padding: 10px; background-color: #3a3a3d; border-radius: 5px; display: flex; align-items: center; }
-        .path-navigation span { font-size: 1.1em; color: #a0a0a0; }
+        .path-navigation span { font-size: 1.1em; color: #a0a0a0; max-width: calc(100% - 200px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         
         #backButton, #homeButton {
             margin-right: 10px;
@@ -140,7 +140,7 @@
         #sortBy {
             padding: 5px;
             border-radius: 4px;
-            border: 1px solid #555;
+            border: 3px solid #555;
             background-color: #3a3a3d;
             color: #e0e0e0;
         }
@@ -148,15 +148,79 @@
         #sortOrder {
             padding: 5px;
             border-radius: 4px;
-            border: 1px solid #555;
+            border: 3px solid #555;
             background-color: #3a3a3d;
             color: #e0e0e0;
         }
+        
 
         label[for="mixSort"] {
-            margin-left: 15px;
+            margin-left: 0px;
         }
         
+        /* 排序下拉菜单样式 */
+        .sort-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .sort-menu-button {
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+            padding: 5px 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1.2em;
+            line-height: 1;
+            transition: all 0.3s ease;
+        }
+
+        .sort-menu-button:hover {
+            transform: scale(1.1);
+            background-color: #4a4a4d;
+        }
+        .sort-menu-button:active {
+            transform: scale(0.9);
+            background-color: #2a2a2d;
+        }
+
+        .sort-dropdown-content {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background-color: #3a3a3d;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 10px;
+            z-index: 1000;
+            min-width: 200px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+
+        .sort-option {
+            margin-bottom: 10px;
+        }
+
+        .sort-option:last-child {
+            margin-bottom: 0;
+        }
+
+        .sort-option label {
+            display: block;
+            margin-bottom: 5px;
+            color: #e0e0e0;
+        }
+
+        .sort-option select {
+            width: 100%;
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #2d2d30;
+            color: #e0e0e0;
+        }
+
         /* 网格布局样式 */
         #fileGrid {
             display: grid;
@@ -360,14 +424,75 @@
             margin-bottom: 8px;
         }
         .mobile .path-navigation {
-            flex-wrap: wrap;
-            gap: 10px;
+            flex-wrap: nowrap;
+            gap: 5px;
+        }
+        .mobile .path-navigation span {
+            max-width: calc(100% - 200px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .mobile .path-navigation .sorting-controls {
-            margin-left: 0;
-            width: 100%;
-            gap: 5px;
-            justify-content: space-around;
+            margin-left: auto;
+            width: auto;
+        }
+        
+        .mobile #backButton,
+        .mobile #homeButton {
+            padding: 0;
+            font-size: 0; /* Hide the text */
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .mobile #backButton::before,
+        .mobile #homeButton::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px; /* Icon size */
+            color: white;
+            line-height: 1;
+        }
+        
+        .mobile #backButton::before {
+            content: '↩'; /* Back icon */
+        }
+        
+        .mobile #homeButton::before {
+            content: '⌂'; /* Home icon */
+        }
+
+        /* 移动端排序下拉菜单调整 */
+        .mobile .sort-dropdown-content {
+            min-width: 150px;
+            right: 0;
+            left: auto;
+        }
+        
+        .mobile .sort-option label {
+            font-size: 0.9em;
+        }
+        
+        .mobile .sort-option select {
+            font-size: 0.9em;
+            padding: 3px;
+        }
+        
+        /* 移动端排序图标调整 */
+        .mobile .sort-menu-button {
+            padding: 5px;
+            font-size: 1.1em;
+            min-width: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .mobile #fileGrid {
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -403,19 +528,32 @@
             <button id="homeButton">返回主目录</button>
             <span id="currentPath">/</span>
             <div class="sorting-controls">
-                <label for="sortBy">排序方式:</label>
-                <select id="sortBy">
-                    <option value="name">文件名</option>
-                    <option value="type">文件类型</option>
-                    <option value="time">修改时间</option>
-                </select>
-                <select id="sortOrder">
-                    <option value="asc">升序</option>
-                    <option value="desc">降序</option>
-                </select>
-                <label for="mixSort">
-                    <input type="checkbox" id="mixSort"> 混合排序
-                </label>
+                <!-- 排序设置下拉菜单 -->
+                <div class="sort-dropdown">
+                    <button id="sortMenuButton" class="sort-menu-button">⋮</button>
+                    <div id="sortDropdown" class="sort-dropdown-content hidden">
+                        <div class="sort-option">
+                            <label for="sortBy">排序方式:</label>
+                            <select id="sortBy">
+                                <option value="name">文件名</option>
+                                <option value="type">文件类型</option>
+                                <option value="time">修改时间</option>
+                            </select>
+                        </div>
+                        <div class="sort-option">
+                            <label for="sortOrder">排序顺序:</label>
+                            <select id="sortOrder">
+                                <option value="asc">升序</option>
+                                <option value="desc">降序</option>
+                            </select>
+                        </div>
+                        <div class="sort-option">
+                            <label for="mixSort">
+                                <input type="checkbox" id="mixSort"> 混合排序
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div id="rootDirsGrid" class="hidden">
@@ -479,6 +617,23 @@
         sortBy.addEventListener('change', sortAndDisplayFiles);
         sortOrder.addEventListener('change', sortAndDisplayFiles);
         document.getElementById('mixSort').addEventListener('change', sortAndDisplayFiles);
+        
+        // 排序下拉菜单控制
+        const sortMenuButton = document.getElementById('sortMenuButton');
+        const sortDropdown = document.getElementById('sortDropdown');
+        
+        // 点击按钮切换下拉菜单显示/隐藏
+        sortMenuButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            sortDropdown.classList.toggle('hidden');
+        });
+        
+        // 点击页面其他地方隐藏下拉菜单
+        document.addEventListener('click', function(e) {
+            if (!sortMenuButton.contains(e.target) && !sortDropdown.contains(e.target)) {
+                sortDropdown.classList.add('hidden');
+            }
+        });
  
         // 获取根目录媒体目录列表并展示
         async function fetchRootDirs() {
