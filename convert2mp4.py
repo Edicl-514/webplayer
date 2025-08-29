@@ -56,20 +56,20 @@ def convert_video_to_mp4_nvenc(input_path):
     """
     if not os.path.exists(input_path):
         print(f"错误：文件不存在 -> {input_path}")
-        return
+        sys.exit(1)
 
     # 获取源视频信息
     source_info = get_video_info(input_path)
     if not source_info:
         print("无法获取源视频信息，无法继续。")
-        return
+        sys.exit(1)
 
     # 校验必要字段
     required_fields = ['duration', 'width', 'height', 'avg_frame_rate']
     missing_fields = [field for field in required_fields if not source_info.get(field)]
     if missing_fields:
         print(f"缺少必要的视频元数据字段: {missing_fields}，无法继续。")
-        return
+        sys.exit(1)
     
     bit_rate = source_info.get('bit_rate')
     if not bit_rate or str(bit_rate).lower() in ('n/a', 'none'):

@@ -101,6 +101,30 @@
             position: relative;
         }
 
+        .download-btn {
+            padding: 10px 20px;
+            background: linear-gradient(to right, #1D976C, #93F9B9); /* 绿色渐变 */
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(29, 151, 108, 0.4);
+            margin-left: 15px;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(29, 151, 108, 0.6);
+            background: linear-gradient(to right, #93F9B9, #1D976C);
+        }
+
+        .download-btn:active {
+            transform: translateY(0);
+        }
+
         video {
             width: 100%;
             height: 100%;
@@ -316,6 +340,69 @@
         .show {
             display: block;
         }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            background-color: #2c3e50;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        #startConversionBtn, #cancelConversionBtn {
+            padding: 10px 20px;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            margin: 5px;
+        }
+
+        #startConversionBtn:hover, #cancelConversionBtn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5);
+        }
+        #startConversionBtn:active, #cancelConversionBtn:active {
+            transform: translateY(0);
+        }
+
+        #startConversionBtn {
+            background: linear-gradient(to right, #41A0FF, #2B73FF);
+        }
+
+        #cancelConversionBtn {
+            background: linear-gradient(to right, #ff4b2b, #ff416c);
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 5px;
+        }
+        .progress-bar-inner {
+            width: 0%;
+            height: 30px;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -330,11 +417,32 @@
         <div style="display: flex; align-items: center;">
             <button class="close-btn" onclick="window.close()">关闭窗口</button>
             <button id="externalPlayBtn" class="external-play-btn">外部播放</button>
+            <button id="downloadBtn" class="download-btn">下载视频</button>
         </div>
     </div>
     
     <div class="video-container">
         <div id="dplayer"></div>
+    </div>
+
+    <div id="conversionModal" class="modal">
+        <div class="modal-content">
+            <h2 id="modalTitle">需要转码</h2>
+            <p id="modalText">此视频格式 (AVI) 可能无法在浏览器中直接播放。是否要将其转换为 MP4？</p>
+            <div id="progressContainer" style="display:none;">
+                <div class="progress-bar-container">
+                    <div id="progressBar" class="progress-bar-inner">0%</div>
+                </div>
+                <p id="progressInfo"></p>
+            </div>
+            <div id="modalActions" style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
+                <button id="startConversionBtn">开始转码</button>
+                <button id="cancelConversionBtn">取消</button>
+            </div>
+            <div style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
+                <button id="modalDownloadBtn" class="download-btn">下载</button>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
@@ -350,6 +458,31 @@
         let dp; // 将dp声明移到这里，使其在整个脚本作用域内可访问
 
         // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
+        function buildVideoUrl(src, mediaDir) {
+            if (!mediaDir) return src;
+            
+            try {
+                // 注意：src可能已经包含了查询参数，我们需要避免双重编码
+                // 先尝试解析src，如果它已经是完整的URL则直接使用，否则基于当前origin构建
+                let url;
+                try {
+                    url = new URL(src);
+                } catch (urlError) {
+                    // 如果src不是完整的URL，则基于当前origin构建
+                    url = new URL(src, window.location.origin);
+                }
+                
+                // 设置mediaDir参数，searchParams.set会自动处理编码
+                url.searchParams.set('mediaDir', mediaDir);
+                return url.toString();
+            } catch (e) {
+                // 如果src不是有效的URL，则直接在后面添加查询参数
+                const separator = src.includes('?') ? '&' : '?';
+                // 确保mediaDir被正确编码
+                return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+            }
+        }
+        
         async function setTempMediaDirAndPlay() {
             if (mediaDir) {
                 try {
@@ -376,32 +509,6 @@
             }
 
             if (videoSrc) {
-                // 构建包含mediaDir参数的完整视频URL
-                function buildVideoUrl(src, mediaDir) {
-                    if (!mediaDir) return src;
-                    
-                    try {
-                        // 注意：src可能已经包含了查询参数，我们需要避免双重编码
-                        // 先尝试解析src，如果它已经是完整的URL则直接使用，否则基于当前origin构建
-                        let url;
-                        try {
-                            url = new URL(src);
-                        } catch (urlError) {
-                            // 如果src不是完整的URL，则基于当前origin构建
-                            url = new URL(src, window.location.origin);
-                        }
-                        
-                        // 设置mediaDir参数，searchParams.set会自动处理编码
-                        url.searchParams.set('mediaDir', mediaDir);
-                        return url.toString();
-                    } catch (e) {
-                        // 如果src不是有效的URL，则直接在后面添加查询参数
-                        const separator = src.includes('?') ? '&' : '?';
-                        // 确保mediaDir被正确编码
-                        return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-                    }
-                }
-                
                 // 构建包含mediaDir参数的视频URL
                 const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
 
@@ -614,10 +721,77 @@
         }
 
         // 页面加载完成后执行
-        setTempMediaDirAndPlay();
+        if (videoSrc && videoSrc.toLowerCase().endsWith('.avi')) {
+            const modal = document.getElementById('conversionModal');
+            modal.style.display = 'block';
+
+            const startBtn = document.getElementById('startConversionBtn');
+            const cancelBtn = document.getElementById('cancelConversionBtn');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalText = document.getElementById('modalText');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressInfo = document.getElementById('progressInfo');
+
+            const ws = new WebSocket(`ws://${window.location.host}`);
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'progress') {
+                    progressBar.style.width = data.progress + '%';
+                    progressBar.textContent = data.progress.toFixed(2) + '%';
+                    progressInfo.textContent = `时间: ${data.time}, 速度: ${data.speed}`;
+                } else if (data.type === 'complete') {
+                    modalTitle.textContent = '转码完成!';
+                    modalText.textContent = '页面即将刷新...';
+                    setTimeout(() => {
+                        const newUrl = new URL(window.location.href);
+                        newUrl.searchParams.set('src', data.newPath);
+                        window.location.href = newUrl.href;
+                    }, 2000);
+                } else if (data.type === 'error') {
+                    modalTitle.textContent = '转码失败';
+                    modalText.textContent = data.message;
+                }
+            };
+
+            startBtn.onclick = async () => {
+                document.getElementById('modalActions').style.display = 'none';
+                document.getElementById('modalDownloadBtn').style.display = 'none';
+                modalText.style.display = 'none';
+                progressContainer.style.display = 'block';
+                modalTitle.textContent = '正在转码...';
+
+                await fetch('/api/convert-video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mediaDir: mediaDir,
+                        relativePath: decodeURIComponent(videoSrc)
+                    })
+                });
+            };
+
+            cancelBtn.onclick = () => {
+                modal.style.display = 'none';
+                setTempMediaDirAndPlay();
+            };
+            
+            const modalDownloadBtn = document.getElementById('modalDownloadBtn');
+
+            modalDownloadBtn.onclick = () => {
+                const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
+                console.log(`Attempting to download from modal: ${fullVideoUrl}`);
+                window.open(fullVideoUrl, '_blank');
+            };
+
+        } else {
+            setTempMediaDirAndPlay();
+        }
 
         // --- 调用外部播放器 ---
         const externalPlayBtn = document.getElementById('externalPlayBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
 
         function playVideoExternally(videoUrl) {
             const userAgent = navigator.userAgent || navigator.vendor || window.opera;
@@ -648,6 +822,17 @@
             } else {
                 alert('无法获取当前视频的URL。');
                 console.error('Could not get video source for external playback.');
+            }
+        });
+        
+        downloadBtn.addEventListener('click', () => {
+            const fullVideoUrl = dp.video.currentSrc;
+            if (fullVideoUrl) {
+                console.log(`Attempting to download: ${fullVideoUrl}`);
+                window.open(fullVideoUrl, '_blank');
+            } else {
+                alert('无法获取当前视频的URL。');
+                console.error('Could not get video source for download.');
             }
         });
     </script>

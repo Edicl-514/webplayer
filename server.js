@@ -4,6 +4,7 @@ const path = require('path');
 const url = require('url');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const WebSocket = require('ws');
 
 const PORT = 3000;
 // 定义媒体目录及其别名
@@ -376,6 +377,85 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (pathname === '/api/convert-video' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const { mediaDir, relativePath } = JSON.parse(body);
+                if (!mediaDir || !relativePath) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Missing mediaDir or relativePath' }));
+                    return;
+                }
+                
+                // 在服务器端安全地构建路径
+                const fullVideoPath = path.join(mediaDir, relativePath);
+
+                const pythonProcess = spawn('python', ['-X', 'utf8', 'convert2mp4.py', fullVideoPath], {
+                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                });
+                let stdoutBuffer = '';
+
+                pythonProcess.stdout.on('data', (data) => {
+                    stdoutBuffer += data.toString();
+                    // Python脚本使用\r来刷新行，所以我们需要按行分割
+                    const lines = stdoutBuffer.split('\r');
+                    if (lines.length > 1) {
+                        // 处理除了最后一行之外的所有行
+                        for (let i = 0; i < lines.length - 1; i++) {
+                            const line = lines[i];
+                            const progressMatch = line.match(/进度: ([\d.]+)% \| 当前时间: ([\d:.]+) \| 速度: ([\d.]+x)/);
+                            if (progressMatch) {
+                                broadcast({
+                                    type: 'progress',
+                                    progress: parseFloat(progressMatch[1]),
+                                    time: progressMatch[2],
+                                    speed: progressMatch[3]
+                                });
+                            }
+                        }
+                        // 保留最后不完整的一行
+                        stdoutBuffer = lines[lines.length - 1];
+                    }
+                    console.log(`stdout: ${data}`);
+                });
+
+                pythonProcess.stderr.on('data', (data) => {
+                    console.error(`stderr: ${data}`);
+                    broadcast({
+                        type: 'error',
+                        message: data.toString()
+                    });
+                });
+
+                pythonProcess.on('close', (code) => {
+                    if (code === 0) {
+                        broadcast({
+                            type: 'complete',
+                            newPath: relativePath.replace(/\.avi$/i, '.mp4')
+                        });
+                    } else {
+                        broadcast({
+                            type: 'error',
+                            message: `转码失败，退出码: ${code}`
+                        });
+                    }
+                });
+
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true, message: 'Conversion started' }));
+
+            } catch (e) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+            }
+        });
+        return;
+    }
+
     // 新增：处理 /node_modules 的请求
     if (pathname.startsWith('/node_modules/')) {
         const filePath = path.join(__dirname, pathname);
@@ -468,6 +548,23 @@ const server = http.createServer((req, res) => {
         }
     });
 });
+
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', ws => {
+    console.log('Client connected');
+    ws.on('close', () => {
+        console.log('Client disconnected');
+    });
+});
+
+function broadcast(data) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+        }
+    });
+}
 
 function getContentType(filePath) {
     const extname = String(path.extname(filePath)).toLowerCase();
