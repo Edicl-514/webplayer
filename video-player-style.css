@@ -1,0 +1,393 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&display=swap');
+
+:root {
+    --primary-bg: #1a1a1a;
+    --secondary-bg: #2c2c2c;
+    --primary-text: #e0e0e0;
+    --secondary-text: #a0a0a0;
+    --accent-color: #00bcd4;
+    --accent-hover: #00e5ff;
+    --shadow-color: rgba(0, 0, 0, 0.5);
+    --accent-text-color: #1a1a1a;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Noto Sans SC', sans-serif;
+    background: linear-gradient(145deg, #0a1929, #1a1a2e);
+    color: var(--primary-text);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    position: relative;
+}
+
+.player-bg {
+    position: fixed;
+    top: -20px;
+    left: -20px;
+    right: -20px;
+    bottom: -20px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(30px) brightness(0.3);
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    z-index: -1;
+}
+
+.player-container {
+    position: relative;
+    width: 90vw;
+    max-width: 1250px;
+    max-height: 90vh;
+    aspect-ratio: 16/9;
+    background-color: rgba(15, 15, 15, 0.65);
+    z-index: 10;
+    border-radius: 20px;
+    border: 1px solid rgba(80, 80, 80, 0.15);
+    box-shadow:
+        0 20px 50px var(--shadow-color),
+        inset 0 0 1px rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    display: flex;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    backdrop-filter: blur(10px);
+}
+
+.player-main {
+    position: relative;
+    z-index: 2;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    width: 100%; /* Changed from 75% for standalone player */
+    height: 100%;
+    gap: 20px;
+    box-shadow: 8px 0 16px rgba(0, 0, 0, 0.2);
+}
+
+.control-btn {
+    background: none;
+    border: none;
+    color: var(--primary-text);
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 10px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.control-btn:hover {
+    color: var(--accent-color);
+}
+.extra-btn {
+    font-size: 16px;
+    position: relative;
+}
+
+/* --- Video Player Styles --- */
+
+.player-container.video-mode {
+    aspect-ratio: auto;
+    width: 90vw;
+    height: 90vh;
+    max-width: 1600px;
+}
+
+.player-main.video-mode {
+    width: 100% !important;
+    box-shadow: none;
+}
+
+.video-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 15px;
+}
+
+.video-title {
+    font-size: 24px;
+    font-weight: 500;
+}
+
+.video-controls-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.video-content-area {
+    flex-grow: 1;
+    width: 100%;
+    height: calc(100% - 80px); /* Adjust based on header height */
+    background-color: #000;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#dplayer {
+    width: 100%;
+    height: 100%;
+}
+
+/* Subtitle Dropdown */
+.subtitle-dropdown {
+    position: relative;
+}
+
+.subtitle-dropdown.no-subtitles {
+    display: none;
+}
+
+.subtitle-dropdown-content {
+    position: absolute;
+    top: 120%; /* Changed from bottom */
+    right: 0;
+    transform: none;
+    left: auto;
+    background: var(--secondary-bg);
+    border-radius: 8px;
+    box-shadow: 0 4px 10px var(--shadow-color);
+    overflow-y: auto;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    min-width: 150px;
+    z-index: 100;
+    max-height: 200px; /* Limit height and add scroll */
+}
+
+/* Custom Scrollbar for Subtitle Dropdown */
+.subtitle-dropdown-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.subtitle-dropdown-content::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+}
+
+.subtitle-dropdown-content::-webkit-scrollbar-thumb {
+    background: var(--accent-color);
+    border-radius: 4px;
+}
+
+.subtitle-dropdown-content::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover);
+}
+
+.subtitle-dropdown-content.show {
+    opacity: 1;
+    visibility: visible;
+    top: 110%; /* Changed from bottom */
+}
+
+.subtitle-dropdown-content a {
+    display: block;
+    padding: 8px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--primary-text);
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.subtitle-dropdown-content a:hover {
+    background-color: var(--accent-color);
+    color: var(--primary-bg);
+}
+
+
+/* DPlayer Style Overrides */
+.dplayer-controller .dplayer-bar-wrap .dplayer-bar {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.dplayer-controller .dplayer-bar-wrap .dplayer-loaded {
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.dplayer-controller .dplayer-bar-wrap .dplayer-played {
+    background: var(--accent-color);
+}
+
+.dplayer-controller .dplayer-thumb {
+    background-color: var(--accent-color) !important;
+    box-shadow: 0 0 10px var(--accent-color);
+}
+
+.dplayer-volume .dplayer-volume-bar-wrap .dplayer-volume-bar {
+     background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.dplayer-volume .dplayer-volume-bar-wrap .dplayer-volume-bar .dplayer-volume-bar-inner {
+    background: var(--accent-color) !important;
+}
+
+.dplayer-setting .dplayer-setting-box {
+    background: var(--secondary-bg) !important;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px var(--shadow-color);
+}
+
+.dplayer-controller .dplayer-icon, .dplayer-quality-item, .dplayer-speed-item, .dplayer-setting-item {
+    color: var(--primary-text) !important;
+    transition: all 0.2s ease;
+}
+
+.dplayer-controller .dplayer-icon:hover, .dplayer-quality-item:hover, .dplayer-speed-item:hover, .dplayer-setting-item:hover {
+    color: var(--accent-color) !important;
+    background: transparent !important;
+}
+
+.dplayer-setting .dplayer-setting-box .dplayer-setting-item.dplayer-setting-item-active {
+    background: var(--accent-color) !important;
+}
+
+.dplayer-setting .dplayer-setting-box .dplayer-setting-item.dplayer-setting-item-active .dplayer-label{
+     color: var(--primary-bg) !important;
+}
+
+/* Modal styles for conversion */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1001; /* Higher than player */
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.8);
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background-color: var(--secondary-bg);
+    margin: 15% auto;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    width: 90%;
+    max-width: 500px;
+    border-radius: 15px;
+    text-align: center;
+    box-shadow: 0 10px 30px var(--shadow-color);
+}
+
+.modal-content h2 {
+    color: var(--accent-color);
+    margin-bottom: 15px;
+}
+
+.modal-content p {
+    margin-bottom: 25px;
+}
+
+#startConversionBtn, #cancelConversionBtn, #modalDownloadBtn {
+    background: none;
+    border: 1px solid var(--primary-text);
+    color: var(--primary-text);
+    padding: 10px 25px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+}
+
+#startConversionBtn:hover, #modalDownloadBtn:hover {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--primary-bg);
+}
+
+#cancelConversionBtn:hover {
+    background: #ff4b2b;
+    border-color: #ff4b2b;
+    color: white;
+}
+.progress-bar-container {
+    width: 100%;
+    background-color: rgba(0,0,0,0.3);
+    border-radius: 5px;
+    overflow: hidden;
+}
+.progress-bar-inner {
+    width: 0%;
+    height: 30px;
+    background-color: var(--accent-color);
+    text-align: center;
+    line-height: 30px;
+    color: var(--primary-bg);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+/* --- Responsive Design for Mobile --- */
+@media (max-width: 768px) {
+    body {
+        align-items: flex-start;
+    }
+
+    .player-container.video-mode {
+        width: 100%;
+        height: 100vh;
+        max-height: none;
+        border-radius: 0;
+        max-width: none;
+    }
+
+    .player-main {
+        padding: 20px;
+    }
+
+    .video-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+        padding-bottom: 15px;
+        margin-bottom: 15px;
+    }
+
+    .video-title {
+        font-size: 20px;
+    }
+    
+    .video-controls-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .video-content-area {
+        height: auto;
+        flex-grow: 1;
+        min-height: 0; /* Allow shrinking */
+    }
+    
+    .dplayer-subtitle {
+        font-size: 3.5vw !important; /* Adjust subtitle font size for mobile */
+        bottom: 8% !important; /* Raise subtitles slightly on mobile */
+    }
+
+    .subtitle-dropdown-content {
+        bottom: auto;
+        top: 110%; /* Position below the button on mobile */
+    }
+    
+    .subtitle-dropdown-content.show {
+        bottom: auto;
+        top: 110%;
+    }
+}

@@ -4,428 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>视频播放器</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a2a6c, #2c3e50);
-            color: #fff;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding: 20px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 20px;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 12px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-
-        .video-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-        }
-
-        .close-btn {
-            padding: 10px 20px;
-            background: linear-gradient(to right, #ff416c, #ff4b2b);
-            color: white;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 10px rgba(255, 75, 43, 0.4);
-        }
-
-        .close-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(255, 75, 43, 0.6);
-            background: linear-gradient(to right, #ff4b2b, #ff416c);
-        }
-
-        .external-play-btn {
-            padding: 10px 20px;
-            background: linear-gradient(to right, #41A0FF, #2B73FF); /* 蓝色渐变 */
-            color: white;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 10px rgba(65, 160, 255, 0.4);
-            margin-left: 15px; /* 与关闭按钮的间距 */
-        }
-
-        .external-play-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(65, 160, 255, 0.6);
-            background: linear-gradient(to right, #2B73FF, #41A0FF);
-        }
-
-        .external-play-btn:active {
-            transform: translateY(0);
-        }
-
-        .close-btn:active {
-            transform: translateY(0);
-        }
-
-        .video-container {
-            flex: none;
-            width: 90%;
-            aspect-ratio: 16 / 9;
-            margin: 0 auto;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0, 0, 0, 0.8);
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            position: relative;
-        }
-
-        .download-btn {
-            padding: 10px 20px;
-            background: linear-gradient(to right, #1D976C, #93F9B9); /* 绿色渐变 */
-            color: white;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 10px rgba(29, 151, 108, 0.4);
-            margin-left: 15px;
-        }
-
-        .download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(29, 151, 108, 0.6);
-            background: linear-gradient(to right, #93F9B9, #1D976C);
-        }
-
-        .download-btn:active {
-            transform: translateY(0);
-        }
-
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            outline: none;
-        }
-
-        .player-controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(0, 0, 0, 0.3);
-            padding: 15px;
-            display: flex;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .video-container:hover .player-controls {
-            opacity: 1;
-        }
-
-        .control-btn {
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            margin: 0 10px;
-            cursor: pointer;
-            transition: background 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .control-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-
-        .progress-container {
-            flex: 1;
-            height: 6px;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 3px;
-            margin: 0 20px;
-            cursor: pointer;
-            position: relative;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(to right, #00c9ff, #92fe9d);
-            border-radius: 3px;
-            width: 0%;
-        }
-
-        .time-display {
-            font-size: 0.9rem;
-            margin: 0 10px;
-            min-width: 100px;
-            text-align: center;
-        }
-
-        .volume-container {
-            display: flex;
-            align-items: center;
-            margin: 0 10px;
-        }
-
-        .volume-slider {
-            width: 0;
-            height: 5px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-            margin: 0 10px;
-            transition: width 0.3s ease;
-            cursor: pointer;
-            overflow: hidden;
-        }
-
-        .volume-container:hover .volume-slider {
-            width: 70px;
-        }
-
-        .volume-bar {
-            height: 100%;
-            background: linear-gradient(to right, #00c9ff, #92fe9d);
-            width: 100%;
-        }
-
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
-
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #00c9ff;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .error-message {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 10;
-            color: #ff416c;
-            font-size: 1.2rem;
-            text-align: center;
-            padding: 20px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
-
-        @media (max-width: 768px) {
-            .header {
-                flex-direction: column;
-                gap: 15px;
-            }
-            
-            .video-title {
-                font-size: 1.2rem;
-            }
-            
-            .control-btn {
-                width: 35px;
-                height: 35px;
-                margin: 0 5px;
-            }
-            
-            .time-display {
-                font-size: 0.8rem;
-                min-width: 80px;
-            }
-            
-            .video-container {
-                width: 100%;
-            }
-        }
-        .subtitle-dropdown {
-            position: relative;
-            margin-top: 10px;
-            width: 100%;
-            max-width: 400px;
-        }
-        .subtitle-select-btn {
-            width: 100%;
-            padding: 10px 15px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-            text-align: left;
-            transition: background 0.3s ease;
-        }
-        .subtitle-select-btn:hover {
-            background: rgba(0, 0, 0, 0.7);
-        }
-        .subtitle-dropdown-content {
-            display: none;
-            position: absolute;
-            background-color: rgba(0, 0, 0, 0.9);
-            min-width: 100%;
-            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            z-index: 1;
-            border-radius: 8px;
-            overflow: hidden;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        .subtitle-dropdown-content a {
-            color: white;
-            padding: 12px 16px;
-            text-decoration: none;
-            display: block;
-            cursor: pointer;
-        }
-        .subtitle-dropdown-content a:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        .show {
-            display: block;
-        }
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgba(0,0,0,0.8);
-        }
-        .modal-content {
-            background-color: #2c3e50;
-            margin: 15% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 80%;
-            max-width: 500px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        #startConversionBtn, #cancelConversionBtn {
-            padding: 10px 20px;
-            color: white;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-            margin: 5px;
-        }
-
-        #startConversionBtn:hover, #cancelConversionBtn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5);
-        }
-        #startConversionBtn:active, #cancelConversionBtn:active {
-            transform: translateY(0);
-        }
-
-        #startConversionBtn {
-            background: linear-gradient(to right, #41A0FF, #2B73FF);
-        }
-
-        #cancelConversionBtn {
-            background: linear-gradient(to right, #ff4b2b, #ff416c);
-        }
-        .progress-bar-container {
-            width: 100%;
-            background-color: #ddd;
-            border-radius: 5px;
-        }
-        .progress-bar-inner {
-            width: 0%;
-            height: 30px;
-            background-color: #4CAF50;
-            text-align: center;
-            line-height: 30px;
-            color: white;
-            border-radius: 5px;
-        }
-    </style>
+    <link rel="stylesheet" href="video-player-style.css?v=1">
 </head>
 <body>
-    <div class="header">
-        <div class="video-title" id="videoTitle">加载中...</div>
-        <div class="subtitle-dropdown">
-            <button id="subtitleBtn" class="subtitle-select-btn">请手动选择字幕</button>
-            <div id="subtitleDropdownContent" class="subtitle-dropdown-content">
-                <!-- Subtitle options will be inserted here -->
+    <div class="player-bg"></div>
+    <div class="player-container video-mode">
+
+        <div class="player-main">
+            <div class="video-header">
+                <h2 id="videoTitle" class="video-title">加载中...</h2>
+                <div class="video-controls-right">
+                     <div class="subtitle-dropdown">
+                        <button id="subtitleBtn" class="control-btn extra-btn"><i class="fas fa-closed-captioning"></i></button>
+                        <div id="subtitleDropdownContent" class="subtitle-dropdown-content">
+                            <!-- Subtitle options will be inserted here -->
+                        </div>
+                    </div>
+                    <button id="externalPlayBtn" class="control-btn extra-btn" title="外部播放"><i class="fas fa-external-link-alt"></i></button>
+                    <button id="downloadBtn" class="control-btn extra-btn" title="下载视频"><i class="fas fa-download"></i></button>
+                    <button class="control-btn extra-btn" onclick="window.close()" title="关闭窗口"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+
+            <div class="video-content-area">
+                <div id="dplayer"></div>
             </div>
         </div>
-        <div style="display: flex; align-items: center;">
-            <button class="close-btn" onclick="window.close()">关闭窗口</button>
-            <button id="externalPlayBtn" class="external-play-btn">外部播放</button>
-            <button id="downloadBtn" class="download-btn">下载视频</button>
-        </div>
-    </div>
-    
-    <div class="video-container">
-        <div id="dplayer"></div>
+
     </div>
 
-    <div id="conversionModal" class="modal">
+    <div id="conversionModal" class="modal" style="display: none;">
         <div class="modal-content">
             <h2 id="modalTitle">需要转码</h2>
             <p id="modalText">此视频格式 (AVI) 可能无法在浏览器中直接播放。是否要将其转换为 MP4？</p>
@@ -462,23 +72,17 @@
             if (!mediaDir) return src;
             
             try {
-                // 注意：src可能已经包含了查询参数，我们需要避免双重编码
-                // 先尝试解析src，如果它已经是完整的URL则直接使用，否则基于当前origin构建
                 let url;
                 try {
                     url = new URL(src);
                 } catch (urlError) {
-                    // 如果src不是完整的URL，则基于当前origin构建
                     url = new URL(src, window.location.origin);
                 }
                 
-                // 设置mediaDir参数，searchParams.set会自动处理编码
                 url.searchParams.set('mediaDir', mediaDir);
                 return url.toString();
             } catch (e) {
-                // 如果src不是有效的URL，则直接在后面添加查询参数
                 const separator = src.includes('?') ? '&' : '?';
-                // 确保mediaDir被正确编码
                 return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
             }
         }
@@ -509,28 +113,24 @@
             }
 
             if (videoSrc) {
-                // 构建包含mediaDir参数的视频URL
                 const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
 
-                // 获取字幕信息
-                // 先解码videoSrc，然后再编码，避免双重编码
                 const decodedVideoSrc = decodeURIComponent(videoSrc);
                 const subtitleResponse = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
                 const subtitleData = await subtitleResponse.json();
-                console.log('Received subtitle data from server:', subtitleData); // 打印从服务器接收到的完整字幕数据
+                console.log('Received subtitle data from server:', subtitleData);
 
                 const dpOptions = {
                     container: document.getElementById('dplayer'),
                     video: {
                         url: fullVideoUrl,
-                        pic: urlParams.get('poster') || '', // Optional: Add a poster image if available in URL params
-                        thumbnails: urlParams.get('thumbnails') || '', // Optional: Add thumbnails if available
-                        // --- 解决移动端劫持播放器的问题 ---
+                        pic: urlParams.get('poster') || '',
+                        thumbnails: urlParams.get('thumbnails') || '',
                         playsinline: true,
                         'webkit-playsinline': true
                     },
                     autoplay: true,
-                    theme: '#FADFA3',
+                    theme: 'var(--accent-color)',
                     lang: 'zh-cn',
                     hotkey: true,
                     screenshot: true,
@@ -539,34 +139,27 @@
                 };
 
                 if (subtitleData.success && subtitleData.subtitles.length > 0) {
-                    const subtitleUrl = subtitleData.subtitles[0].url; // 默认使用第一个找到的字幕
-                    // 构建完整的字幕URL，确保包含正确的mediaDir参数
+                    const subtitleUrl = subtitleData.subtitles[0].url;
                     let fullSubtitleUrl;
                     if (mediaDir) {
-                        // 如果有mediaDir，构建完整URL
                         const separator = subtitleUrl.includes('?') ? '&' : '?';
                         fullSubtitleUrl = `${subtitleUrl}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-                        console.log('MediaDir is set. Full Subtitle URL with mediaDir:', fullSubtitleUrl);
                     } else {
-                        // 如果没有mediaDir，字幕文件应该在当前请求的同一个目录结构下
                         fullSubtitleUrl = subtitleUrl;
-                        console.log('MediaDir is not set. Using Subtitle URL as is:', fullSubtitleUrl);
                     }
                     
                     console.log('Subtitle URL:', fullSubtitleUrl);
                     dpOptions.subtitle = {
                         url: fullSubtitleUrl,
-                        type: 'webvtt', // Always use webvtt as the backend now handles conversion
-                        fontSize: '40px',
-                        fontfamily: 'Arial, sans-serif',
+                        type: 'webvtt',
+                        fontSize: '2vw',
+                        fontfamily: 'Noto Sans SC, sans-serif',
                         background:'rgba(0, 0, 0, 0.5)',
-                        bottom: '10%',
+                        bottom: '5%',
                         color: '#FFFFFF'
                     };
                 }
                 
-                // 创建DPlayer实例的变量，使其在整个作用域内可访问
-
                 function bindDPlayerEvents(player) {
                     player.on('error', function () {
                         console.error('DPlayer error occurred:', arguments);
@@ -575,43 +168,29 @@
 
                     player.on('subtitle_error', function () {
                         console.error('DPlayer subtitle error occurred:', arguments);
-                        videoTitle.textContent = '字幕加载失败，请尝试从下方列表手动选择。';
-                    });
-
-                    player.on('loadedmetadata', function() {
-                        const video = player.video;
-                        if (video.videoWidth && video.videoHeight) {
-                            aspect = video.videoWidth / video.videoHeight;
-                            adjustPlayerSize();
-                            player.resize();
-                        }
                     });
                 }
 
-                // 初始化DPlayer
                 function initDPlayer() {
                     dp = new DPlayer(dpOptions);
                     bindDPlayerEvents(dp);
-                    // 在DPlayer初始化后再加载字幕列表
                     loadAllSubtitles();
+                    // Set background image
+                    const albumCover = urlParams.get('poster');
+                    if (albumCover) {
+                        document.querySelector('.player-bg').style.backgroundImage = `url('${albumCover}')`;
+                    }
                 }
 
                 const subtitleBtn = document.getElementById('subtitleBtn');
                 const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
 
-                if (dpOptions.subtitle) {
-                    const initialSubtitleName = subtitleData.subtitles[0].name;
-                    subtitleBtn.textContent = `当前字幕: ${initialSubtitleName}`;
-                }
-
-                // Toggle dropdown
                 subtitleBtn.onclick = () => {
                     subtitleDropdownContent.classList.toggle("show");
                 };
 
-                // Close dropdown if clicked outside
                 window.onclick = function(event) {
-                    if (!event.target.matches('.subtitle-select-btn')) {
+                    if (!event.target.closest('.subtitle-dropdown')) {
                         if (subtitleDropdownContent.classList.contains('show')) {
                             subtitleDropdownContent.classList.remove('show');
                         }
@@ -619,11 +198,23 @@
                 }
 
                 async function loadAllSubtitles() {
+                    const subtitleDropdown = document.querySelector('.subtitle-dropdown');
                     try {
                         const response = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}&all=true`);
                         const data = await response.json();
                         if (data.success && data.subtitles.length > 0) {
-                            subtitleDropdownContent.innerHTML = ''; // Clear list
+                            subtitleDropdown.classList.remove('no-subtitles');
+                            subtitleDropdownContent.innerHTML = '';
+                            const offOption = document.createElement('a');
+                            offOption.textContent = '关闭字幕';
+                            offOption.onclick = () => {
+                                if (dp && dp.subtitle) {
+                                    dp.subtitle.hide();
+                                }
+                                subtitleDropdownContent.classList.remove('show');
+                            };
+                            subtitleDropdownContent.appendChild(offOption);
+
                             data.subtitles.forEach(sub => {
                                 const link = document.createElement('a');
                                 link.textContent = sub.name;
@@ -643,18 +234,16 @@
                                     
                                     const subtitleOptions = {
                                         type: 'webvtt',
-                                        fontSize: '40px',
-                                        fontfamily: 'Arial, sans-serif',
+                                        fontSize: '2vw',
+                                        fontfamily: 'Noto Sans SC, sans-serif',
                                         background:'rgba(0, 0, 0, 0.5)',
-                                        bottom: '10%',
+                                        bottom: '5%',
                                         color: '#FFFFFF'
                                     };
 
                                     if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
                                         dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
-                                        subtitleBtn.textContent = `当前字幕: ${sub.name}`;
                                     } else if (dp) {
-                                        console.log('Subtitle object not found, recreating player to add subtitle.');
                                         const currentTime = dp.video.currentTime;
                                         const wasPaused = dp.video.paused;
                                         
@@ -671,56 +260,27 @@
                                                 dp.play();
                                             }
                                         });
-                                        subtitleBtn.textContent = `当前字幕: ${sub.name}`;
-                                    } else {
-                                        console.error('DPlayer instance is not available for subtitle switch.');
                                     }
-                                    
                                     subtitleDropdownContent.classList.remove('show');
                                 };
                                 subtitleDropdownContent.appendChild(link);
                             });
                         } else {
-                            subtitleBtn.textContent = '没有找到可用字幕';
-                            subtitleBtn.disabled = true;
+                            subtitleDropdown.classList.add('no-subtitles');
                         }
                     } catch (error) {
                         console.error('Error loading all subtitles:', error);
-                        subtitleBtn.textContent = '加载字幕列表失败';
-                        subtitleBtn.disabled = true;
+                        subtitleDropdown.classList.add('no-subtitles');
                     }
                 }
                 
-                // 初始化DPlayer
                 initDPlayer();
 
-
-                let aspect = 16 / 9;
-                
-                function adjustPlayerSize() {
-                    const container = document.querySelector('.video-container');
-                    const maxWidth = window.innerWidth * 0.9;
-                    const maxHeight = window.innerHeight * 0.8; // 留空间给header和控件
-                    let width = maxWidth;
-                    let height = width / aspect;
-                    if (height > maxHeight) {
-                        height = maxHeight;
-                        width = height * aspect;
-                    }
-                    container.style.width = `${width}px`;
-                    container.style.height = `${height}px`;
-                    dp.resize();
-                }
-
-                adjustPlayerSize();
-                window.addEventListener('resize', adjustPlayerSize);
-                window.addEventListener('orientationchange', adjustPlayerSize);
             } else {
                 videoTitle.textContent = '未找到视频源';
             }
         }
 
-        // 页面加载完成后执行
         if (videoSrc && videoSrc.toLowerCase().endsWith('.avi')) {
             const modal = document.getElementById('conversionModal');
             modal.style.display = 'block';
@@ -789,7 +349,6 @@
             setTempMediaDirAndPlay();
         }
 
-        // --- 调用外部播放器 ---
         const externalPlayBtn = document.getElementById('externalPlayBtn');
         const downloadBtn = document.getElementById('downloadBtn');
 
@@ -797,18 +356,13 @@
             const userAgent = navigator.userAgent || navigator.vendor || window.opera;
 
             if (/android/i.test(userAgent)) {
-                // 对于Android，我们尝试使用Intent来打开视频
                 const intentUrl = 'intent:' + videoUrl + '#Intent;action=android.intent.action.VIEW;type=video/*;end';
                 window.location.href = intentUrl;
 
             } else if (/win/i.test(userAgent)) {
-                // 对于Windows，我们尝试使用PotPlayer的URL scheme
-                // 注意：这需要用户已经安装了PotPlayer
                 window.location.href = 'potplayer://' + videoUrl;
 
             } else {
-                // 对于其他操作系统（如iOS, macOS, Linux），我们弹出一个提示
-                // 或者，我们可以直接在新标签页中打开视频URL
                 alert('此功能目前主要支持Windows和Android设备。您的浏览器将尝试直接打开视频链接。');
                 window.open(videoUrl, '_blank');
             }
