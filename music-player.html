@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Gemini Music Player</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+    <div class="player-bg"></div>
+    <div class="player-container">
+
+        <div class="player-main">
+            <div class="main-content">
+                <div class="info-container">
+                    <div class="cover-wrapper">
+                        <img src="" alt="Album Cover" id="album-cover" class="cover-img">
+                    </div>
+                    <div class="song-details">
+                        <h2 id="song-title">歌曲名称</h2>
+                        <p id="song-artist">歌手</p>
+                    </div>
+                </div>
+    
+                <div class="lyrics-container">
+                    <div class="lyrics-controls">
+                        <button id="toggle-lyrics-visualizer-btn" class="control-btn extra-btn" title="切换可视化"><i class="fas fa-chart-bar"></i></button>
+                    </div>
+                    <div class="visualization-container">
+                        <canvas id="visualizer"></canvas>
+                    </div>
+                    <div class="lyrics-wrapper" id="lyrics-wrapper">
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress-container">
+                <span id="current-time">00:00</span>
+                <input type="range" id="progress-bar" class="progress-bar" value="0" step="0.1" min="0" max="100">
+                <span id="duration">00:00</span>
+            </div>
+
+            <div class="controls-container">
+                <div class="main-controls">
+                    <button id="prev-btn" class="control-btn"><i class="fas fa-step-backward"></i></button>
+                    <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
+                    <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
+                </div>
+                
+                <div class="extra-controls">
+                     <button id="mode-btn" class="control-btn extra-btn" title="列表循环"><i class="fas fa-retweet"></i></button>
+                    <div class="volume-control">
+                        <button id="volume-btn" class="control-btn extra-btn"><i class="fas fa-volume-high"></i></button>
+                        <input type="range" id="volume-slider" class="volume-slider" min="0" max="1" step="0.01" value="0.8">
+                    </div>
+                    <div class="speed-control">
+                         <button id="speed-btn" class="control-btn extra-btn">1.0x</button>
+                         <div class="speed-options">
+                            <div data-speed="0.5">0.5x</div>
+                            <div data-speed="0.75">0.75x</div>
+                            <div data-speed="1.0">1.0x</div>
+                            <div data-speed="1.25">1.25x</div>
+                            <div data-speed="1.5">1.5x</div>
+                            <div data-speed="2.0">2.0x</div>
+                        </div>
+                    </div>
+                    <button id="playlist-btn" class="control-btn extra-btn"><i class="fas fa-list-ul"></i></button>
+                     <button id="upload-lrc-btn" class="control-btn extra-btn" title="上传歌词"><i class="fas fa-file-arrow-up"></i></button>
+                    <input type="file" id="lrc-file-input" accept=".lrc,.vtt" style="display: none;">
+                </div>
+            </div>
+        </div>
+
+        <div class="playlist-panel">
+            <h3>播放列表 <i class="fas fa-times" id="close-playlist-btn"></i></h3>
+            <ul id="playlist-ul">
+                </ul>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/colorthief@2.3.2/dist/color-thief.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/buffer@6.0.3/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-codepage@1.0.0/dist/cptable.full.js"></script>
+    <script>
+        const { Buffer } = buffer;
+    </script>
+    <script src="music-app.js?v=1"></script>
+</body>
+</html>

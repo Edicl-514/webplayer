@@ -13,8 +13,10 @@ const MEDIA_DIRS = [
     { path: 'K:\\e', alias: 'K' },
     { path: 'L:\\e', alias: 'L' },
     { path: 'M:\\e', alias: 'M' },
-    { path: 'N:\\e', alias: 'N' }
+    { path: 'N:\\e', alias: 'N' },
+    { path: 'J:\\OneDrive - MSFT', alias: 'MUSIC' }
 ];
+const MUSIC_DIR = path.join(__dirname, 'music'); // 音乐文件目录
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
 
@@ -28,6 +30,34 @@ const server = http.createServer((req, res) => {
         // 如果解码失败，使用原始路径并记录错误
         console.warn('Failed to decode pathname, using raw pathname:', parsedUrl.pathname);
         pathname = parsedUrl.pathname;
+    }
+
+    // 新增：处理音乐列表请求
+    if (pathname === '/api/music') {
+        fs.readdir(MUSIC_DIR, (err, files) => {
+            if (err) {
+                console.error('Error reading music directory:', err);
+                res.statusCode = 500;
+                res.end('Error reading music directory');
+                return;
+            }
+
+            const musicFiles = files.filter(file => file.endsWith('.mp3') || file.endsWith('.flac'));
+            const lyricsFiles = files.filter(file => file.endsWith('.lrc') || file.endsWith('.vtt'));
+
+            const playlist = musicFiles.map(musicFile => {
+                const baseName = path.parse(musicFile).name;
+                const lrcFile = lyricsFiles.find(lyric => path.parse(lyric).name === baseName);
+                return {
+                    music: musicFile,
+                    lrc: lrcFile || null
+                };
+            });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(playlist));
+        });
+        return;
     }
 
     // 处理获取媒体目录列表的请求
@@ -472,6 +502,11 @@ const server = http.createServer((req, res) => {
     }
 
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
+    if (pathname.startsWith('/music/') || pathname.startsWith('/lyrics/')) {
+        const musicPath = path.join(__dirname, pathname);
+        fs.createReadStream(musicPath).pipe(res);
+        return;
+    }
     // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
     const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
     // 如果 pathname 以 / 开头，path.join 会把它当作绝对路径，我们需要移除开头的 /
@@ -578,6 +613,10 @@ function getContentType(filePath) {
         '.gif': 'image/gif',
         '.svg': 'image/svg+xml',
         '.wav': 'audio/wav',
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
         '.mp4': 'video/mp4',
         '.webm': 'video/webm',
         '.ogg': 'audio/ogg',

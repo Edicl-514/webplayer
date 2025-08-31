@@ -508,7 +508,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>WebPlayer - 媒体浏览器</h1>
+        <h1>WebPlayer - 媒体浏览器 </h1>
         <!-- 搜索表单 -->
         <div class="search-container">
             <form id="searchForm">
@@ -910,6 +910,7 @@
                     const extension = file.name.split('.').pop().toLowerCase();
                     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
                     const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
+                    const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
                     const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
                     const encodedFileName = encodeURIComponent(file.name);
 
@@ -950,6 +951,11 @@
                             thumbnailContainer.appendChild(icon);
                         };
                         thumbnailContainer.appendChild(img);
+                    } else if (isAudio) {
+                        const icon = document.createElement('div');
+                        icon.className = 'icon';
+                        icon.innerHTML = '&#127925;'; // 音乐图标
+                        thumbnailContainer.appendChild(icon);
                     } else {
                         // 其他文件类型显示默认图标
                         const icon = document.createElement('div');
@@ -986,6 +992,8 @@
                         } else if (e.target.tagName.toLowerCase() !== 'img') {
                             if (isVideo) {
                                 playVideo(file.name);
+                            } else if (isAudio) {
+                                playMusic(file.name);
                             } else {
                                 downloadFile(file.name);
                             }
@@ -1000,6 +1008,15 @@
                         playButton.onclick = (e) => {
                             e.stopPropagation(); // 阻止网格项的点击事件
                             playVideo(file.name);
+                        };
+                        actionsDiv.appendChild(playButton);
+                    } else if (isAudio) {
+                        const playButton = document.createElement('button');
+                        playButton.textContent = '播放';
+                        playButton.className = 'play-btn';
+                        playButton.onclick = (e) => {
+                            e.stopPropagation();
+                            playMusic(file.name);
                         };
                         actionsDiv.appendChild(playButton);
                     }
@@ -1140,6 +1157,15 @@
             // 在新窗口中打开视频播放页面，添加mediaDir参数
             const videoPageUrl = `video-player.html?src=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
             window.open(videoPageUrl, '_blank');
+        }
+
+        function playMusic(fileName) {
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const musicUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            
+            const musicPageUrl = `music-player.html?src=${encodeURIComponent(musicUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
+            window.open(musicPageUrl, '_blank');
         }
 
         closePlayerButton.onclick = () => {
