@@ -31,8 +31,9 @@ def main():
     # Setup argparse
     parser = argparse.ArgumentParser(description="Get music info from MusicBrainz or Netease and save it.")
     parser.add_argument("filepath", help="Path to the audio file.")
-    parser.add_argument("--source", choices=['musicbrainz', 'netease'], default='netease', help="The source to get music info from.")
+    parser.add_argument("--source", choices=['musicbrainz', 'netease', 'local'], default='local', help="The source to get music info from.")
     parser.add_argument("--no-write", action="store_true", help="Do not write the info to the original file.")
+    parser.add_argument("--json-output", action="store_true", help="Output all metadata as JSON.")
     
     args = parser.parse_args()
 
@@ -46,38 +47,124 @@ def main():
         musicbrainzngs.auth(MB_CLIENT_ID, MB_CLIENT_SECRET)
 
     if not os.path.exists(args.filepath):
-        print(f"Error: File not found at {args.filepath}")
+        print(f"Error: File not found at {args.filepath}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        print(f"Processing file: {args.filepath}")
+        print(f"Processing file: {args.filepath}", file=sys.stderr)
         
         # 1. Get metadata from the audio file
         track_info = get_audio_metadata(args.filepath)
         if not track_info or not track_info.get('title'):
-            print("Could not read metadata, falling back to filename.")
+            print("Could not read metadata, falling back to filename.", file=sys.stderr)
             track_info = {'title': os.path.splitext(os.path.basename(args.filepath))[0], 'artist': '', 'album': ''}
+            print(f"DEBUG: Fallback track_info: {track_info}", file=sys.stderr)
 
-        print(f"Detected metadata: Title={track_info.get('title')}, Artist={track_info.get('artist')}, Album={track_info.get('album')}")
+        print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
 
         # 2. Get music info from the selected source
-        if args.source == 'musicbrainz':
+        if args.source == 'local':
+            cover_data = get_local_cover(args.filepath)
+            music_info = {
+                "title": track_info.get("title"),
+                "artist": track_info.get("artist"),
+                "album": track_info.get("album"),
+                "lyrics": None,
+                "cover_data": cover_data,
+                "cover_url": None
+            }
+        elif args.source == 'musicbrainz':
             music_info = search_musicbrainz(track_info)
         else: # netease
             music_info = search_netease(track_info)
 
         # 3. Process the retrieved info (save cover, lyrics, etc.)
         if music_info:
-            if not args.no_write:
+            cover_filename = None
+            if not args.no_write and args.source != 'local':
                 embed_info_to_audio(args.filepath, music_info)
             
             # Save cover and lyrics to cache
             if 'cover_data' in music_info and music_info['cover_data']:
-                save_cover_art(music_info['cover_data'], track_info['title'], CACHE_COVERS_DIR)
+                cover_filename = save_cover_art(music_info['cover_data'], track_info['title'], CACHE_COVERS_DIR)
             if 'lyrics' in music_info and music_info['lyrics']:
                 save_lrc_file(os.path.join(CACHE_LYRICS_DIR, f"{track_info['title']}.lrc"), music_info['lyrics'])
+
+            # Output JSON if requested
+            if args.json_output:
+                json_info = music_info.copy()
+                if 'cover_data' in json_info:
+                    del json_info['cover_data']
+                if cover_filename:
+                    json_info['cover_filename'] = cover_filename
+                print(json.dumps(json_info, indent=4, ensure_ascii=False))
     except Exception as e:
-        print(f"An unexpected error occurred in main: {e}")
+        print(f"An unexpected error occurred in main: {e}", file=sys.stderr)
+
+# --- Local File Functions ---
+
+def get_local_cover(file_path):
+    """
+    Extracts cover art from the audio file itself.
+    If no embedded cover is found, it searches for common cover filenames
+    (e.g., cover.jpg, folder.png) in the same directory.
+    """
+    cover_data = None
+    # 1. Try to extract embedded cover art first
+    try:
+        print(f"DEBUG: Attempting to extract embedded cover from {os.path.basename(file_path)}", file=sys.stderr)
+        with open(file_path, 'rb') as f:
+            audio = File(f, easy=False) # Use easy=False for more detailed tags
+            if audio is not None:
+                if isinstance(audio, MP3):
+                    apic_key = next((k for k in audio.tags.keys() if k.startswith('APIC')), None)
+                    if apic_key:
+                        print("DEBUG: Found APIC tag in MP3.", file=sys.stderr)
+                        cover_data = audio.tags[apic_key].data
+                elif isinstance(audio, FLAC):
+                    if audio.pictures:
+                        print("DEBUG: Found picture data in FLAC.", file=sys.stderr)
+                        cover_data = audio.pictures[0].data
+                elif isinstance(audio, MP4):
+                    if 'covr' in audio.tags and audio.tags['covr']:
+                        print("DEBUG: Found 'covr' tag in MP4.", file=sys.stderr)
+                        cover_data = audio.tags['covr'][0]
+                
+                if cover_data:
+                    print("SUCCESS: Found and extracted embedded cover art.", file=sys.stderr)
+                    return BytesIO(cover_data)
+                else:
+                    print("DEBUG: No embedded cover art found in the file's tags.", file=sys.stderr)
+    except PermissionError:
+        print(f"ERROR: Permission denied while reading embedded cover art from {file_path}. The file might be online-only or locked.", file=sys.stderr)
+    except Exception as e:
+        print(f"ERROR: Could not read embedded cover art: {e}", file=sys.stderr)
+
+    # 2. If no embedded cover, search for local image files
+    try:
+        directory = os.path.dirname(file_path)
+        if not directory:
+             directory = "."
+        print(f"DEBUG: Searching for local cover images in directory: {directory}", file=sys.stderr)
+        
+        cover_names = ['cover', 'folder', 'front', 'back']
+        extensions = ['.jpg', '.jpeg', '.png']
+
+        for filename in os.listdir(directory):
+            name_lower = filename.lower()
+            name_part, ext_part = os.path.splitext(name_lower)
+            
+            if name_part in cover_names and ext_part in extensions:
+                image_path = os.path.join(directory, filename)
+                print(f"SUCCESS: Found local cover file: {image_path}", file=sys.stderr)
+                with open(image_path, 'rb') as f:
+                    return BytesIO(f.read())
+        print("DEBUG: No matching local cover image files found.", file=sys.stderr)
+    except Exception as e:
+        print(f"ERROR: An error occurred while searching for local cover files: {e}", file=sys.stderr)
+
+    print("No cover art found.", file=sys.stderr)
+    return None
 
 # --- MusicBrainz Functions ---
 
@@ -86,7 +173,7 @@ def search_musicbrainz(track_info):
     Searches MusicBrainz for track information.
     """
     if not track_info or not track_info.get("title"):
-        print("Not enough metadata to search MusicBrainz.")
+        print("Not enough metadata to search MusicBrainz.", file=sys.stderr)
         return None
     
     try:
@@ -100,41 +187,44 @@ def search_musicbrainz(track_info):
             recording = result["recording-list"][0]
             release_id = recording.get("release-list", [{}])[0].get("id")
             
-            cover_data = None
+            cover_data, cover_url = None, None
             if release_id:
-                cover_data = get_mb_cover_art(release_id)
+                cover_data, cover_url = get_mb_cover_art(release_id)
 
             return {
                 "title": recording.get("title"),
                 "artist": recording["artist-credit-phrase"],
                 "album": recording.get("release-list", [{}])[0].get("title"),
-                "cover_data": cover_data
+                "lyrics": None,
+                "cover_data": cover_data,
+                "cover_url": cover_url
             }
             
     except musicbrainzngs.MusicBrainzError as e:
-        print(f"MusicBrainz API error: {e}")
+        print(f"MusicBrainz API error: {e}", file=sys.stderr)
     
     return None
 
 def get_mb_cover_art(release_id):
     """
     Downloads cover art from the Cover Art Archive.
+    Returns a tuple (image_data, image_url).
     """
     if not release_id:
-        return None
+        return None, None
     
     cover_art_url = f"https://coverartarchive.org/release/{release_id}/front-500"
     
     try:
         response = requests.get(cover_art_url)
         response.raise_for_status()
-        return BytesIO(response.content)
+        return BytesIO(response.content), cover_art_url
     except requests.exceptions.RequestException as e:
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 404:
-            print("Cover art not found on Cover Art Archive.")
+            print("Cover art not found on Cover Art Archive.", file=sys.stderr)
         else:
-            print(f"Error downloading cover art: {e}")
-    return None
+            print(f"Error downloading cover art: {e}", file=sys.stderr)
+    return None, cover_art_url
 
 # --- Netease Functions ---
 
@@ -143,15 +233,18 @@ def search_netease(track_info):
     Searches Netease Music for track information.
     """
     if not track_info or not track_info.get("title"):
-        print("Not enough metadata to search Netease.")
+        print("Not enough metadata to search Netease.", file=sys.stderr)
         return None
 
     artist = track_info.get('artist', '')
     title = track_info.get('title', '')
     album = track_info.get('album', '')
     
-    lyrics, cover_url = try_netease_api(artist, title, album)
+    lyrics, cover_url, song_info = try_netease_api(artist, title, album)
     
+    if not song_info:
+        return None
+
     cover_data = None
     if cover_url:
         try:
@@ -159,11 +252,15 @@ def search_netease(track_info):
             response.raise_for_status()
             cover_data = BytesIO(response.content)
         except requests.exceptions.RequestException as e:
-            print(f"Error downloading Netease cover: {e}")
+            print(f"Error downloading Netease cover: {e}", file=sys.stderr)
 
     return {
+        "title": song_info.get('name'),
+        "artist": song_info.get('artists', [{}])[0].get('name'),
+        "album": song_info.get('album', {}).get('name'),
         "lyrics": lyrics,
-        "cover_data": cover_data
+        "cover_data": cover_data,
+        "cover_url": cover_url
     }
 
 def try_netease_api(artist, title, album):
@@ -216,6 +313,9 @@ def try_netease_api(artist, title, album):
         lyric_resp = requests.get(lyric_url, headers=headers)
         lyric_data = lyric_resp.json()
         lyrics = lyric_data.get('lrc', {}).get('lyric', '')
+        translated_lyrics = lyric_data.get('tlyric', {}).get('lyric', '')
+
+        combined_lyrics = combine_lyrics(lyrics, translated_lyrics)
         
         # Get cover URL
         cover_url = best_song.get('album', {}).get('picUrl')
@@ -224,11 +324,32 @@ def try_netease_api(artist, title, album):
         else:
             cover_url = get_netease_cover_from_page(song_id)
 
-        return lyrics, cover_url
+        return combined_lyrics, cover_url, best_song
         
     except Exception as e:
-        print(f"Netease API error: {e}")
-        return None, None
+        print(f"Netease API error: {e}", file=sys.stderr)
+        return None, None, None
+    
+def combine_lyrics(lyrics, translated_lyrics):
+    if not lyrics:
+        return translated_lyrics
+    if not translated_lyrics:
+        return lyrics
+
+    lyrics_lines = lyrics.strip().split('\n')
+    translated_lines = translated_lyrics.strip().split('\n')
+    combined_lines = []
+
+    # This is a simplified merge. A more robust solution would parse timestamps.
+    for line in lyrics_lines:
+        combined_lines.append(line)
+        # Find a matching translated line (simplified)
+        for t_line in translated_lines:
+            if line.split(']')[0] == t_line.split(']')[0]:
+                combined_lines.append(t_line)
+                break
+
+    return '\n'.join(combined_lines)
 
 def get_netease_cover_from_page(song_id):
     """Fallback to get cover URL by parsing the song's webpage using json-ld."""
@@ -248,7 +369,7 @@ def get_netease_cover_from_page(song_id):
             if data.get('images') and data['images']:
                 return data['images'][0].replace("?param=130y130", "?param=500y500")
     except Exception as e:
-        print(f"Failed to get cover from page for song ID {song_id}: {e}")
+        print(f"Failed to get cover from page for song ID {song_id}: {e}", file=sys.stderr)
     return None
 
 def is_match(a, b):
@@ -265,7 +386,9 @@ def is_match(a, b):
 def save_cover_art(image_data, track_title, output_dir):
     """Saves cover art to a file."""
     if not image_data:
-        return
+        return None
+    
+    image_data.seek(0) # Reset stream before reading
         
     filename = f"{track_title.replace('/', '_').replace(':', '_')}_cover.jpg"
     filepath = os.path.join(output_dir, filename)
@@ -275,9 +398,11 @@ def save_cover_art(image_data, track_title, output_dir):
         if img.mode == 'RGBA':
             img = img.convert('RGB')
         img.save(filepath)
-        print(f"Cover art saved to: {filepath}")
+        print(f"Cover art saved to: {filepath}", file=sys.stderr)
+        return filename
     except Exception as e:
-        print(f"Error saving cover art: {e}")
+        print(f"Error saving cover art: {e}", file=sys.stderr)
+        return None
 
 def save_lrc_file(lrc_path, lyrics):
     """Saves lyrics to an LRC file."""
@@ -287,9 +412,9 @@ def save_lrc_file(lrc_path, lyrics):
     try:
         with open(lrc_path, 'w', encoding='utf-8') as f:
             f.write(lyrics)
-        print(f"Lyrics saved to: {lrc_path}")
+        print(f"Lyrics saved to: {lrc_path}", file=sys.stderr)
     except Exception as e:
-        print(f"Error saving LRC file: {e}")
+        print(f"Error saving LRC file: {e}", file=sys.stderr)
 
 def embed_info_to_audio(file_path, music_info):
     """Embeds cover art and metadata into the audio file."""
@@ -312,7 +437,7 @@ def embed_info_to_audio(file_path, music_info):
                     img.save(output, format='JPEG')
                     cover_data = output.getvalue()
             except Exception as e:
-                print(f"Could not process image before embedding: {e}")
+                print(f"Could not process image before embedding: {e}", file=sys.stderr)
 
             if file_path.lower().endswith('.mp3'):
                 audio_id3 = ID3(file_path)
@@ -336,12 +461,12 @@ def embed_info_to_audio(file_path, music_info):
                 mp4['covr'] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 mp4.save()
             
-            print("Successfully embedded cover art.")
+            print("Successfully embedded cover art.", file=sys.stderr)
 
         # Update metadata tags using EasyID3 for simplicity
         audio = File(file_path, easy=True)
         if audio is None:
-            print("Cannot open audio file to embed metadata.")
+            print("Cannot open audio file to embed metadata.", file=sys.stderr)
             return
 
         if music_info.get('title'):
@@ -352,10 +477,10 @@ def embed_info_to_audio(file_path, music_info):
             audio['album'] = music_info['album']
         
         audio.save()
-        print("Successfully embedded metadata.")
+        print("Successfully embedded metadata.", file=sys.stderr)
 
     except Exception as e:
-        print(f"Error embedding info into audio file: {e}")
+        print(f"Error embedding info into audio file: {e}", file=sys.stderr)
 
 # This block seems to be misplaced. Removing it.
 
@@ -365,15 +490,19 @@ def get_audio_metadata(file_path):
     Handles various file formats like FLAC, MP3, M4A, etc.
     """
     try:
-        audio = File(file_path)
-        if audio is None:
-            print(f"Cannot read file: {file_path}")
-            return None
+        print(f"DEBUG: Reading metadata from: {file_path}", file=sys.stderr)
+        with open(file_path, 'rb') as f:
+            audio = File(f)
+            if audio is None:
+                print(f"ERROR: mutagen.File() returned None for: {file_path}", file=sys.stderr)
+                return None
 
-        tags = audio.tags
+            tags = audio.tags
+        print(f"DEBUG: Raw tags from mutagen: {tags}", file=sys.stderr)
         track_info = {}
 
         file_ext = os.path.splitext(file_path)[1].lower()
+        print(f"DEBUG: Detected file extension: {file_ext}", file=sys.stderr)
 
         if file_ext == '.mp3':
             # Handle MP3 files (ID3 tags)
@@ -423,17 +552,21 @@ def get_audio_metadata(file_path):
                     "albumartist": tags.get("albumartist", [None])[0],
                 }
         else:
-            print(f"Unsupported file type: {file_ext}")
+            print(f"Unsupported file type: {file_ext}", file=sys.stderr)
             return None
 
         # Ensure all keys exist
         for key in ["title", "artist", "album", "albumartist"]:
             track_info.setdefault(key, None)
         
+        print(f"DEBUG: Successfully extracted metadata: {track_info}", file=sys.stderr)
         return track_info
 
+    except PermissionError:
+        print(f"Error reading metadata from {file_path}: [Errno 13] Permission denied. The file might be online-only or locked by another process.", file=sys.stderr)
+        return None
     except Exception as e:
-        print(f"Error reading metadata from {file_path}: {e}")
+        print(f"Error reading metadata from {file_path}: {e}", file=sys.stderr)
         return None
 # This block seems to be misplaced. Removing it.
 
@@ -442,4 +575,4 @@ if __name__ == "__main__":
         main()
     except SystemExit as e:
         if e.code != 0:
-            print("\nAn error occurred. Exiting.")
+            print("\nAn error occurred. Exiting.", file=sys.stderr)

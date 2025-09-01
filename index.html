@@ -334,6 +334,22 @@
             box-shadow: 0 3px 6px rgba(0,0,0,0.5);
         }
         
+        .add-to-playlist-btn {
+            background: linear-gradient(to right, #ffc107, #ff9800);
+            transition: all 0.3s ease;
+            color: white;
+        }
+        
+        .add-to-playlist-btn:hover {
+            background-color: #e0a800;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.6);
+        }
+        .add-to-playlist-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
         #videoPlayerContainer {
             margin-top: 20px;
             text-align: center;
@@ -1019,6 +1035,17 @@
                             playMusic(file.name);
                         };
                         actionsDiv.appendChild(playButton);
+
+                        // 添加“添加到播放列表”按钮
+                        const addToPlaylistButton = document.createElement('button');
+                        addToPlaylistButton.textContent = '添加';
+                        addToPlaylistButton.title = '添加到播放列表';
+                        addToPlaylistButton.className = 'add-to-playlist-btn';
+                        addToPlaylistButton.onclick = (e) => {
+                            e.stopPropagation();
+                            addToPlaylist(file);
+                        };
+                        actionsDiv.appendChild(addToPlaylistButton);
                     }
 
                     // 添加下载按钮
@@ -1166,6 +1193,69 @@
             
             const musicPageUrl = `music-player.html?src=${encodeURIComponent(musicUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
             window.open(musicPageUrl, '_blank');
+        }
+
+        function showNotification(message) {
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            notification.style.position = 'fixed';
+            notification.style.bottom = '20px';
+            notification.style.left = '50%';
+            notification.style.transform = 'translateX(-50%)';
+            notification.style.backgroundColor = '#28a745';
+            notification.style.color = 'white';
+            notification.style.padding = '10px 20px';
+            notification.style.borderRadius = '5px';
+            notification.style.zIndex = '2000';
+            notification.style.opacity = '0';
+            notification.style.transition = 'opacity 0.5s';
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.opacity = '1';
+            }, 10);
+
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 500);
+            }, 3000);
+        }
+
+        function addToPlaylist(file) {
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(file.name);
+            const musicUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            const finalSrc = `${decodeURIComponent(musicUrl)}?mediaDir=${encodeURIComponent(currentMediaDir)}`;
+
+            const parts = file.name.replace(/\.\w+$/, '').split(' - ');
+            let artist = '未知艺术家';
+            let title = parts[0];
+            if (parts.length > 1) {
+                artist = parts[0];
+                title = parts.slice(1).join(' - ');
+            }
+
+            const song = {
+                title: title,
+                artist: artist,
+                src: finalSrc,
+                cover: 'cover.jpg', // Default cover
+                lrc: null
+            };
+
+            let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+
+            // Check for duplicates based on src
+            if (playlist.some(pSong => pSong.src === song.src)) {
+                showNotification(`'${song.title}' 已经在播放列表中`);
+                return;
+            }
+
+            playlist.push(song);
+            localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+            showNotification(`'${song.title}' 已添加到播放列表`);
         }
 
         closePlayerButton.onclick = () => {

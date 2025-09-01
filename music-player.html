@@ -70,8 +70,28 @@
                         </div>
                     </div>
                     <button id="playlist-btn" class="control-btn extra-btn"><i class="fas fa-list-ul"></i></button>
-                     <button id="upload-lrc-btn" class="control-btn extra-btn" title="上传歌词"><i class="fas fa-file-arrow-up"></i></button>
-                    <input type="file" id="lrc-file-input" accept=".lrc,.vtt" style="display: none;">
+                     <!-- <button id="upload-lrc-btn" class="control-btn extra-btn" title="上传歌词"><i class="fas fa-file-arrow-up"></i></button>
+                    <input type="file" id="lrc-file-input" accept=".lrc,.vtt" style="display: none;"> -->
+                    <div class="network-control">
+                        <button id="network-btn" class="control-btn extra-btn" title="网络功能"><i class="fas fa-globe"></i></button>
+                        <div class="network-options">
+                            <div id="fetch-lyrics-btn">歌词</div>
+                            <div class="cover-options">
+                                <span>封面</span>
+                                <div class="cover-sources">
+                                    <div id="fetch-cover-netease-btn">网易云</div>
+                                    <div id="fetch-cover-mb-btn">MusicBrainz</div>
+                                </div>
+                            </div>
+                             <div class="info-options">
+                                <span>信息</span>
+                                <div class="info-sources">
+                                    <div id="fetch-info-netease-btn">网易云</div>
+                                    <div id="fetch-info-mb-btn">MusicBrainz</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -87,6 +107,7 @@
     <script src="https://cdn.jsdelivr.net/npm/colorthief@2.3.2/dist/color-thief.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/buffer@6.0.3/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/js-codepage@1.0.0/dist/cptable.full.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     <script>
         const { Buffer } = buffer;
     </script>

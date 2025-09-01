@@ -5,6 +5,8 @@ const url = require('url');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
+const { exec } = require('child_process');
+const https = require('https');
 
 const PORT = 8080;
 // 定义媒体目录及其别名
@@ -16,7 +18,7 @@ const MEDIA_DIRS = [
     { path: 'N:\\e', alias: 'N' },
     { path: 'J:\\OneDrive - MSFT', alias: 'MUSIC' }
 ];
-const MUSIC_DIR = path.join(__dirname, 'music'); // 音乐文件目录
+const MUSIC_DIR = MEDIA_DIRS.find(d => d.alias === 'MUSIC')?.path || path.join(__dirname, 'music');
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
 
@@ -34,29 +36,31 @@ const server = http.createServer((req, res) => {
 
     // 新增：处理音乐列表请求
     if (pathname === '/api/music') {
-        fs.readdir(MUSIC_DIR, (err, files) => {
-            if (err) {
-                console.error('Error reading music directory:', err);
+        getFilesRecursively(MUSIC_DIR)
+            .then(allFiles => {
+                const musicFiles = allFiles.filter(file => file.endsWith('.mp3') || file.endsWith('.flac'));
+                const lyricsFiles = allFiles.filter(file => file.endsWith('.lrc') || file.endsWith('.vtt'));
+
+                const playlist = musicFiles.map(musicFile => {
+                    const baseName = path.parse(musicFile).name;
+                    const dirName = path.dirname(musicFile);
+                    const lrcFile = lyricsFiles.find(lyric => {
+                        return path.dirname(lyric) === dirName && path.parse(lyric).name === baseName;
+                    });
+                    return {
+                        music: musicFile.replace(/\\/g, '/'), // Ensure forward slashes for URLs
+                        lrc: lrcFile ? lrcFile.replace(/\\/g, '/') : null
+                    };
+                });
+
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(playlist));
+            })
+            .catch(err => {
+                console.error('Error reading music directory recursively:', err);
                 res.statusCode = 500;
                 res.end('Error reading music directory');
-                return;
-            }
-
-            const musicFiles = files.filter(file => file.endsWith('.mp3') || file.endsWith('.flac'));
-            const lyricsFiles = files.filter(file => file.endsWith('.lrc') || file.endsWith('.vtt'));
-
-            const playlist = musicFiles.map(musicFile => {
-                const baseName = path.parse(musicFile).name;
-                const lrcFile = lyricsFiles.find(lyric => path.parse(lyric).name === baseName);
-                return {
-                    music: musicFile,
-                    lrc: lrcFile || null
-                };
             });
-
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(playlist));
-        });
         return;
     }
 
@@ -76,6 +80,133 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(MEDIA_DIRS));
         return;
     }
+
+    // 新增：处理获取音乐元数据请求
+    if (pathname === '/api/music-info' && req.method === 'GET') {
+        const musicPath = parsedUrl.query.path;
+        if (!musicPath) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing music path parameter' }));
+            return;
+        }
+
+        const fullMusicPath = path.join(MUSIC_DIR, musicPath);
+
+        const pythonProcess = spawn('python', [
+            'get_music_info.py',
+            fullMusicPath,
+            '--json-output'
+        ], {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (stderrData) {
+                console.error(`get_music_info.py stderr: ${stderrData}`);
+            }
+            if (code !== 0) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error getting music info' }));
+                return;
+            }
+            try {
+                // 尝试找到有效的JSON输出
+                const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                if (jsonMatch && jsonMatch[1]) {
+                    const musicInfo = JSON.parse(jsonMatch[1]);
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: true, data: musicInfo }));
+                } else {
+                     throw new Error('No valid JSON found in python script output.');
+                }
+            } catch (e) {
+                console.error('Error parsing python script output:', e);
+                console.error('Raw stdout:', stdoutData);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error parsing music info' }));
+            }
+        });
+        return;
+    }
+
+    // 新增：处理网络信息获取请求
+    if (pathname === '/api/fetch-info' && req.method === 'GET') {
+        const musicPath = parsedUrl.query.path;
+        const source = parsedUrl.query.source || 'netease';
+
+        if (!musicPath) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing music path parameter' }));
+            return;
+        }
+
+        const fullMusicPath = path.join(MUSIC_DIR, musicPath);
+
+        const command = `python get_music_info.py "${fullMusicPath}" --source ${source} --no-write --json-output`;
+
+        exec(command, { env: { ...process.env, PYTHONIOENCODING: 'UTF-8' } }, (error, stdout, stderr) => {
+            if (stderr) {
+                console.error(`get_music_info.py stderr: ${stderr}`);
+            }
+            if (error) {
+                console.error(`exec error: ${error}`);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error executing python script' }));
+                return;
+            }
+
+            try {
+                const jsonMatch = stdout.match(/({[\s\S]*})/);
+                if (jsonMatch && jsonMatch[1]) {
+                    const musicInfo = JSON.parse(jsonMatch[1]);
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: true, data: musicInfo }));
+                } else {
+                    throw new Error('No valid JSON found in python script output.');
+                }
+            } catch (e) {
+                console.error('Error parsing python script output:', e);
+                console.error('Raw stdout:', stdout);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error parsing music info' }));
+            }
+        });
+        return;
+    }
+    
+    // 新增：图片代理
+    if (pathname === '/api/proxy-image' && req.method === 'GET') {
+        const imageUrl = parsedUrl.query.url;
+        if (!imageUrl) {
+            res.statusCode = 400;
+            res.end('Missing image URL');
+            return;
+        }
+
+        const proxyRequest = https.get(imageUrl, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res, { end: true });
+        });
+
+        proxyRequest.on('error', (err) => {
+            console.error('Proxy request error:', err);
+            res.statusCode = 500;
+            res.end('Failed to proxy image');
+        });
+        return;
+    }
+
 
     // 处理切换媒体目录的请求
     if (pathname === '/api/set-media-dir' && req.method === 'POST') {
@@ -502,9 +633,23 @@ const server = http.createServer((req, res) => {
     }
 
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
-    if (pathname.startsWith('/music/') || pathname.startsWith('/lyrics/')) {
-        const musicPath = path.join(__dirname, pathname);
-        fs.createReadStream(musicPath).pipe(res);
+    if (pathname.startsWith('/music/')) {
+        const relativeMusicPath = decodeURIComponent(pathname.substring('/music/'.length));
+        const fullMusicPath = path.join(MUSIC_DIR, relativeMusicPath);
+
+        // Security check to prevent path traversal attacks
+        if (fullMusicPath.startsWith(path.resolve(MUSIC_DIR))) {
+            const stream = fs.createReadStream(fullMusicPath);
+            stream.on('error', (err) => {
+                console.error(`Error streaming file ${fullMusicPath}:`, err);
+                res.statusCode = 404;
+                res.end('File not found');
+            });
+            stream.pipe(res);
+        } else {
+            res.statusCode = 403;
+            res.end('Forbidden');
+        }
         return;
     }
     // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
@@ -631,6 +776,22 @@ function getContentType(filePath) {
         '.ass': 'text/plain'
     };
     return mimeTypes[extname] || 'application/octet-stream';
+}
+
+async function getFilesRecursively(dir, baseDir = null) {
+    if (baseDir === null) {
+        baseDir = dir;
+    }
+    const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+    const files = await Promise.all(dirents.map((dirent) => {
+        const resolvedPath = path.resolve(dir, dirent.name);
+        if (dirent.isDirectory()) {
+            return getFilesRecursively(resolvedPath, baseDir);
+        } else {
+            return path.relative(baseDir, resolvedPath);
+        }
+    }));
+    return Array.prototype.concat(...files);
 }
 
 // 新增：处理字幕请求的API

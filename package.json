@@ -11,6 +11,7 @@
   "description": "",
   "dependencies": {
     "@fancyapps/ui": "^6.0.25",
+    "music-metadata": "^11.8.3",
     "srt-webvtt": "^2.0.0",
     "ws": "^8.18.3"
   }

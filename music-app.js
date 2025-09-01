@@ -23,9 +23,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const visualizationContainer = document.querySelector('.visualization-container');
     const canvas = document.getElementById('visualizer');
     const toggleLyricsVisualizerBtn = document.getElementById('toggle-lyrics-visualizer-btn');
-    const uploadLrcBtn = document.getElementById('upload-lrc-btn');
-    const lrcFileInput = document.getElementById('lrc-file-input');
+    // const uploadLrcBtn = document.getElementById('upload-lrc-btn');
+    // const lrcFileInput = document.getElementById('lrc-file-input');
     const closePlaylistBtn = document.getElementById('close-playlist-btn');
+    const networkBtn = document.getElementById('network-btn');
+    const fetchLyricsBtn = document.getElementById('fetch-lyrics-btn');
+    const fetchCoverNeteaseBtn = document.getElementById('fetch-cover-netease-btn');
+    const fetchCoverMbBtn = document.getElementById('fetch-cover-mb-btn');
+    const fetchInfoNeteaseBtn = document.getElementById('fetch-info-netease-btn');
+    const fetchInfoMbBtn = document.getElementById('fetch-info-mb-btn');
     
     // --- 播放器状态和数据 ---
     let currentSongIndex = 0;
@@ -58,10 +64,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const urlParams = new URLSearchParams(window.location.search);
         const src = urlParams.get('src');
         const title = urlParams.get('title') || '未知曲目';
-        const mediaDir = urlParams.get('mediaDir'); // mediaDir is not used yet but might be useful
-
+        const mediaDir = urlParams.get('mediaDir');
+    
+        let savedPlaylist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+    
         if (src) {
-            // 从文件名中提取标题和艺术家
             const decodedTitle = decodeURIComponent(title);
             const parts = decodedTitle.replace(/\.\w+$/, '').split(' - ');
             let artist = '未知艺术家';
@@ -70,26 +77,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 artist = parts[0];
                 songTitle = parts.slice(1).join(' - ');
             }
-
             const finalSrc = `${decodeURIComponent(src)}?mediaDir=${encodeURIComponent(mediaDir)}`;
-            playlist = [{
-                title: songTitle,
-                artist: artist,
-                src: finalSrc,
-                cover: 'cover.jpg', // 默认封面
-                lrc: null // 暂时没有歌词
-            }];
-            
-            // 隐藏播放列表相关按钮，因为只有一个项目
+    
+            let songIndex = savedPlaylist.findIndex(pSong => pSong.src === finalSrc);
+    
+            if (songIndex === -1) {
+                const newSong = {
+                    title: songTitle,
+                    artist: artist,
+                    src: finalSrc,
+                    cover: 'cover.jpg',
+                    lrc: null
+                };
+                savedPlaylist.push(newSong);
+                localStorage.setItem('musicPlaylist', JSON.stringify(savedPlaylist));
+                songIndex = savedPlaylist.length - 1;
+            }
+    
+            playlist = savedPlaylist;
+            currentSongIndex = songIndex;
+            initPlaylist();
+            loadSong(currentSongIndex);
+    
+        } else if (savedPlaylist.length > 0) {
+            playlist = savedPlaylist;
+            currentSongIndex = 0;
+            initPlaylist();
+            loadSong(currentSongIndex);
+        } else {
+            fetchPlaylist();
+        }
+    
+        if (playlist.length > 1) {
+            playlistBtn.style.display = 'block';
+            prevBtn.style.display = 'block';
+            nextBtn.style.display = 'block';
+            modeBtn.style.display = 'block';
+        } else {
             playlistBtn.style.display = 'none';
             prevBtn.style.display = 'none';
             nextBtn.style.display = 'none';
             modeBtn.style.display = 'none';
-            
-            loadSong(0);
-        } else {
-            // Fallback to fetching playlist if no src is provided
-            fetchPlaylist();
         }
     }
 
@@ -113,9 +141,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return {
                     title: title,
                     artist: artist,
-                    src: `/music/${musicFile}`,
-                    cover: "./music/cover.jpg", // 暂时使用通用封面
-                    lrc: item.lrc ? `/lyrics/${item.lrc}` : null
+                    src: `/music/${item.music}`,
+                    cover: "./music/cover.jpg", // A default cover
+                    lrc: item.lrc ? `/music/${item.lrc}` : null // Lyrics are also in the music dir
                 };
             });
             initPlaylist();
@@ -210,16 +238,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sound) {
             sound.unload(); // 卸载上一首
         }
-        // 重置封面旋转动画，以便下一首歌曲从头开始
         albumCover.classList.remove('playing');
         const song = playlist[index];
+
+        // 1. 先用播放列表中的基本信息填充UI
         songTitle.textContent = song.title;
         songArtist.textContent = song.artist;
-        albumCover.src = getCacheBustedUrl(song.cover);
+        albumCover.src = getCacheBustedUrl(song.cover); // 使用默认封面
         playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
-        
+
+        // 2. 异步获取详细的音乐信息
+        fetchMusicInfo(song);
+
         sound = new Howl({
-            src: [song.src], // 直接使用后端的URL
+            src: [song.src],
             format: ['flac', 'mp3'],
             crossOrigin: 'anonymous',
             volume: volumeSlider.value,
@@ -236,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
                    setupVisualizer();
                    if(isVisualizerVisible) {
                        cancelAnimationFrame(visualizerRAF);
-                       draw(); // 直接调用
+                       draw();
                    }
                 }
             },
@@ -247,12 +279,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 cancelAnimationFrame(lyricRAF);
                 cancelAnimationFrame(visualizerRAF);
             },
-            onend: () => {
-                playNext();
-            },
+            onend: () => playNext(),
             onload: () => {
                  durationEl.textContent = formatTime(sound.duration());
-                 // 设置主题色
                 if (albumCover.complete) {
                     setThemeColor(albumCover);
                 } else {
@@ -263,6 +292,69 @@ document.addEventListener('DOMContentLoaded', () => {
         
         loadLyrics(song.lrc);
         updatePlaylistUI();
+    }
+
+    async function fetchMusicInfo(song) {
+        try {
+            // 从 song.src 中提取文件名，并移除URL参数
+            let musicPath = song.src;
+            if (musicPath.includes('?')) {
+                musicPath = musicPath.split('?')[0];
+            }
+            if (musicPath.startsWith('/music/')) {
+                musicPath = musicPath.substring('/music/'.length);
+            }
+            
+            const response = await fetch(`/api/music-info?path=${encodeURIComponent(musicPath)}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch music info');
+            }
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                const info = result.data;
+                // 用获取到的信息更新UI
+                songTitle.textContent = info.title || song.title;
+                songArtist.textContent = info.artist || song.artist;
+                
+                // 检查后端是否返回了封面文件名
+                if (info.cover_filename) {
+                    const coverUrl = `/cache/covers/${info.cover_filename}`;
+                    
+                    // 使用一个技巧来检查图片是否存在，如果404则不更新
+                    const img = new Image();
+                    img.onload = () => {
+                        albumCover.src = getCacheBustedUrl(coverUrl);
+                        playerBg.style.backgroundImage = `url(${getCacheBustedUrl(coverUrl)})`;
+                        // 封面加载后重新设置主题色
+                        // 传入已经加载完成的img对象，而不是albumCover DOM元素
+                        // 避免因DOM更新延迟导致colorthief读取不到图像数据
+                        setThemeColor(img);
+                    };
+                    img.onerror = () => {
+                        console.warn(`Cover image not found at ${coverUrl}, using default.`);
+                        // 如果封面加载失败，确保主题色被重置或使用默认封面
+                        albumCover.src = getCacheBustedUrl(song.cover);
+                        playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
+                        // Ensure the default cover is loaded before getting color
+                        if (albumCover.complete) {
+                            setThemeColor(albumCover);
+                        } else {
+                            albumCover.onload = () => setThemeColor(albumCover);
+                        }
+                    };
+                    img.src = getCacheBustedUrl(coverUrl);
+                } else {
+                    // 如果后端没有返回封面文件名，保持原有逻辑或使用默认封面
+                    console.warn("No cover_filename in API response, using default cover.");
+                    albumCover.src = getCacheBustedUrl(song.cover);
+                    playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
+                    setThemeColor(albumCover);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching music info:', error);
+        }
     }
     
     function playSong() {
@@ -382,6 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initPlaylist() {
+        playlistUl.innerHTML = ''; // Clear existing playlist
         playlist.forEach((song, index) => {
             const li = document.createElement('li');
             li.dataset.index = index;
@@ -390,18 +483,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="title">${song.title}</span>
                     <span class="artist">${song.artist}</span>
                 </div>
-                <i class="fas fa-play-circle d-none"></i>
+                <div class="playlist-item-controls">
+                     <i class="fas fa-bars handle" style="cursor: grab; margin-right: 10px;"></i>
+                    <i class="fas fa-trash delete-btn"></i>
+                </div>
             `;
-            li.addEventListener('click', () => {
-                currentSongIndex = index;
-                loadSong(index);
+            
+            li.querySelector('.song-info').addEventListener('click', () => {
+                // 确保我们获取的是最新的索引
+                const latestIndex = Array.from(playlistUl.children).indexOf(li);
+                currentSongIndex = latestIndex;
+                loadSong(latestIndex);
                 playSong();
                 if (window.innerWidth <= 768) {
-                    togglePlaylist(); // 移动端点击后自动关闭列表
+                    togglePlaylist();
                 }
             });
+            
+            li.querySelector('.delete-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const latestIndex = Array.from(playlistUl.children).indexOf(li);
+                removeSongFromPlaylist(latestIndex);
+            });
+
             playlistUl.appendChild(li);
         });
+
+        // 初始化一次Sortable
+        if (!playlistUl.sortableInstance) {
+            playlistUl.sortableInstance = new Sortable(playlistUl, {
+                animation: 150,
+                handle: '.handle',
+                onEnd: function (evt) {
+                    const { oldIndex, newIndex } = evt;
+                    handleDrop(oldIndex, newIndex);
+                }
+            });
+        }
     }
 
     function updatePlaylistUI() {
@@ -412,6 +530,83 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 item.classList.remove('playing');
             }
+        });
+    }
+
+    function removeSongFromPlaylist(indexToRemove) {
+        playlist.splice(indexToRemove, 1);
+        localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+
+        // 从DOM中移除
+        const itemToRemove = playlistUl.children[indexToRemove];
+        if (itemToRemove) {
+            itemToRemove.remove();
+        }
+
+        if (currentSongIndex === indexToRemove) {
+             if (playlist.length === 0) {
+                // 播放列表为空的处理
+                if (sound) sound.stop();
+                songTitle.textContent = '播放列表为空';
+                songArtist.textContent = '';
+                albumCover.src = 'cover.jpg';
+                return;
+            }
+            currentSongIndex = indexToRemove >= playlist.length ? playlist.length - 1 : indexToRemove;
+            loadSong(currentSongIndex);
+            playSong();
+        } else if (currentSongIndex > indexToRemove) {
+            currentSongIndex--;
+        }
+        
+        // 更新后续项目的事件监听器和索引
+        updatePlaylistEventListeners();
+        updatePlaylistUI();
+    }
+
+    function handleDrop(oldIndex, newIndex) {
+        if (oldIndex === newIndex) return;
+
+        const movedItem = playlist.splice(oldIndex, 1)[0];
+        playlist.splice(newIndex, 0, movedItem);
+
+        // 更新当前播放歌曲的索引
+        if (currentSongIndex === oldIndex) {
+            currentSongIndex = newIndex;
+        } else if (oldIndex < currentSongIndex && newIndex >= currentSongIndex) {
+            currentSongIndex--;
+        } else if (oldIndex > currentSongIndex && newIndex <= currentSongIndex) {
+            currentSongIndex++;
+        }
+
+        localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+        
+        // SortableJS已经移动了DOM，我们只需要更新事件监听器
+        updatePlaylistEventListeners();
+        updatePlaylistUI();
+    }
+
+    function updatePlaylistEventListeners() {
+        Array.from(playlistUl.children).forEach((li, index) => {
+            li.dataset.index = index;
+
+            // 移除旧的监听器以避免重复绑定
+            const newLi = li.cloneNode(true);
+            li.parentNode.replaceChild(newLi, li);
+
+            newLi.querySelector('.song-info').addEventListener('click', () => {
+                currentSongIndex = index;
+                loadSong(index);
+                playSong();
+                if (window.innerWidth <= 768) {
+                    togglePlaylist();
+                }
+            });
+            
+            newLi.querySelector('.delete-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeSongFromPlaylist(index);
+            });
         });
     }
     
@@ -892,9 +1087,16 @@ document.addEventListener('DOMContentLoaded', () => {
     modeBtn.addEventListener('click', changePlayMode);
     speedOptions.addEventListener('click', setSpeed);
     playlistBtn.addEventListener('click', togglePlaylist);
-    uploadLrcBtn.addEventListener('click', () => lrcFileInput.click());
-    lrcFileInput.addEventListener('change', handleLrcFileSelect);
+    // uploadLrcBtn.addEventListener('click', () => lrcFileInput.click());
+    // lrcFileInput.addEventListener('change', handleLrcFileSelect);
     closePlaylistBtn.addEventListener('click', togglePlaylist);
+
+    // --- 网络功能事件监听 ---
+    fetchLyricsBtn.addEventListener('click', () => fetchFromNetwork('lyrics'));
+    fetchCoverNeteaseBtn.addEventListener('click', () => fetchFromNetwork('cover', 'netease'));
+    fetchCoverMbBtn.addEventListener('click', () => fetchFromNetwork('cover', 'musicbrainz'));
+    fetchInfoNeteaseBtn.addEventListener('click', () => fetchFromNetwork('info', 'netease'));
+    fetchInfoMbBtn.addEventListener('click', () => fetchFromNetwork('info', 'musicbrainz'));
     toggleLyricsVisualizerBtn.addEventListener('click', toggleLyricsVisualizer);
 
     // --- 歌词文件处理 ---
@@ -981,6 +1183,66 @@ document.addEventListener('DOMContentLoaded', () => {
             showVisualizer();
         }
     }
+
+    // --- 网络请求功能 ---
+    async function fetchFromNetwork(type, source = 'netease') {
+        if (!playlist[currentSongIndex]) {
+            alert('请先播放一首歌曲');
+            return;
+        }
+
+        const song = playlist[currentSongIndex];
+        let musicPath = song.src;
+        if (musicPath.includes('?')) {
+            musicPath = musicPath.split('?')[0];
+        }
+        if (musicPath.startsWith('/music/')) {
+            musicPath = musicPath.substring('/music/'.length);
+        }
+
+        try {
+            const response = await fetch(`/api/fetch-info?path=${encodeURIComponent(musicPath)}&source=${source}`);
+            if (!response.ok) {
+                throw new Error(`网络响应错误: ${response.statusText}`);
+            }
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                const info = result.data;
+                console.log('Fetched info:', info);
+
+                if (type === 'lyrics' && info.lyrics) {
+                    currentLyrics = [];
+                    parseLrc(info.lyrics);
+                    alert('歌词同步成功！');
+                } else if (type === 'cover' && info.cover_url) {
+                    const coverUrl = `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`;
+                    albumCover.src = getCacheBustedUrl(coverUrl);
+                    playerBg.style.backgroundImage = `url(${getCacheBustedUrl(coverUrl)})`;
+                    setThemeColor(albumCover);
+                    alert('封面匹配成功！');
+                } else if (type === 'info') {
+                    songTitle.textContent = info.title || song.title;
+                    songArtist.textContent = info.artist || song.artist;
+                    // 更新播放列表中的信息
+                    playlist[currentSongIndex].title = info.title || song.title;
+                    playlist[currentSongIndex].artist = info.artist || song.artist;
+                    initPlaylist();
+                    updatePlaylistUI();
+                    localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                    alert('歌曲信息匹配成功！');
+                } else {
+                    alert(`${type} 信息未找到。`);
+                }
+            } else {
+                alert(`从 ${source} 获取 ${type} 失败: ${result.message || '未知错误'}`);
+            }
+        } catch (error) {
+            console.error(`Error fetching from network (${type}, ${source}):`, error);
+            alert(`请求失败: ${error.message}`);
+        }
+    }
+
 
     // --- 歌词滚动事件 ---
     lyricsContainer.addEventListener('wheel', (e) => {
