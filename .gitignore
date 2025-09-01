@@ -12,3 +12,6 @@ temp.txt
 /video-player-test
 music-player-sample.html
 cover.jpg
+/cache
+get-music-info-netease.py
+get-music-info-mb.py

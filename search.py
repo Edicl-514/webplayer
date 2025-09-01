@@ -42,7 +42,7 @@ class EverythingSDK:
         """加载 Everything64.dll"""
         try:
             # 尝试从当前目录或系统路径加载
-            self.dll = ctypes.WinDLL(r"D:\code\webplayer\everything_sdk\dll\Everything64.dll") # type: ignore
+            self.dll = ctypes.WinDLL(r".\everything_sdk\dll\Everything64.dll") # type: ignore
         except OSError:
             try:
                 # 如果找不到64位版本，尝试32位

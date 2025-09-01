@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 
-const PORT = 3000;
+const PORT = 8080;
 // 定义媒体目录及其别名
 const MEDIA_DIRS = [
     { path: 'J:\\e', alias: 'J' }, // 示例：请将此路径更改为您的视频和文件目录
@@ -685,7 +685,7 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
 // 缩略图缓存目录
-const THUMBNAIL_DIR = path.join(__dirname, 'thumbnails');
+const THUMBNAIL_DIR = path.join(__dirname, 'cache', 'thumbnails');
 
 /**
  * 执行搜索操作
