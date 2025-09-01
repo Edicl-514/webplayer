@@ -32,6 +32,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const fetchCoverMbBtn = document.getElementById('fetch-cover-mb-btn');
     const fetchInfoNeteaseBtn = document.getElementById('fetch-info-netease-btn');
     const fetchInfoMbBtn = document.getElementById('fetch-info-mb-btn');
+   const settingsBtn = document.getElementById('settings-btn');
+   const infoPrioritySelect = document.getElementById('info-priority');
+   const coverPrioritySelect = document.getElementById('cover-priority');
+   const lyricsFetchSelect = document.getElementById('lyrics-fetch');
+   const lyricsTypeSelect = document.getElementById('lyrics-type');
     
     // --- 播放器状态和数据 ---
     let currentSongIndex = 0;
@@ -305,7 +310,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 musicPath = musicPath.substring('/music/'.length);
             }
             
-            const response = await fetch(`/api/music-info?path=${encodeURIComponent(musicPath)}`);
+           const settings = getSettings();
+           const params = new URLSearchParams({
+               path: musicPath,
+               source: settings.infoPriority,
+               'no-write': settings.lyricsFetch === 'false', // Assuming 'false' means don't write
+               'original-lyrics': settings.lyricsType === 'original'
+           });
+
+            const response = await fetch(`/api/music-info?${params.toString()}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch music info');
             }
@@ -317,6 +330,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 songTitle.textContent = info.title || song.title;
                 songArtist.textContent = info.artist || song.artist;
                 
+                // BUGFIX: 更新播放列表和localStorage中的元数据
+                const hasChanged = (song.title !== songTitle.textContent) || (song.artist !== songArtist.textContent);
+                if (hasChanged) {
+                    song.title = songTitle.textContent;
+                    song.artist = songArtist.textContent;
+                    initPlaylist();
+                    updatePlaylistUI();
+                    localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                }
+
                 // 检查后端是否返回了封面文件名
                 if (info.cover_filename) {
                     const coverUrl = `/cache/covers/${info.cover_filename}`;
@@ -350,6 +373,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     albumCover.src = getCacheBustedUrl(song.cover);
                     playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
                     setThemeColor(albumCover);
+                }
+
+                // 新增：检查并处理返回的歌词
+                if (info.lyrics) {
+                    console.log('Got lyrics from fetchMusicInfo, parsing...');
+                    currentLyrics = []; // 清空旧歌词
+                    parseLrc(info.lyrics);
+                    showToast('自动匹配歌词成功！', 'success');
                 }
             }
         } catch (error) {
@@ -675,17 +706,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function parseLrc(lrc) {
         const lines = lrc.split('\n');
-        const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+        const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g; // 使用全局匹配来处理一行多个时间戳
+        const lyricsMap = new Map();
+
         lines.forEach(line => {
-            const match = timeRegex.exec(line);
-            if (match) {
-                const time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 1000;
-                const text = line.replace(timeRegex, '').trim();
-                if (text) {
-                    currentLyrics.push({ time, text });
-                }
+            let text = line.replace(timeRegex, '').trim();
+            if (!text) return;
+
+            const matches = Array.from(line.matchAll(timeRegex));
+            if (matches.length > 0) {
+                matches.forEach(match => {
+                    const time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseFloat(`0.${match[3]}`);
+                    if (!lyricsMap.has(time)) {
+                        lyricsMap.set(time, []);
+                    }
+                    lyricsMap.get(time).push(text);
+                });
             }
         });
+
+        currentLyrics = Array.from(lyricsMap.entries()).map(([time, texts]) => ({
+            time,
+            texts
+        }));
 
         currentLyrics.sort((a, b) => a.time - b.time);
         renderLyrics();
@@ -724,11 +767,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         currentLyrics.forEach((lyric, index) => {
-            const p = document.createElement('p');
-            p.textContent = lyric.text;
-            p.dataset.time = lyric.time;
-            p.dataset.index = index;
-            lyricsWrapper.appendChild(p);
+            const group = document.createElement('div');
+            group.classList.add('lyric-group');
+            group.dataset.time = lyric.time;
+            group.dataset.index = index;
+            
+            lyric.texts.forEach(text => {
+                const p = document.createElement('p');
+                p.textContent = text;
+                group.appendChild(p);
+            });
+
+            lyricsWrapper.appendChild(group);
         });
         showLyrics();
         toggleLyricsVisualizerBtn.style.display = 'block';
@@ -752,32 +802,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         if (activeIndex !== -1) {
-            const activeLine = lyricsWrapper.querySelector(`p[data-index='${activeIndex}']`);
-            if (activeLine && !activeLine.classList.contains('active')) {
-                const prevActive = lyricsWrapper.querySelector('p.active');
+            const activeGroup = lyricsWrapper.querySelector(`.lyric-group[data-index='${activeIndex}']`);
+            if (activeGroup && !activeGroup.classList.contains('active')) {
+                const prevActive = lyricsWrapper.querySelector('.lyric-group.active');
                 if (prevActive) {
                     prevActive.classList.remove('active');
                 }
-                activeLine.classList.add('active');
+                activeGroup.classList.add('active');
 
                 // 滚动歌词
-                // 只有在非手动滚动状态下才自动滚动
                 if (!isLyricScrolling) {
                     lyricsWrapper.style.transition = 'transform 0.5s ease-out';
                     
-                    // 使用requestAnimationFrame确保DOM更新完成
                     requestAnimationFrame(() => {
                         const containerHeight = lyricsWrapper.parentElement.offsetHeight;
                         const visualizationHeight = document.querySelector('.visualization-container').offsetHeight || 0;
                         const effectiveContainerHeight = containerHeight - visualizationHeight;
                         
-                        // 获取激活行的实际渲染高度（包括字体放大效果）
-                        const activeLineHeight = activeLine.offsetHeight;
-                        const lineTop = activeLine.offsetTop;
+                        const activeLineHeight = activeGroup.offsetHeight;
+                        const lineTop = activeGroup.offsetTop;
                         const lineCenter = lineTop + (activeLineHeight / 2);
                         const containerCenter = effectiveContainerHeight / 2;
                         
-                        // 计算滚动偏移，使歌词中心与容器中心对齐
                         const scrollOffset = lineCenter - containerCenter;
                         
                         lyricsWrapper.style.transform = `translateY(-${scrollOffset}px)`;
@@ -792,33 +838,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 歌词手动滚动功能 ---
 
     function findCenterLyric() {
-        const allLyrics = lyricsWrapper.querySelectorAll('p[data-index]');
-        if (allLyrics.length === 0) return null;
+        const allLyricGroups = lyricsWrapper.querySelectorAll('.lyric-group[data-index]');
+        if (allLyricGroups.length === 0) return null;
 
         const containerRect = lyricsContainer.getBoundingClientRect();
         const containerCenterY = containerRect.top + containerRect.height / 2;
         
-        let centerLyric = null;
+        let centerLyricGroup = null;
         let minDistance = Infinity;
 
-        allLyrics.forEach(line => {
-            const lineRect = line.getBoundingClientRect();
-            if (lineRect.height === 0) return; // Skip invisible elements
-            const lineCenterY = lineRect.top + lineRect.height / 2;
-            const distance = Math.abs(containerCenterY - lineCenterY);
+        allLyricGroups.forEach(group => {
+            const groupRect = group.getBoundingClientRect();
+            if (groupRect.height === 0) return; // Skip invisible elements
+            const groupCenterY = groupRect.top + groupRect.height / 2;
+            const distance = Math.abs(containerCenterY - groupCenterY);
 
             if (distance < minDistance) {
                 minDistance = distance;
-                centerLyric = line;
+                centerLyricGroup = group;
             }
         });
         
-        // 如果找不到有效的中心歌词，则返回null
-        if (!centerLyric || centerLyric.getBoundingClientRect().height === 0) {
+        if (!centerLyricGroup || centerLyricGroup.getBoundingClientRect().height === 0) {
             return null;
         }
         
-        return centerLyric;
+        return centerLyricGroup;
     }
 
     function updatePlayButtonPosition() {
@@ -826,7 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
             const centerLine = findCenterLyric();
             if (centerLine) {
-                const lastTarget = lyricsWrapper.querySelector('p.target');
+                const lastTarget = lyricsWrapper.querySelector('.lyric-group.target');
                 if (lastTarget) lastTarget.classList.remove('target');
                 centerLine.classList.add('target');
     
@@ -851,7 +896,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playFromLyricsBtn.classList.add('hidden');
         lyricsWrapper.classList.remove('scrolling');
         
-        const lastTarget = lyricsWrapper.querySelector('p.target');
+        const lastTarget = lyricsWrapper.querySelector('.lyric-group.target');
         if(lastTarget) lastTarget.classList.remove('target');
 
         // 恢复自动滚动
@@ -917,9 +962,9 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsContainer.appendChild(playFromLyricsBtn);
 
         playFromLyricsBtn.addEventListener('click', () => {
-            const targetLine = lyricsWrapper.querySelector('p.target');
-            if (targetLine) {
-                const time = parseFloat(targetLine.dataset.time);
+            const targetGroup = lyricsWrapper.querySelector('.lyric-group.target');
+            if (targetGroup) {
+                const time = parseFloat(targetGroup.dataset.time);
                 sound.seek(time);
                 if (!isPlaying) playSong();
             }
@@ -991,6 +1036,41 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
             document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
         }
+    }
+    
+    // --- Toast 通知 ---
+    let toastContainer;
+    
+    function createToastContainer() {
+        if (document.querySelector('.toast-container')) {
+            toastContainer = document.querySelector('.toast-container');
+            return;
+        }
+        toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+    
+    function showToast(message, type = 'info', duration = 3000) {
+        if (!toastContainer) createToastContainer();
+    
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+    
+        toastContainer.appendChild(toast);
+    
+        // 触发动画
+        setTimeout(() => {
+            toast.classList.add('show');
+        }, 10);
+    
+        // 自动隐藏
+        setTimeout(() => {
+            toast.classList.remove('show');
+            // 动画结束后从DOM中移除
+            toast.addEventListener('transitionend', () => toast.remove());
+        }, duration);
     }
     
     // --- 移动端音量控制相关变量 ---
@@ -1092,12 +1172,65 @@ document.addEventListener('DOMContentLoaded', () => {
     closePlaylistBtn.addEventListener('click', togglePlaylist);
 
     // --- 网络功能事件监听 ---
-    fetchLyricsBtn.addEventListener('click', () => fetchFromNetwork('lyrics'));
+    // --- Setup Lyrics Menu ---
+    if (fetchLyricsBtn) {
+        fetchLyricsBtn.classList.add('lyrics-options');
+        fetchLyricsBtn.innerHTML = `
+            <span>获取歌词</span>
+            <div class="lyrics-sources">
+                <div id="fetch-lyrics-bilingual-btn">双语歌词</div>
+                <div id="fetch-lyrics-original-btn">原文歌词</div>
+            </div>
+        `;
+        
+        const bilingualBtn = document.getElementById('fetch-lyrics-bilingual-btn');
+        const originalBtn = document.getElementById('fetch-lyrics-original-btn');
+    
+        if (bilingualBtn) {
+            bilingualBtn.addEventListener('click', () => fetchFromNetwork('lyrics', 'netease', true));
+        }
+        if (originalBtn) {
+            originalBtn.addEventListener('click', () => fetchFromNetwork('lyrics', 'netease', false));
+        }
+    }
     fetchCoverNeteaseBtn.addEventListener('click', () => fetchFromNetwork('cover', 'netease'));
     fetchCoverMbBtn.addEventListener('click', () => fetchFromNetwork('cover', 'musicbrainz'));
     fetchInfoNeteaseBtn.addEventListener('click', () => fetchFromNetwork('info', 'netease'));
     fetchInfoMbBtn.addEventListener('click', () => fetchFromNetwork('info', 'musicbrainz'));
     toggleLyricsVisualizerBtn.addEventListener('click', toggleLyricsVisualizer);
+
+   // --- 设置功能 ---
+   function saveSettings() {
+       const settings = {
+           infoPriority: infoPrioritySelect.value,
+           coverPriority: coverPrioritySelect.value,
+           lyricsFetch: lyricsFetchSelect.value,
+           lyricsType: lyricsTypeSelect.value,
+       };
+       localStorage.setItem('playerSettings', JSON.stringify(settings));
+   }
+
+   function loadSettings() {
+       const settings = JSON.parse(localStorage.getItem('playerSettings')) || {};
+       infoPrioritySelect.value = settings.infoPriority || 'local';
+       coverPrioritySelect.value = settings.coverPriority || 'local';
+       lyricsFetchSelect.value = settings.lyricsFetch || 'true';
+       lyricsTypeSelect.value = settings.lyricsType || 'bilingual';
+   }
+
+   function getSettings() {
+       return {
+           infoPriority: infoPrioritySelect.value,
+           coverPriority: coverPrioritySelect.value,
+           lyricsFetch: lyricsFetchSelect.value,
+           lyricsType: lyricsTypeSelect.value,
+       };
+   }
+
+   infoPrioritySelect.addEventListener('change', saveSettings);
+   coverPrioritySelect.addEventListener('change', saveSettings);
+   lyricsFetchSelect.addEventListener('change', saveSettings);
+   lyricsTypeSelect.addEventListener('change', saveSettings);
 
     // --- 歌词文件处理 ---
     function handleLrcFileSelect(event) {
@@ -1185,12 +1318,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 网络请求功能 ---
-    async function fetchFromNetwork(type, source = 'netease') {
+    async function fetchFromNetwork(type, source = 'netease', bilingual = true) {
         if (!playlist[currentSongIndex]) {
-            alert('请先播放一首歌曲');
+            showToast('请先播放一首歌曲', 'error');
             return;
         }
-
+    
         const song = playlist[currentSongIndex];
         let musicPath = song.src;
         if (musicPath.includes('?')) {
@@ -1199,28 +1332,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (musicPath.startsWith('/music/')) {
             musicPath = musicPath.substring('/music/'.length);
         }
-
+    
+        const typeMap = { lyrics: '歌词', cover: '封面', info: '信息' };
+        const actionText = `从 ${source} 获取${typeMap[type]}`;
+        showToast(`正在${actionText}...`, 'info', 2500);
+    
         try {
-            const response = await fetch(`/api/fetch-info?path=${encodeURIComponent(musicPath)}&source=${source}`);
+            let url = `/api/fetch-info?path=${encodeURIComponent(musicPath)}&source=${source}`;
+            if (type === 'lyrics' && !bilingual) {
+                url += '&original_lyrics=true';
+            }
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`网络响应错误: ${response.statusText}`);
             }
             const result = await response.json();
-
+    
             if (result.success && result.data) {
                 const info = result.data;
                 console.log('Fetched info:', info);
-
+    
                 if (type === 'lyrics' && info.lyrics) {
                     currentLyrics = [];
                     parseLrc(info.lyrics);
-                    alert('歌词同步成功！');
+                    showToast('歌词同步成功！', 'success');
                 } else if (type === 'cover' && info.cover_url) {
                     const coverUrl = `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`;
                     albumCover.src = getCacheBustedUrl(coverUrl);
                     playerBg.style.backgroundImage = `url(${getCacheBustedUrl(coverUrl)})`;
                     setThemeColor(albumCover);
-                    alert('封面匹配成功！');
+                    showToast('封面匹配成功！', 'success');
                 } else if (type === 'info') {
                     songTitle.textContent = info.title || song.title;
                     songArtist.textContent = info.artist || song.artist;
@@ -1230,16 +1371,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     initPlaylist();
                     updatePlaylistUI();
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
-                    alert('歌曲信息匹配成功！');
+                    showToast('歌曲信息匹配成功！', 'success');
                 } else {
-                    alert(`${type} 信息未找到。`);
+                    showToast(`${typeMap[type]}信息未找到。`, 'info');
                 }
             } else {
-                alert(`从 ${source} 获取 ${type} 失败: ${result.message || '未知错误'}`);
+                showToast(`${actionText}失败: ${result.message || '未知错误'}`, 'error');
             }
         } catch (error) {
             console.error(`Error fetching from network (${type}, ${source}):`, error);
-            alert(`请求失败: ${error.message}`);
+            showToast(`请求失败: ${error.message}`, 'error');
         }
     }
 
@@ -1274,6 +1415,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- 初始化 ---
     createLyricsPlayButton();
+    createToastContainer(); // 初始化Toast容器
+   loadSettings();
     initializePlayer(); // 初始化播放器
     // 设置默认激活的倍速选项
     document.querySelector('.speed-options div[data-speed="1.0"]').classList.add('active');

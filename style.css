@@ -224,15 +224,21 @@ body {
     padding-right: 40px;
 }
 
-.lyrics-wrapper p {
+.lyrics-wrapper .lyric-group {
     padding: 18px 0;
-    font-size: 18px;
-    color: var(--secondary-text);
     cursor: pointer;
     transition: all 0.3s ease;
-    line-height: 1.6;
     border-left: 3px solid transparent;
     padding-left: 10px;
+}
+
+.lyrics-wrapper p {
+    font-size: 18px;
+    color: var(--secondary-text);
+    transition: all 0.3s ease;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
 }
 
 .lyrics-wrapper.scrolling p {
@@ -245,9 +251,12 @@ body {
     background-color: rgba(0,0,0,0.2);
 }
 
-.lyrics-wrapper p.active {
+.lyrics-wrapper .lyric-group.active p {
     color: var(--accent-color);
     font-weight: 500;
+}
+
+.lyrics-wrapper .lyric-group.active {
     transform: scale(1.2);
     transform-origin: center center;
 }
@@ -759,11 +768,11 @@ body {
     border-bottom-right-radius: 8px;
 }
 
-.cover-options > span, .info-options > span {
+.cover-options > span, .info-options > span, .lyrics-options > span {
     display: block;
 }
 
-.cover-sources, .info-sources {
+.cover-sources, .info-sources, .lyrics-sources {
     display: block;
     position: absolute;
     opacity: 0;
@@ -777,14 +786,14 @@ body {
     box-shadow: 0 4px 10px var(--shadow-color);
 }
 
-.cover-options:hover .cover-sources, .info-options:hover .info-sources {
+.cover-options:hover .cover-sources, .info-options:hover .info-sources, .lyrics-options:hover .lyrics-sources {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
     transition: opacity 0.2s ease-out;
 }
 
-.cover-sources div, .info-sources div {
+.cover-sources div, .info-sources div, .lyrics-sources div {
     padding: 10px 18px;
     white-space: nowrap;
 }
@@ -792,4 +801,97 @@ body {
 .cover-sources div:hover, .info-sources div:hover {
     background-color: var(--accent-color);
     color: var(--primary-bg);
+}
+/* Toast Notifications */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.toast {
+    background-color: var(--secondary-bg);
+    color: var(--primary-text);
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    font-size: 14px;
+    border-left: 5px solid var(--secondary-text);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast.success {
+    border-left-color: #4caf50;
+    background-color: #2e3c30;
+}
+
+.toast.error {
+    border-left-color: #f44336;
+    background-color: #4a2c2a;
+}
+
+.toast.info {
+    border-left-color: var(--accent-color);
+    background-color: #2a3f4a;
+}
+
+/* 设置控件 */
+.settings-control {
+   position: relative;
+}
+
+.settings-options {
+   position: absolute;
+   bottom: calc(100% + 15px);
+   left: 50%;
+   transform: translateX(-50%);
+   background: var(--secondary-bg);
+   border-radius: 8px;
+   box-shadow: 0 4px 10px var(--shadow-color);
+   z-index: 20;
+   opacity: 0;
+   visibility: hidden;
+   transition: all 0.2s ease-out;
+   width: max-content;
+   padding: 10px;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+}
+
+.settings-control:hover .settings-options {
+   opacity: 1;
+   visibility: visible;
+}
+
+.settings-option {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   font-size: 14px;
+}
+
+.settings-option label {
+   white-space: nowrap;
+}
+
+.settings-option select {
+   background: var(--primary-bg);
+   color: var(--primary-text);
+   border: 1px solid var(--secondary-text);
+   border-radius: 4px;
+   padding: 5px;
+   cursor: pointer;
 }

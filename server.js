@@ -92,11 +92,21 @@ const server = http.createServer((req, res) => {
 
         const fullMusicPath = path.join(MUSIC_DIR, musicPath);
 
-        const pythonProcess = spawn('python', [
-            'get_music_info.py',
-            fullMusicPath,
-            '--json-output'
-        ], {
+       const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics } = parsedUrl.query;
+       
+       const args = ['get_music_info.py', fullMusicPath, '--json-output'];
+
+       if (source) {
+           args.push('--source', source);
+       }
+       if (noWrite === 'true') {
+           args.push('--no-write');
+       }
+       if (originalLyrics === 'true') {
+           args.push('--original-lyrics');
+       }
+
+        const pythonProcess = spawn('python', args, {
             env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
         });
 
@@ -153,7 +163,11 @@ const server = http.createServer((req, res) => {
 
         const fullMusicPath = path.join(MUSIC_DIR, musicPath);
 
-        const command = `python get_music_info.py "${fullMusicPath}" --source ${source} --no-write --json-output`;
+        const originalLyrics = parsedUrl.query.original_lyrics === 'true';
+        let command = `python get_music_info.py "${fullMusicPath}" --source ${source} --no-write --json-output`;
+        if (originalLyrics) {
+            command += ' --original-lyrics';
+        }
 
         exec(command, { env: { ...process.env, PYTHONIOENCODING: 'UTF-8' } }, (error, stdout, stderr) => {
             if (stderr) {

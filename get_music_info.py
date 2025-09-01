@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--no-write", action="store_true", help="Do not write the info to the original file.")
     parser.add_argument("--json-output", action="store_true", help="Output all metadata as JSON.")
     
+    parser.add_argument("--original-lyrics", action="store_true", help="Only get original lyrics, do not combine with translations.")
+    
     args = parser.parse_args()
 
     # Ensure cache directories exist
@@ -60,7 +62,7 @@ def main():
             track_info = {'title': os.path.splitext(os.path.basename(args.filepath))[0], 'artist': '', 'album': ''}
             print(f"DEBUG: Fallback track_info: {track_info}", file=sys.stderr)
 
-        print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
+        #print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
 
         # 2. Get music info from the selected source
         if args.source == 'local':
@@ -76,7 +78,16 @@ def main():
         elif args.source == 'musicbrainz':
             music_info = search_musicbrainz(track_info)
         else: # netease
-            music_info = search_netease(track_info)
+            music_info = search_netease(track_info, bilingual=not args.original_lyrics)
+        
+        # If the source is local, but we still want to fetch lyrics online
+        if args.source == 'local' and not args.no_write:
+            #print("Source is local, but lyrics fetching is enabled. Searching Netease for lyrics.", file=sys.stderr)
+            # We only care about the lyrics from this call
+            netease_info = search_netease(track_info, bilingual=not args.original_lyrics)
+            if netease_info and netease_info.get('lyrics'):
+                music_info['lyrics'] = netease_info.get('lyrics')
+
 
         # 3. Process the retrieved info (save cover, lyrics, etc.)
         if music_info:
@@ -88,7 +99,9 @@ def main():
             if 'cover_data' in music_info and music_info['cover_data']:
                 cover_filename = save_cover_art(music_info['cover_data'], track_info['title'], CACHE_COVERS_DIR)
             if 'lyrics' in music_info and music_info['lyrics']:
-                save_lrc_file(os.path.join(CACHE_LYRICS_DIR, f"{track_info['title']}.lrc"), music_info['lyrics'])
+                # Clean the title to create a valid filename
+                safe_title = re.sub(r'[\\/*?:"<>|]', '_', track_info['title'])
+                save_lrc_file(os.path.join(CACHE_LYRICS_DIR, f"{safe_title}.lrc"), music_info['lyrics'])
 
             # Output JSON if requested
             if args.json_output:
@@ -112,7 +125,7 @@ def get_local_cover(file_path):
     cover_data = None
     # 1. Try to extract embedded cover art first
     try:
-        print(f"DEBUG: Attempting to extract embedded cover from {os.path.basename(file_path)}", file=sys.stderr)
+        #print(f"DEBUG: Attempting to extract embedded cover from {os.path.basename(file_path)}", file=sys.stderr)
         with open(file_path, 'rb') as f:
             audio = File(f, easy=False) # Use easy=False for more detailed tags
             if audio is not None:
@@ -131,10 +144,10 @@ def get_local_cover(file_path):
                         cover_data = audio.tags['covr'][0]
                 
                 if cover_data:
-                    print("SUCCESS: Found and extracted embedded cover art.", file=sys.stderr)
+                    #print("SUCCESS: Found and extracted embedded cover art.", file=sys.stderr)
                     return BytesIO(cover_data)
-                else:
-                    print("DEBUG: No embedded cover art found in the file's tags.", file=sys.stderr)
+                #else:
+                    #print("DEBUG: No embedded cover art found in the file's tags.", file=sys.stderr)
     except PermissionError:
         print(f"ERROR: Permission denied while reading embedded cover art from {file_path}. The file might be online-only or locked.", file=sys.stderr)
     except Exception as e:
@@ -180,11 +193,21 @@ def search_musicbrainz(track_info):
         result = musicbrainzngs.search_recordings(
             artist=track_info.get("artist"),
             recording=track_info.get("title"),
-            limit=1
+            limit=5  # Increase limit to find a better match
         )
         
         if result["recording-list"]:
-            recording = result["recording-list"][0]
+            recording = None
+            # Find a recording where the artist is a good match
+            for rec in result["recording-list"]:
+                mb_artist = rec.get("artist-credit-phrase", "")
+                if is_match(mb_artist, track_info.get("artist")):
+                    recording = rec
+                    break
+            
+            if not recording:
+                print(f"Could not find a good match on MusicBrainz for '{track_info.get('title')}' by '{track_info.get('artist')}'. Aborting.", file=sys.stderr)
+                return None
             release_id = recording.get("release-list", [{}])[0].get("id")
             
             cover_data, cover_url = None, None
@@ -228,7 +251,7 @@ def get_mb_cover_art(release_id):
 
 # --- Netease Functions ---
 
-def search_netease(track_info):
+def search_netease(track_info, bilingual=True):
     """
     Searches Netease Music for track information.
     """
@@ -240,7 +263,7 @@ def search_netease(track_info):
     title = track_info.get('title', '')
     album = track_info.get('album', '')
     
-    lyrics, cover_url, song_info = try_netease_api(artist, title, album)
+    lyrics, cover_url, song_info = try_netease_api(artist, title, album, bilingual=bilingual)
     
     if not song_info:
         return None
@@ -263,7 +286,7 @@ def search_netease(track_info):
         "cover_url": cover_url
     }
 
-def try_netease_api(artist, title, album):
+def try_netease_api(artist, title, album, bilingual=True):
     """Attempts to get song info from Netease API."""
     try:
         search_url = "http://music.163.com/api/search/get/web"
@@ -273,13 +296,13 @@ def try_netease_api(artist, title, album):
         }
         
         # Build search term with artist, album, and title if they exist
+        # Build a more precise search term, prioritizing title and artist.
+        # The long and detailed album names can sometimes confuse the search API.
         search_parts = []
-        if artist:
-            search_parts.append(artist)
-        if album:
-            search_parts.append(album)
         if title:
             search_parts.append(title)
+        if artist:
+            search_parts.append(artist)
         search_term = " ".join(search_parts)
         
         params = {
@@ -304,7 +327,10 @@ def try_netease_api(artist, title, album):
                 break
         
         if not best_song:
-            best_song = songs[0] # Fallback to the first result
+            # If no good match is found after checking results, don't just default to the first one.
+            # This prevents getting completely wrong info.
+            print(f"Could not find a good match for '{title}' by '{artist}'. Aborting.", file=sys.stderr)
+            return None, None, None
 
         song_id = best_song['id']
         
@@ -315,7 +341,10 @@ def try_netease_api(artist, title, album):
         lyrics = lyric_data.get('lrc', {}).get('lyric', '')
         translated_lyrics = lyric_data.get('tlyric', {}).get('lyric', '')
 
-        combined_lyrics = combine_lyrics(lyrics, translated_lyrics)
+        if bilingual:
+            final_lyrics = combine_lyrics(lyrics, translated_lyrics)
+        else:
+            final_lyrics = lyrics
         
         # Get cover URL
         cover_url = best_song.get('album', {}).get('picUrl')
@@ -324,7 +353,7 @@ def try_netease_api(artist, title, album):
         else:
             cover_url = get_netease_cover_from_page(song_id)
 
-        return combined_lyrics, cover_url, best_song
+        return final_lyrics, cover_url, best_song
         
     except Exception as e:
         print(f"Netease API error: {e}", file=sys.stderr)
@@ -490,7 +519,7 @@ def get_audio_metadata(file_path):
     Handles various file formats like FLAC, MP3, M4A, etc.
     """
     try:
-        print(f"DEBUG: Reading metadata from: {file_path}", file=sys.stderr)
+        #print(f"DEBUG: Reading metadata from: {file_path}", file=sys.stderr)
         with open(file_path, 'rb') as f:
             audio = File(f)
             if audio is None:
@@ -498,7 +527,7 @@ def get_audio_metadata(file_path):
                 return None
 
             tags = audio.tags
-        print(f"DEBUG: Raw tags from mutagen: {tags}", file=sys.stderr)
+        #print(f"DEBUG: Raw tags from mutagen: {tags}", file=sys.stderr)
         track_info = {}
 
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -559,7 +588,7 @@ def get_audio_metadata(file_path):
         for key in ["title", "artist", "album", "albumartist"]:
             track_info.setdefault(key, None)
         
-        print(f"DEBUG: Successfully extracted metadata: {track_info}", file=sys.stderr)
+        #print(f"DEBUG: Successfully extracted metadata: {track_info}", file=sys.stderr)
         return track_info
 
     except PermissionError:
