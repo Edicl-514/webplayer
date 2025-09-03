@@ -16,3 +16,8 @@ cover.jpg
 get-music-info-netease.py
 get-music-info-mb.py
 get-lyric-duallan.py
+/models
+correct_vtt.py
+subcorrect.py
+test.mp4
+test.vtt

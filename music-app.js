@@ -37,6 +37,9 @@ document.addEventListener('DOMContentLoaded', () => {
    const coverPrioritySelect = document.getElementById('cover-priority');
    const lyricsFetchSelect = document.getElementById('lyrics-fetch');
    const lyricsTypeSelect = document.getElementById('lyrics-type');
+   const searchResultsLimitInput = document.getElementById('search-results-limit');
+   const forceMatchSelect = document.getElementById('force-match');
+   const queryKeywordsInput = document.getElementById('query-keywords');
     
     // --- 播放器状态和数据 ---
     let currentSongIndex = 0;
@@ -315,7 +318,10 @@ document.addEventListener('DOMContentLoaded', () => {
                path: musicPath,
                source: settings.infoPriority,
                'no-write': settings.lyricsFetch === 'false', // Assuming 'false' means don't write
-               'original-lyrics': settings.lyricsType === 'original'
+               'original-lyrics': settings.lyricsType === 'original',
+               'limit': settings.searchResultsLimit,
+               'force-match': settings.forceMatch,
+               'query': settings.queryKeywords
            });
 
             const response = await fetch(`/api/music-info?${params.toString()}`);
@@ -782,6 +788,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         showLyrics();
         toggleLyricsVisualizerBtn.style.display = 'block';
+        
+        // BUGFIX: 如果在播放时加载了新歌词，确保歌词滚动能够启动
+        if (isPlaying) {
+            cancelAnimationFrame(lyricRAF);
+            lyricRAF = requestAnimationFrame(updateLyrics);
+        }
     }
 
     function updateLyrics() {
@@ -867,28 +879,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updatePlayButtonPosition() {
-            if (!isLyricScrolling) return;
-    
-            const centerLine = findCenterLyric();
-            if (centerLine) {
-                const lastTarget = lyricsWrapper.querySelector('.lyric-group.target');
-                if (lastTarget) lastTarget.classList.remove('target');
-                centerLine.classList.add('target');
-    
-                // 使用offsetTop计算位置，避免getBoundingClientRect可能带来的不稳定
-                // 计算选中行相对于歌词容器的位置
-                const relativeTop = centerLine.offsetTop;
-                const containerScrollTop = Math.abs(lyricScrollTop);
-                const visualizationHeight = document.querySelector('.visualization-container').offsetHeight || 0;
-                const top = relativeTop - containerScrollTop + visualizationHeight / 2;
-                
-                // 确保按钮在可视区域内
-                const maxTop = lyricsContainer.clientHeight - playFromLyricsBtn.offsetHeight;
-                const clampedTop = Math.max(0, Math.min(maxTop, top));
-                
-                playFromLyricsBtn.style.top = `${clampedTop}px`;
-            }
+        if (!isLyricScrolling) return;
+
+        const centerLine = findCenterLyric();
+        if (centerLine) {
+            const lastTarget = lyricsWrapper.querySelector('.lyric-group.target');
+            if (lastTarget) lastTarget.classList.remove('target');
+            centerLine.classList.add('target');
         }
+    }
 
     function exitLyricScrollState() {
         isLyricScrolling = false;
@@ -1206,6 +1205,9 @@ document.addEventListener('DOMContentLoaded', () => {
            coverPriority: coverPrioritySelect.value,
            lyricsFetch: lyricsFetchSelect.value,
            lyricsType: lyricsTypeSelect.value,
+          searchResultsLimit: searchResultsLimitInput.value,
+          forceMatch: forceMatchSelect.value,
+          queryKeywords: queryKeywordsInput.value,
        };
        localStorage.setItem('playerSettings', JSON.stringify(settings));
    }
@@ -1216,6 +1218,9 @@ document.addEventListener('DOMContentLoaded', () => {
        coverPrioritySelect.value = settings.coverPriority || 'local';
        lyricsFetchSelect.value = settings.lyricsFetch || 'true';
        lyricsTypeSelect.value = settings.lyricsType || 'bilingual';
+      searchResultsLimitInput.value = settings.searchResultsLimit || '5';
+      forceMatchSelect.value = settings.forceMatch || 'false';
+      queryKeywordsInput.value = settings.queryKeywords || '{artist} {title}';
    }
 
    function getSettings() {
@@ -1224,6 +1229,9 @@ document.addEventListener('DOMContentLoaded', () => {
            coverPriority: coverPrioritySelect.value,
            lyricsFetch: lyricsFetchSelect.value,
            lyricsType: lyricsTypeSelect.value,
+          searchResultsLimit: searchResultsLimitInput.value,
+          forceMatch: forceMatchSelect.value,
+          queryKeywords: queryKeywordsInput.value,
        };
    }
 
@@ -1231,9 +1239,12 @@ document.addEventListener('DOMContentLoaded', () => {
    coverPrioritySelect.addEventListener('change', saveSettings);
    lyricsFetchSelect.addEventListener('change', saveSettings);
    lyricsTypeSelect.addEventListener('change', saveSettings);
+  searchResultsLimitInput.addEventListener('change', saveSettings);
+  forceMatchSelect.addEventListener('change', saveSettings);
+  queryKeywordsInput.addEventListener('change', saveSettings);
 
-    // --- 歌词文件处理 ---
-    function handleLrcFileSelect(event) {
+   // --- 歌词文件处理 ---
+   function handleLrcFileSelect(event) {
         const file = event.target.files[0];
         if (!file) {
             return;
@@ -1338,10 +1349,24 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`正在${actionText}...`, 'info', 2500);
     
         try {
-            let url = `/api/fetch-info?path=${encodeURIComponent(musicPath)}&source=${source}`;
+            const settings = getSettings();
+            const params = new URLSearchParams({
+                path: musicPath,
+                source: source,
+                'no-write': true, // Manual fetch shouldn't write to file
+                'force-match': settings.forceMatch,
+                'limit': settings.searchResultsLimit,
+                'query': settings.queryKeywords
+            });
+
             if (type === 'lyrics' && !bilingual) {
-                url += '&original_lyrics=true';
+                params.set('original_lyrics', 'true');
+            } else if (type === 'lyrics' && bilingual) {
+                // Ensure bilingual lyrics are requested if not original
+                 params.set('original_lyrics', 'false');
             }
+
+            let url = `/api/fetch-info?${params.toString()}`;
             const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`网络响应错误: ${response.statusText}`);

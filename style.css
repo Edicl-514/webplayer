@@ -185,6 +185,8 @@ body {
 #play-from-lyrics-btn {
     position: absolute;
     left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 40px;
     height: 40px;
     background-color: var(--accent-color);
@@ -215,7 +217,8 @@ body {
 
 .lyrics-wrapper {
     text-align: center;
-    height: 100%;
+    padding-top: 40vh;
+    padding-bottom: 40vh;
     transition: transform 0.5s ease-out;
     width: 100%;
     position: relative;
@@ -451,11 +454,9 @@ body {
     width: 75%;
 }
 
-/* 在PC端隐藏播放列表切换按钮 */
-@media (min-width: 769px) {
-    #playlist-btn {
-        display: none;
-    }
+/* Utility classes */
+.mobile-only {
+    display: none;
 }
 
 .playlist-panel h3 {
@@ -575,6 +576,9 @@ body {
 
 /* 响应式设计 - 移动端 */
 @media (max-width: 768px) {
+    .mobile-only {
+        display: flex;
+    }
     body {
         align-items: flex-start;
         padding-top: 0;
@@ -798,7 +802,7 @@ body {
     white-space: nowrap;
 }
 
-.cover-sources div:hover, .info-sources div:hover {
+.cover-sources div:hover, .info-sources div:hover, .lyrics-sources div:hover {
     background-color: var(--accent-color);
     color: var(--primary-bg);
 }

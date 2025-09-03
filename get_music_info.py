@@ -36,6 +36,9 @@ def main():
     parser.add_argument("--json-output", action="store_true", help="Output all metadata as JSON.")
     
     parser.add_argument("--original-lyrics", action="store_true", help="Only get original lyrics, do not combine with translations.")
+    parser.add_argument("--limit", type=int, default=5, help="Number of search results to return.")
+    parser.add_argument("--force-match", action="store_true", help="Force match the first result.")
+    parser.add_argument("--query", type=str, default="{artist} {title}", help="Keywords to use for searching.")
     
     args = parser.parse_args()
 
@@ -76,15 +79,15 @@ def main():
                 "cover_url": None
             }
         elif args.source == 'musicbrainz':
-            music_info = search_musicbrainz(track_info)
+            music_info = search_musicbrainz(track_info, force_match=args.force_match)
         else: # netease
-            music_info = search_netease(track_info, bilingual=not args.original_lyrics)
+            music_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
         
         # If the source is local, but we still want to fetch lyrics online
         if args.source == 'local' and not args.no_write:
             #print("Source is local, but lyrics fetching is enabled. Searching Netease for lyrics.", file=sys.stderr)
             # We only care about the lyrics from this call
-            netease_info = search_netease(track_info, bilingual=not args.original_lyrics)
+            netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
             if netease_info and netease_info.get('lyrics'):
                 music_info['lyrics'] = netease_info.get('lyrics')
 
@@ -181,7 +184,7 @@ def get_local_cover(file_path):
 
 # --- MusicBrainz Functions ---
 
-def search_musicbrainz(track_info):
+def search_musicbrainz(track_info, force_match=False):
     """
     Searches MusicBrainz for track information.
     """
@@ -198,12 +201,16 @@ def search_musicbrainz(track_info):
         
         if result["recording-list"]:
             recording = None
-            # Find a recording where the artist is a good match
-            for rec in result["recording-list"]:
-                mb_artist = rec.get("artist-credit-phrase", "")
-                if is_match(mb_artist, track_info.get("artist")):
-                    recording = rec
-                    break
+            recordings = result["recording-list"]
+            if force_match and recordings:
+                recording = recordings[0]
+            else:
+                # Find a recording where the artist is a good match
+                for rec in recordings:
+                    mb_artist = rec.get("artist-credit-phrase", "")
+                    if is_match(mb_artist, track_info.get("artist")):
+                        recording = rec
+                        break
             
             if not recording:
                 print(f"Could not find a good match on MusicBrainz for '{track_info.get('title')}' by '{track_info.get('artist')}'. Aborting.", file=sys.stderr)
@@ -251,7 +258,7 @@ def get_mb_cover_art(release_id):
 
 # --- Netease Functions ---
 
-def search_netease(track_info, bilingual=True):
+def search_netease(track_info, bilingual=True, limit=5, force_match=False, query_template="{artist} {title}"):
     """
     Searches Netease Music for track information.
     """
@@ -263,7 +270,7 @@ def search_netease(track_info, bilingual=True):
     title = track_info.get('title', '')
     album = track_info.get('album', '')
     
-    lyrics, cover_url, song_info = try_netease_api(artist, title, album, bilingual=bilingual)
+    lyrics, cover_url, song_info = try_netease_api(artist, title, album, bilingual=bilingual, limit=limit, force_match=force_match, query_template=query_template)
     
     if not song_info:
         return None
@@ -286,7 +293,7 @@ def search_netease(track_info, bilingual=True):
         "cover_url": cover_url
     }
 
-def try_netease_api(artist, title, album, bilingual=True):
+def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=False, query_template="{artist} {title}"):
     """Attempts to get song info from Netease API."""
     try:
         search_url = "http://music.163.com/api/search/get/web"
@@ -295,45 +302,42 @@ def try_netease_api(artist, title, album, bilingual=True):
             'Referer': 'http://music.163.com/'
         }
         
-        # Build search term with artist, album, and title if they exist
-        # Build a more precise search term, prioritizing title and artist.
-        # The long and detailed album names can sometimes confuse the search API.
-        search_parts = []
-        if title:
-            search_parts.append(title)
-        if artist:
-            search_parts.append(artist)
-        search_term = " ".join(search_parts)
+        # Build search term using the query template
+        search_term = query_template.format(artist=artist or '', title=title or '', album=album or '')
         
         params = {
             's': search_term,
             'type': 1,
-            'limit': 5
+            'limit': limit
         }
         
         resp = requests.get(search_url, params=params, headers=headers)
         result = resp.json()
         
         if not result.get('result') or not result['result'].get('songs'):
-            return None, None
+            return None, None, None
             
         songs = result['result']['songs']
         
         # Find best match
         best_song = None
-        for song in songs:
-            if is_match(song.get('name', ''), title) and is_match(song.get('artists', [{}])[0].get('name', ''), artist):
-                best_song = song
-                break
+        if force_match and songs:
+            best_song = songs[0]
+        else:
+            for song in songs:
+                if is_match(song.get('name', ''), title) and is_match(song.get('artists', [{}])[0].get('name', ''), artist):
+                    best_song = song
+                    break
         
         if not best_song:
-            # If no good match is found after checking results, don't just default to the first one.
-            # This prevents getting completely wrong info.
-            print(f"Could not find a good match for '{title}' by '{artist}'. Aborting.", file=sys.stderr)
+            if not songs:
+                print(f"Search for '{search_term}' returned no results from Netease.", file=sys.stderr)
+            else:
+                # This means nothing matched, regardless of force_match
+                print(f"Could not find a good match for '{title}' by '{artist}'. Aborting.", file=sys.stderr)
             return None, None, None
 
         song_id = best_song['id']
-        
         # Get lyrics
         lyric_url = f"http://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&kv=-1&tv=-1"
         lyric_resp = requests.get(lyric_url, headers=headers)

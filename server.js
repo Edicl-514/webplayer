@@ -92,10 +92,10 @@ const server = http.createServer((req, res) => {
 
         const fullMusicPath = path.join(MUSIC_DIR, musicPath);
 
-       const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics } = parsedUrl.query;
+       const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
        
        const args = ['get_music_info.py', fullMusicPath, '--json-output'];
-
+ 
        if (source) {
            args.push('--source', source);
        }
@@ -104,6 +104,15 @@ const server = http.createServer((req, res) => {
        }
        if (originalLyrics === 'true') {
            args.push('--original-lyrics');
+       }
+       if (forceMatch === 'true') {
+           args.push('--force-match');
+       }
+       if (limit) {
+           args.push('--limit', limit);
+       }
+       if (query) {
+           args.push('--query', query);
        }
 
         const pythonProcess = spawn('python', args, {
@@ -138,7 +147,9 @@ const server = http.createServer((req, res) => {
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ success: true, data: musicInfo }));
                 } else {
-                     throw new Error('No valid JSON found in python script output.');
+                    // 如果没有找到JSON，说明Python脚本可能没有找到匹配项
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, message: 'Could not find a good match.', data: null }));
                 }
             } catch (e) {
                 console.error('Error parsing python script output:', e);
@@ -163,35 +174,67 @@ const server = http.createServer((req, res) => {
 
         const fullMusicPath = path.join(MUSIC_DIR, musicPath);
 
-        const originalLyrics = parsedUrl.query.original_lyrics === 'true';
-        let command = `python get_music_info.py "${fullMusicPath}" --source ${source} --no-write --json-output`;
-        if (originalLyrics) {
-            command += ' --original-lyrics';
-        }
+        // 为了安全性和一致性，从 exec 改为 spawn，并添加所有参数
+        const { 'original_lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
 
-        exec(command, { env: { ...process.env, PYTHONIOENCODING: 'UTF-8' } }, (error, stdout, stderr) => {
-            if (stderr) {
-                console.error(`get_music_info.py stderr: ${stderr}`);
+        const args = [
+            'get_music_info.py',
+            fullMusicPath,
+            '--source', source,
+            '--no-write',
+            '--json-output'
+        ];
+
+        if (originalLyrics === 'true') {
+            args.push('--original-lyrics');
+        }
+        if (forceMatch === 'true') {
+            args.push('--force-match');
+        }
+        if (limit) {
+            args.push('--limit', limit);
+        }
+        if (query) {
+            args.push('--query', query);
+        }
+        
+        const pythonProcess = spawn('python', args, {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (stderrData) {
+                console.error(`get_music_info.py stderr: ${stderrData}`);
             }
-            if (error) {
-                console.error(`exec error: ${error}`);
+            if (code !== 0) {
                 res.statusCode = 500;
                 res.end(JSON.stringify({ success: false, message: 'Error executing python script' }));
                 return;
             }
-
             try {
-                const jsonMatch = stdout.match(/({[\s\S]*})/);
+                const jsonMatch = stdoutData.match(/({[\s\S]*})/);
                 if (jsonMatch && jsonMatch[1]) {
                     const musicInfo = JSON.parse(jsonMatch[1]);
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ success: true, data: musicInfo }));
                 } else {
-                    throw new Error('No valid JSON found in python script output.');
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, message: 'Could not find a good match.', data: null }));
                 }
             } catch (e) {
                 console.error('Error parsing python script output:', e);
-                console.error('Raw stdout:', stdout);
+                console.error('Raw stdout:', stdoutData);
                 res.statusCode = 500;
                 res.end(JSON.stringify({ success: false, message: 'Error parsing music info' }));
             }
@@ -332,21 +375,23 @@ const server = http.createServer((req, res) => {
                                 size: 0
                             });
                         } else {
-                            // 对于文件，异步获取大小信息
+                            // 对于文件或符号链接等，异步获取状态信息
                             fs.stat(itemPath, (statErr, stats) => {
                                 if (statErr) {
-                                    console.error(`Error getting size for ${itemPath}:`, statErr);
-                                    // 即使获取大小失败，也返回文件基本信息
+                                    console.error(`Error getting stats for ${itemPath}:`, statErr);
+                                    // 即使获取状态失败，也返回基本信息，标记为文件
                                     resolve({
                                         name: file.name,
                                         isDirectory: false,
                                         size: 0
                                     });
                                 } else {
+                                    // 再次检查是否为目录，因为 readdir 的结果可能不准确（例如符号链接）
+                                    const isDirectory = stats.isDirectory();
                                     resolve({
                                         name: file.name,
-                                        isDirectory: false,
-                                        size: stats.size
+                                        isDirectory: isDirectory,
+                                        size: isDirectory ? 0 : stats.size
                                     });
                                 }
                             });
