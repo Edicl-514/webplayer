@@ -258,8 +258,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2. 异步获取详细的音乐信息
         fetchMusicInfo(song);
 
+        const srcParts = song.src.split('?');
+        const path = srcParts[0];
+        const query = srcParts.length > 1 ? `?${srcParts[1]}` : '';
+        // Encode each path segment to handle special characters, preventing 403 errors.
+        const encodedPath = path.split('/').map(part => encodeURIComponent(part).replace(/\./g, '%2E')).join('/');
+        const finalSrcForHowler = encodedPath + query;
+
         sound = new Howl({
-            src: [song.src],
+            src: [finalSrcForHowler],
             format: ['flac', 'mp3'],
             crossOrigin: 'anonymous',
             volume: volumeSlider.value,
@@ -1350,8 +1357,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
         try {
             const settings = getSettings();
+            const encodedPath = musicPath.split('/').map(part => encodeURIComponent(part).replace(/\./g, '%2E')).join('/');
             const params = new URLSearchParams({
-                path: musicPath,
+                path: encodedPath,
                 source: source,
                 'no-write': true, // Manual fetch shouldn't write to file
                 'force-match': settings.forceMatch,

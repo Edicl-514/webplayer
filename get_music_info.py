@@ -4,6 +4,7 @@ import json
 import re
 import argparse
 import requests
+import urllib.parse
 import musicbrainzngs
 from mutagen import File
 from mutagen.flac import FLAC, Picture
@@ -41,6 +42,9 @@ def main():
     parser.add_argument("--query", type=str, default="{artist} {title}", help="Keywords to use for searching.")
     
     args = parser.parse_args()
+
+    # Decode the filepath if it's URL-encoded
+    args.filepath = urllib.parse.unquote(args.filepath)
 
     # Ensure cache directories exist
     os.makedirs(CACHE_LYRICS_DIR, exist_ok=True)
@@ -103,7 +107,7 @@ def main():
                 cover_filename = save_cover_art(music_info['cover_data'], track_info['title'], CACHE_COVERS_DIR)
             if 'lyrics' in music_info and music_info['lyrics']:
                 # Clean the title to create a valid filename
-                safe_title = re.sub(r'[\\/*?:"<>|]', '_', track_info['title'])
+                safe_title = sanitize_filename(track_info['title'])
                 save_lrc_file(os.path.join(CACHE_LYRICS_DIR, f"{safe_title}.lrc"), music_info['lyrics'])
 
             # Output JSON if requested
@@ -416,14 +420,20 @@ def is_match(a, b):
 
 # --- File Saving Functions ---
 
+def sanitize_filename(name):
+    """Removes characters that are invalid for filenames."""
+    return re.sub(r'[\\/*?:"<>|]', '_', name)
+
+
 def save_cover_art(image_data, track_title, output_dir):
     """Saves cover art to a file."""
     if not image_data:
         return None
     
     image_data.seek(0) # Reset stream before reading
-        
-    filename = f"{track_title.replace('/', '_').replace(':', '_')}_cover.jpg"
+    
+    safe_title = sanitize_filename(track_title)
+    filename = f"{safe_title}_cover.jpg"
     filepath = os.path.join(output_dir, filename)
     
     try:

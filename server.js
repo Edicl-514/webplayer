@@ -321,10 +321,14 @@ const server = http.createServer((req, res) => {
     }
  
     // 防止目录遍历攻击
-    if (pathname.includes('..')) {
-        res.statusCode = 403;
-        res.end('Forbidden');
-        return;
+    const normalizedPath = path.normalize(pathname);
+    if (normalizedPath.includes('..') || !normalizedPath.startsWith(path.sep)) {
+        const fullRequestedPath = path.join(WEB_ROOT, normalizedPath);
+        if (!fullRequestedPath.startsWith(WEB_ROOT)) {
+            res.statusCode = 403;
+            res.end('Forbidden: Path traversal detected.');
+            return;
+        }
     }
 
     // 如果请求根路径，提供 index.html
