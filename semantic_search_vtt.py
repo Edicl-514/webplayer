@@ -3,7 +3,8 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 import pickle
-
+import sys
+import os
 # 1. 读取 VTT 字幕
 def load_vtt(vtt_file):
     entries = []
@@ -61,9 +62,12 @@ def search(query, index, entries, model, min_score=0.5):
 
 
 if __name__ == "__main__":
-    vtt_file = input("请输入 VTT 字幕文件路径: ")
-    
-    import os
+    vtt_file = ""
+    if len(sys.argv) > 1:
+        vtt_file = sys.argv[1]
+    else:
+        vtt_file = input("请输入 VTT 字幕文件路径: ")
+
     while not os.path.exists(vtt_file):
         print("文件不存在，请重新输入。")
         vtt_file = input("请输入 VTT 字幕文件路径: ")

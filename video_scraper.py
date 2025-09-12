@@ -9,6 +9,13 @@ from tmdbv3api import TMDb, Movie, TV
 import urllib3
 import urllib.parse
 
+# 新增 cloudscraper 导入
+try:
+    import cloudscraper
+except ImportError:
+    print("警告: 未安装 cloudscraper 库，Hanime 刮削功能将不可用。", file=sys.stderr)
+    cloudscraper = None
+
 # 禁用因 verify=False 引发的 InsecureRequestWarning 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 自定义 JSON 编码器以处理特殊对象
@@ -73,69 +80,138 @@ def jaccard_similarity(s1, s2):
 # ==============================================================================
 
 class Scraper:
-    def scrape(self, file_path, jav_source='javbus'):
+    def scrape(self, file_path, video_type=None):
         """主刮削方法"""
         filename = os.path.basename(file_path)
         info = guessit(filename)
         
-        video_type = self.determine_video_type(filename, info)
+        # 自动判断类型，这也会顺便提取番号到 info 中
+        determined_type = self.determine_video_type(filename, info)
+
+        # 如果通过参数指定了类型，则使用该类型，否则使用自动判断的类型
+        if video_type:
+            print(f"使用指定的视频类型: {video_type}")
+        else:
+            video_type = determined_type
         
         scraped_data = {"file_info": {"path": file_path, "parsed_by_guessit": info}}
         
         if video_type == 'jav':
-            if jav_source == 'fanza':
-                scraped_data.update(self.scrape_fanza(info))
-            elif jav_source == 'jav321':
-                scraped_data.update(self.scrape_jav321(info))
-            elif jav_source == 'javdb':
-                scraped_data.update(self.scrape_javdb(info))
-            else: # 默认使用 javbus
-                scraped_data.update(self.scrape_jav(info))
+            sources = {
+                'Javbus': self.scrape_jav,
+                'Fanza': self.scrape_fanza,
+                'Jav321': self.scrape_jav321,
+                'JavDB': self.scrape_javdb
+            }
+            
+            all_results = []
+            # 使用番号作为查询基准
+            query_title = info.get('id', '')
+            if not query_title:
+                 # 如果 guessit 没找到 id，尝试从文件名中提取
+                jav_pattern = r'([a-zA-Z]{2,5}[-_]\d{2,5})'
+                jav_match = re.search(jav_pattern, filename, re.IGNORECASE)
+                if jav_match:
+                    query_title = jav_match.group(1).replace('_', '-')
+
+            if not query_title:
+                scraped_data.update({"error": "无法从文件名中确定 JAV 番号"})
+                return scraped_data
+
+            print(f"识别到 JAV 番号: {query_title}，开始从所有源刮削...")
+
+            for source_name, scrape_func in sources.items():
+                print(f"-> 正在刮削 {source_name}...")
+                result = scrape_func(info)
+                if result and not result.get("error"):
+                    title = result.get('title') or ''
+                    # Jaccard 相似度计算基于标题
+                    score = jaccard_similarity(query_title.lower(), title.lower())
+                    result['source'] = source_name
+                    result['score'] = score
+                    all_results.append(result)
+                else:
+                    error_msg = result.get("error", "未知错误") if result else "无返回"
+                    print(f"  - {source_name} 刮削失败: {error_msg}")
+
+            if not all_results:
+                scraped_data.update({"error": "所有 JAV 源均刮削失败"})
+            else:
+                # 过滤掉相似度低于阈值的结果
+                SIMILARITY_THRESHOLD = 0.1  # 设置一个较低的阈值以包含标题有较多修饰的情况
+                final_results = []
+                for res in all_results:
+                    if res['score'] >= SIMILARITY_THRESHOLD:
+                        final_results.append(res)
+                    else:
+                        title = res.get('title') or ''
+                        print(f"  - {res['source']} 的结果 '{title}' (匹配度: {res['score']:.2f}) 低于阈值 {SIMILARITY_THRESHOLD}，已过滤。")
+
+                if not final_results:
+                    scraped_data.update({"error": "所有 JAV 源的刮削结果匹配度过低"})
+                else:
+                    # 按匹配度降序排序
+                    final_results.sort(key=lambda x: x['score'], reverse=True)
+                    scraped_data['jav_results'] = final_results
         elif video_type == 'fc2':
             scraped_data.update(self.scrape_fc2(info))
         elif video_type == 'anime':
             query_title = self._extract_anime_name(filename)
-            print(f"正在为 '{query_title}' 同时搜索 Bangumi 和 Getchu...")
+            print(f"正在为 '{query_title}' 搜索...")
 
+            print("-> 正在刮削 Bangumi...")
             bgm_data = self.scrape_anime_bgm(filename)
+            print("-> 正在刮削 Getchu...")
             getchu_data = self.scrape_anime_getchu(filename)
+            hanime_data = None
 
             bgm_valid = bgm_data and not bgm_data.get("error")
             getchu_valid = getchu_data and not getchu_data.get("error")
+            hanime_valid = False
 
-            if not bgm_valid and not getchu_valid:
-                error_message = "Bangumi 和 Getchu 均刮削失败"
+            if not getchu_valid:
+                print("-> Getchu 刮削失败，尝试 Hanime...")
+                hanime_data = self.scrape_anime_hanime(filename)
+                hanime_valid = hanime_data and not hanime_data.get("error")
+                if hanime_valid:
+                    print("-> Hanime 刮削成功。")
+                else:
+                    print("-> Hanime 刮削也失败了。")
+
+            # --- 结果比较 ---
+            valid_results = []
+            if bgm_valid:
+                valid_results.append({'source': 'Bangumi', 'data': bgm_data})
+            if getchu_valid:
+                valid_results.append({'source': 'Getchu', 'data': getchu_data})
+            if hanime_valid:
+                valid_results.append({'source': 'Hanime', 'data': hanime_data})
+
+            if not valid_results:
+                error_message = "所有动漫源 (Bangumi, Getchu, Hanime) 均刮削失败"
                 if bgm_data and bgm_data.get("error"):
                     error_message += f"\n  - Bangumi: {bgm_data.get('error')}"
                 if getchu_data and getchu_data.get("error"):
                     error_message += f"\n  - Getchu: {getchu_data.get('error')}"
+                if hanime_data and hanime_data.get("error"):
+                    error_message += f"\n  - Hanime: {hanime_data.get('error')}"
                 scraped_data.update({"error": error_message})
+            
+            elif len(valid_results) == 1:
+                winner = valid_results[0]
+                print(f"只有 {winner['source']} 成功，返回其结果。")
+                scraped_data.update(winner['data'])
 
-            elif bgm_valid and not getchu_valid:
-                print("仅 Bangumi 成功，返回其结果。")
-                scraped_data.update(bgm_data)
-
-            elif not bgm_valid and getchu_valid:
-                print("仅 Getchu 成功，返回其结果。")
-                scraped_data.update(getchu_data)
-
-            else:  # Both are valid, compare them
-                bgm_title = bgm_data.get('title_cn') or bgm_data.get('title', '')
-                getchu_title = getchu_data.get('title', '')
-
-                bgm_score = jaccard_similarity(query_title.lower(), bgm_title.lower())
-                getchu_score = jaccard_similarity(query_title.lower(), getchu_title.lower())
-
-                print(f"对比查询: '{query_title}'")
-                print(f"  - Bangumi  (匹配度: {bgm_score:.2f}): '{bgm_title}'")
-                print(f"  - Getchu   (匹配度: {getchu_score:.2f}): '{getchu_title}'")
-
-                if bgm_score >= getchu_score:
-                    print("=> Bangumi 匹配度更高，选择 Bangumi。")
-                    scraped_data.update(bgm_data)
-                else:
-                    print("=> Getchu 匹配度更高，选择 Getchu。")
-                    scraped_data.update(getchu_data)
+            else: # 多个结果，需要比较
+                print(f"\n对比查询: '{query_title}'")
+                for res in valid_results:
+                    title = res['data'].get('title_cn') or res['data'].get('title', '')
+                    res['score'] = jaccard_similarity(query_title.lower(), title.lower())
+                    print(f"  - {res['source']:<8} (匹配度: {res['score']:.2f}): '{title}'")
+                
+                winner = max(valid_results, key=lambda item: item['score'])
+                print(f"=> {winner['source']} 匹配度最高，选择 {winner['source']}。")
+                scraped_data.update(winner['data'])
         elif video_type in ['tv', 'movie']:
             scraped_data.update(self.scrape_tmdb(info, video_type))
         else:
@@ -153,7 +229,7 @@ class Scraper:
             return 'fc2'
 
         # 其次匹配 JAV 番号
-        jav_pattern = r'([a-zA-Z]{2,5}[-_]\d{3,5})'
+        jav_pattern = r'([a-zA-Z]{2,5}[-_]\d{2,5})'
         jav_match = re.search(jav_pattern, filename, re.IGNORECASE)
         if jav_match:
             # 如果匹配成功，将番号存入 info，以便后续使用
@@ -358,6 +434,8 @@ class Scraper:
 
             poster_img = soup.find('a', class_='bigImage')
             poster_url = poster_img['href'] if poster_img else None
+            if poster_url and not poster_url.startswith('http'):
+                poster_url = JAVBUS_BASE_URL + poster_url
             
             info_panel = soup.find('div', class_='info')
             
@@ -1125,6 +1203,82 @@ class Scraper:
         except Exception as e:
             return {"error": f"Getchu 处理时发生未知错误: {str(e)}"}
 
+    def scrape_anime_hanime(self, filename):
+        """从 Hanime1 刮削动漫信息"""
+        if not cloudscraper:
+            return {"error": "cloudscraper 库未安装，无法使用 Hanime 刮削功能。"}
+
+        query = self._extract_anime_name(filename)
+        
+        scraper = cloudscraper.create_scraper()
+        search_url = f"https://hanime1.me/search?query={urllib.parse.quote_plus(query)}&type=&genre=%E8%A3%8F%E7%95%AA"
+
+        try:
+            search_response = scraper.get(search_url, timeout=15)
+            search_response.raise_for_status()
+
+            soup = BeautifulSoup(search_response.text, 'html.parser')
+            link_tag = soup.select_one('a[href*="/watch?v="]')
+
+            if not link_tag or not link_tag.has_attr('href'):
+                return {"error": f"在 Hanime 未找到匹配 '{query}' 的动漫信息。"}
+            
+            detail_url = urllib.parse.urljoin(search_response.url, link_tag['href'])
+
+            detail_response = scraper.get(detail_url, timeout=15)
+            detail_response.raise_for_status()
+            detail_soup = BeautifulSoup(detail_response.text, 'html.parser')
+
+            title_tag = detail_soup.select_one('h3#shareBtn-title')
+            title = title_tag.get_text(strip=True) if title_tag else "未知标题"
+
+            details_panel = detail_soup.select_one('div.video-description-panel')
+            description = "无简介"
+            upload_date = "未知"
+            
+            if details_panel:
+                views_date_tag = details_panel.select_one('.hidden-xs')
+                if views_date_tag:
+                    views_date_text = views_date_tag.get_text(strip=True)
+                    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', views_date_text)
+                    if date_match:
+                        upload_date = date_match.group(1).strip()
+
+                desc_parts = []
+                desc_divs = details_panel.find_all('div', recursive=False)
+                if len(desc_divs) > 1:
+                    for i in range(1, len(desc_divs)):
+                        desc_parts.append(desc_divs[i].get_text(strip=True))
+                if desc_parts:
+                    description = "\n".join(desc_parts)
+
+            tags_container = detail_soup.select('.video-tags-wrapper .single-video-tag a[href*="/search"]')
+            tags = []
+            if tags_container:
+                for tag in tags_container:
+                    tag_text = tag.get_text(strip=True)
+                    if tag_text:
+                        cleaned_tag = re.sub(r'\s*\(\d+\)$', '', tag_text).strip()
+                        tags.append(cleaned_tag)
+
+            return {
+                "type": "Anime",
+                "source": "Hanime",
+                "title": title,
+                "title_cn": title, # For consistency
+                "summary": description,
+                "air_date": upload_date,
+                "tags": tags,
+                "url": detail_url
+            }
+
+        except cloudscraper.exceptions.CloudflareException as e:
+            return {"error": f"Hanime Cloudflare 绕过失败: {str(e)}"}
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Hanime 网页请求失败: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Hanime 处理时发生未知错误: {str(e)}"}
+
 
 # ==============================================================================
 # 主程序入口
@@ -1136,79 +1290,30 @@ def main():
         sys.exit(1)
 
     # --- 参数解析 ---
-    user_input = None
-    jav_source = None
+    scrape_target = None
+    video_type = None
+    valid_types = ['fc2', 'jav', 'anime', 'tv', 'movie']
 
-    args = sys.argv[1:]
-    if args:
-        user_input = args[0]
-        # 检查第二个参数是否是源
-        if len(args) > 1 and args[1].lower() in ['javbus', 'fanza', 'jav321', 'javdb']:
-            jav_source = args[1].lower()
+    if len(sys.argv) > 1:
+        scrape_target = sys.argv[1]
+        if len(sys.argv) > 2:
+            video_type = sys.argv[2].lower()
+            if video_type not in valid_types:
+                print(f"错误: 无效的视频类型 '{video_type}'。有效类型为: {', '.join(valid_types)}")
+                sys.exit(1)
 
     # --- 如果没有通过参数提供输入，则提示用户输入 ---
-    if not user_input:
-        user_input = input("请输入视频文件的完整路径、文件名或番号: ").strip()
+    if not scrape_target:
+        scrape_target = input("请输入视频文件的完整路径、文件名或番号: ").strip()
 
-    user_input = user_input.strip('\'"')
+    scrape_target = scrape_target.strip('\'"')
     
-    # --- 判断输入类型 ---
-    # 允许用户直接输入文件名进行测试，即使文件不存在。
-    # 任何不完全匹配番号格式的输入都将被视为文件名或文件路径。
-    scrape_target = user_input
-    
-    # 用于精确匹配番号格式 (例如: ABC-123)
-    jav_id_pattern = r'^[a-zA-Z]{2,5}[-_]\d{3,5}$'
-    fc2_id_pattern = r'^(FC2-PPV-|FC2-)\d+$'
-    
-    is_jav_id = re.match(jav_id_pattern, user_input, re.IGNORECASE)
-    is_fc2_id = re.match(fc2_id_pattern, user_input, re.IGNORECASE)
-
-    # --- 如果未指定 JAV 源，且目标可能是 JAV，则提示用户选择 ---
-    # 用于在文件名中搜索番号的模式
-    jav_search_pattern = r'([a-zA-Z]{2,5}[-_]\d{3,5})'
-    
-    is_potential_jav = False
-    # 检查输入字符串是否包含 FC2 番号
-    is_potential_fc2 = is_fc2_id or re.search(r'(FC2-PPV-|FC2-)(\d+)', os.path.basename(scrape_target), re.IGNORECASE)
-
-    if is_jav_id:
-        is_potential_jav = True
-    elif not is_potential_fc2: # 如果不是 FC2，再检查是否是 JAV
-        # 只要输入不是一个精确的 FC2 番号，就检查它是否包含 JAV 番号
-        filename = os.path.basename(scrape_target)
-        temp_info = guessit(filename)
-        if re.search(jav_search_pattern, filename, re.IGNORECASE) or \
-           ('id' in temp_info and re.match(jav_search_pattern, temp_info.get('id', ''), re.IGNORECASE)):
-            is_potential_jav = True
-
-    if not jav_source and is_potential_jav:
-        while True:
-            choice = input("请选择 JAV 刮削源 (1: Javbus, 2: Fanza, 3: Jav321, 4: JavDB): ").strip()
-            if choice == '1':
-                jav_source = 'javbus'
-                break
-            elif choice == '2':
-                jav_source = 'fanza'
-                break
-            elif choice == '3':
-                jav_source = 'jav321'
-                break
-            elif choice == '4':
-                jav_source = 'javdb'
-                break
-            else:
-                print("无效输入，请输入 1, 2, 3 或 4。")
-
     # --- 开始刮削 ---
     print(f"\n正在处理: {scrape_target}")
-    if jav_source:
-        print(f"使用 JAV 源: {jav_source.capitalize()}")
 
     scraper = Scraper()
-    # 对于番号，scrape_target 就是番号本身；对于文件，则是路径
-    # Scraper 类内部会处理这两种情况
-    final_data = scraper.scrape(scrape_target, jav_source=jav_source)
+    # 传递 video_type
+    final_data = scraper.scrape(scrape_target, video_type=video_type)
 
     # --- 输出结果 ---
     json_output = json.dumps(final_data, indent=4, ensure_ascii=False, cls=CustomEncoder)
