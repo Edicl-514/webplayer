@@ -2,12 +2,12 @@ import whisper
 import os
 import datetime
 
+# 用户输入视频/音频文件路径
+audio_file_path = input("请输入视频/音频文件的路径: ").strip()
+
 # 加载模型，选择 'large' 模型以获得最高准确率
 # 第一次运行会自动下载模型
 model = whisper.load_model("large-v3") 
-
-# 指定输入文件路径（可以是视频或音频文件）
-audio_file_path = "test.mp4" 
 
 start_timestamp = int(datetime.datetime.now().timestamp())
 
