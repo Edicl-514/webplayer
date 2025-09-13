@@ -71,6 +71,48 @@ def main():
 
         #print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
 
+        # --- Cache Check ---
+        # Before fetching, check if we have cached lyrics and cover
+        cached_lyrics = None
+        cached_cover_filename = None
+        
+        # Use a more unique identifier for cache files
+        artist = track_info.get('artist', 'Unknown Artist')
+        title = track_info.get('title', 'Unknown Title')
+        safe_artist = sanitize_filename(artist)
+        safe_title = sanitize_filename(title)
+        
+        # Check for cached lyrics
+        lrc_filename = f"{safe_artist} - {safe_title}.lrc"
+        lrc_filepath = os.path.join(CACHE_LYRICS_DIR, lrc_filename)
+        if os.path.exists(lrc_filepath):
+            try:
+                with open(lrc_filepath, 'r', encoding='utf-8') as f:
+                    cached_lyrics = f.read()
+                print(f"Found cached lyrics at: {lrc_filepath}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error reading cached lyrics: {e}", file=sys.stderr)
+
+        # Check for cached cover
+        cover_filename_base = f"{safe_artist} - {safe_title}_cover.jpg"
+        cover_filepath = os.path.join(CACHE_COVERS_DIR, cover_filename_base)
+        if os.path.exists(cover_filepath):
+            cached_cover_filename = cover_filename_base
+            print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
+
+        # If we have both, we can potentially exit early
+        if cached_lyrics and cached_cover_filename and args.json_output:
+            print(json.dumps({
+                "title": title,
+                "artist": artist,
+                "album": track_info.get('album'),
+                "lyrics": cached_lyrics,
+                "cover_filename": cached_cover_filename,
+                "cover_url": None, # No URL for cached items
+                "from_cache": True
+            }, indent=4, ensure_ascii=False))
+            return # Exit after printing JSON if we have everything from cache
+
         # 2. Get music info from the selected source
         if args.source == 'local':
             cover_data = get_local_cover(args.filepath)
@@ -104,11 +146,18 @@ def main():
             
             # Save cover and lyrics to cache
             if 'cover_data' in music_info and music_info['cover_data']:
-                cover_filename = save_cover_art(music_info['cover_data'], track_info['title'], CACHE_COVERS_DIR)
-            if 'lyrics' in music_info and music_info['lyrics']:
-                # Clean the title to create a valid filename
-                safe_title = sanitize_filename(track_info['title'])
-                save_lrc_file(os.path.join(CACHE_LYRICS_DIR, f"{safe_title}.lrc"), music_info['lyrics'])
+                artist_for_save = music_info.get('artist') or track_info.get('artist') or 'Unknown Artist'
+                title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
+                cover_filename = save_cover_art(music_info['cover_data'], artist_for_save, title_for_save, CACHE_COVERS_DIR)
+            
+            # Use cached cover filename if it exists and no new one was generated
+            final_cover_filename = cover_filename or cached_cover_filename
+
+            # Save lyrics to cache if they were fetched and not already cached
+            if 'lyrics' in music_info and music_info['lyrics'] and not cached_lyrics:
+                artist_for_save = music_info.get('artist') or track_info.get('artist') or 'Unknown Artist'
+                title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
+                save_lrc_file(music_info['lyrics'], artist_for_save, title_for_save, CACHE_LYRICS_DIR)
 
             # Output JSON if requested
             if args.json_output:
@@ -116,7 +165,10 @@ def main():
                 if 'cover_data' in json_info:
                     del json_info['cover_data']
                 if cover_filename:
-                    json_info['cover_filename'] = cover_filename
+                    json_info['cover_filename'] = final_cover_filename
+                # If lyrics came from cache, make sure they are in the output
+                if cached_lyrics and 'lyrics' not in json_info:
+                    json_info['lyrics'] = cached_lyrics
                 print(json.dumps(json_info, indent=4, ensure_ascii=False))
     except Exception as e:
         print(f"An unexpected error occurred in main: {e}", file=sys.stderr)
@@ -425,17 +477,23 @@ def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', '_', name)
 
 
-def save_cover_art(image_data, track_title, output_dir):
-    """Saves cover art to a file."""
+def save_cover_art(image_data, artist, title, output_dir):
+    """Saves cover art to a file using artist and title."""
     if not image_data:
         return None
     
     image_data.seek(0) # Reset stream before reading
     
-    safe_title = sanitize_filename(track_title)
-    filename = f"{safe_title}_cover.jpg"
+    safe_artist = sanitize_filename(artist)
+    safe_title = sanitize_filename(title)
+    filename = f"{safe_artist} - {safe_title}_cover.jpg"
     filepath = os.path.join(output_dir, filename)
     
+    # Avoid re-saving if it already exists
+    if os.path.exists(filepath):
+        print(f"Cover art already exists at: {filepath}", file=sys.stderr)
+        return filename
+
     try:
         img = Image.open(image_data)
         if img.mode == 'RGBA':
@@ -447,15 +505,25 @@ def save_cover_art(image_data, track_title, output_dir):
         print(f"Error saving cover art: {e}", file=sys.stderr)
         return None
 
-def save_lrc_file(lrc_path, lyrics):
-    """Saves lyrics to an LRC file."""
+def save_lrc_file(lyrics, artist, title, output_dir):
+    """Saves lyrics to an LRC file using artist and title."""
     if not lyrics:
         return
-    
+        
+    safe_artist = sanitize_filename(artist)
+    safe_title = sanitize_filename(title)
+    filename = f"{safe_artist} - {safe_title}.lrc"
+    filepath = os.path.join(output_dir, filename)
+
+    # Avoid re-saving if it already exists
+    if os.path.exists(filepath):
+        print(f"Lyrics file already exists at: {filepath}", file=sys.stderr)
+        return
+
     try:
-        with open(lrc_path, 'w', encoding='utf-8') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             f.write(lyrics)
-        print(f"Lyrics saved to: {lrc_path}", file=sys.stderr)
+        print(f"Lyrics saved to: {filepath}", file=sys.stderr)
     except Exception as e:
         print(f"Error saving LRC file: {e}", file=sys.stderr)
 

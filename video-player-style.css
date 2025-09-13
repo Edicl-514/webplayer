@@ -39,7 +39,8 @@ body {
     background-position: center;
     filter: blur(30px) brightness(0.3);
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    z-index: -1;
+    z-index: 1; /* 提高 z-index 以覆盖 body 的背景 */
+    background-color: var(--primary-bg); /* 添加一个背景色 */
 }
 
 .player-container {
@@ -55,22 +56,43 @@ body {
     box-shadow:
         0 20px 50px var(--shadow-color),
         inset 0 0 1px rgba(255, 255, 255, 0.1);
-    overflow: hidden;
+    overflow-y: auto;
     display: flex;
+    flex-direction: column; /* Change to column layout */
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     backdrop-filter: blur(10px);
 }
 
+/* Custom Scrollbar for Player Container */
+.player-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.player-container::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+}
+
+.player-container::-webkit-scrollbar-thumb {
+    background: var(--accent-color);
+    border-radius: 4px;
+}
+
+.player-container::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover);
+}
+
 .player-main {
-    position: relative;
-    z-index: 2;
-    padding: 30px;
-    display: flex;
-    flex-direction: column;
-    width: 100%; /* Changed from 75% for standalone player */
-    height: 100%;
-    gap: 20px;
-    box-shadow: 8px 0 16px rgba(0, 0, 0, 0.2);
+   position: relative;
+   z-index: 2;
+   padding: 20px; /* Adjust padding */
+   display: flex;
+   flex-direction: column;
+   width: 100%; /* Full width */
+   /* height: 65%; */ /* Removed for scrolling */
+   flex-shrink: 0;
+   gap: 15px;
+   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .control-btn {
@@ -103,18 +125,21 @@ body {
     max-width: 1600px;
 }
 
+/* This is no longer needed as sidebar is removed */
+/*
 .player-main.video-mode {
     width: 100% !important;
     box-shadow: none;
 }
+*/
 
 .video-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 15px;
+    padding-bottom: 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    margin-bottom: 15px;
+    margin-bottom: 10px;
 }
 
 .video-title {
@@ -129,9 +154,8 @@ body {
 }
 
 .video-content-area {
-    flex-grow: 1;
     width: 100%;
-    height: calc(100% - 80px); /* Adjust based on header height */
+    aspect-ratio: 16 / 9;
     background-color: #000;
     border-radius: 10px;
     overflow: hidden;
@@ -148,7 +172,8 @@ body {
 }
 
 .subtitle-dropdown.no-subtitles {
-    display: none;
+    /* 不再完全隐藏按钮，下拉显示为灰色提示 */
+    opacity: 0.9;
 }
 
 .subtitle-dropdown-content {
@@ -167,6 +192,37 @@ body {
     min-width: 150px;
     z-index: 100;
     max-height: 200px; /* Limit height and add scroll */
+}
+
+/* 新增：分组标题样式 */
+.subtitle-section-header {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--accent-color);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    background: rgba(0,0,0,0.05);
+}
+
+/* 新增：禁用项样式 */
+.subtitle-dropdown-content a.disabled {
+    color: var(--secondary-text);
+    pointer-events: none;
+    opacity: 0.6;
+    cursor: default;
+    display: block;
+    padding: 8px 15px;
+}
+
+/* 新增：动作项样式（占位） */
+.subtitle-dropdown-content a.subtitle-action-item {
+    display: block;
+    padding: 8px 15px;
+    cursor: pointer;
+    color: var(--accent-text-color);
+    border-top: 1px dashed rgba(255,255,255,0.03);
+}
+.subtitle-dropdown-content a.subtitle-action-item:hover {
+    background-color: rgba(255,255,255,0.03);
 }
 
 /* Custom Scrollbar for Subtitle Dropdown */
@@ -209,6 +265,173 @@ body {
     color: var(--primary-bg);
 }
 
+/* Scraper Dropdown */
+.scraper-dropdown {
+   position: relative;
+}
+
+.scraper-dropdown-content {
+   position: absolute;
+   top: 120%;
+   right: 0;
+   background: var(--secondary-bg);
+   border-radius: 8px;
+   box-shadow: 0 4px 10px var(--shadow-color);
+   overflow: hidden;
+   opacity: 0;
+   visibility: hidden;
+   transition: all 0.3s ease;
+   min-width: 100px;
+   z-index: 100;
+}
+
+.scraper-dropdown-content.show {
+   opacity: 1;
+   visibility: visible;
+   top: 110%;
+}
+
+.scraper-dropdown-content a {
+   display: block;
+   padding: 8px 15px;
+   cursor: pointer;
+   font-size: 14px;
+   color: var(--primary-text);
+   text-decoration: none;
+   transition: background-color 0.2s;
+}
+
+.scraper-dropdown-content a:hover {
+   background-color: var(--accent-color);
+   color: var(--primary-bg);
+}
+
+/* Video Info Panel (previously Sidebar) */
+.video-info-panel {
+   width: 100%;
+   /* height: 35%; */ /* Removed for scrolling */
+   padding: 20px;
+   background-color: rgba(0, 0, 0, 0.2);
+   border-top: 1px solid rgba(255, 255, 255, 0.1);
+   display: flex;
+   flex-direction: column;
+   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.panel-title {
+   font-size: 20px;
+   font-weight: 500;
+   padding-bottom: 10px;
+   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+   margin-bottom: 10px;
+   flex-shrink: 0; /* Prevent title from shrinking */
+}
+
+.panel-content {
+   /* flex-grow: 1; */ /* Removed for scrolling */
+   /* overflow-y: auto; */ /* Removed for scrolling */
+   padding-right: 10px; /* For scrollbar spacing */
+}
+
+.panel-content::-webkit-scrollbar {
+   width: 8px;
+}
+
+.panel-content::-webkit-scrollbar-track {
+   background: rgba(0,0,0,0.2);
+   border-radius: 4px;
+}
+
+.panel-content::-webkit-scrollbar-thumb {
+   background: var(--accent-color);
+   border-radius: 4px;
+}
+
+.panel-content::-webkit-scrollbar-thumb:hover {
+   background: var(--accent-hover);
+}
+
+/* Styles for scraped data display */
+.source-container {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.source-container h3 {
+    color: var(--accent-hover);
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--accent-color);
+    padding-bottom: 5px;
+}
+
+.image-container img, .image-gallery img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-top: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: transform 0.2s ease-in-out;
+    cursor: zoom-in;
+}
+
+.image-gallery a:hover img, .image-container a:hover img {
+    transform: scale(1.05);
+}
+
+.image-gallery a:active img, .image-container a:active img {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+}
+
+.image-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    margin-top: 5px;
+}
+
+.info-list .image-gallery a,
+.info-list .image-container a {
+    border-bottom: none;
+}
+
+.info-list {
+   list-style-type: none;
+   padding-left: 0;
+}
+
+.info-list li {
+   margin-bottom: 10px;
+   font-size: 14px;
+}
+
+.info-list li strong {
+   color: var(--accent-color);
+   display: block;
+   margin-bottom: 4px;
+}
+
+.info-list li span, .info-list li a {
+   color: var(--primary-text);
+   word-break: break-word;
+}
+
+.info-list li a {
+   text-decoration: none;
+   border-bottom: 1px dotted var(--accent-color);
+}
+
+.info-list li a:hover {
+   color: var(--accent-hover);
+}
+
+.info-list ul {
+   padding-left: 20px;
+   margin-top: 5px;
+}
 
 /* DPlayer Style Overrides */
 .dplayer-controller .dplayer-bar-wrap .dplayer-bar {
@@ -381,6 +604,12 @@ body {
         bottom: 8% !important; /* Raise subtitles slightly on mobile */
     }
 
+    .scraper-dropdown-content,
+    .subtitle-dropdown-content {
+        right: auto;
+        left: 0;
+    }
+
     .subtitle-dropdown-content {
         bottom: auto;
         top: 110%; /* Position below the button on mobile */
@@ -389,5 +618,82 @@ body {
     .subtitle-dropdown-content.show {
         bottom: auto;
         top: 110%;
+    }
+}
+
+/* 同文件夹字幕的可折叠标题（改为带浮动子菜单） */
+.subtitle-local-toggle {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--primary-text);
+    user-select: none;
+}
+
+/* 小箭头（改为指向右侧，展开时旋转） */
+.subtitle-local-toggle::after {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: 8px;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: 6px solid var(--primary-text); /* 指向右侧箭头 */
+    transform-origin: center;
+    transition: transform 0.2s ease, border-left-color 0.2s;
+}
+.subtitle-local-toggle.open::after {
+    transform: rotate(180deg); /* 箭头向左（视觉上表现为打开） */
+    border-left-color: var(--accent-color);
+}
+
+/* 浮动的同文件夹字幕子菜单（桌面：右侧弹出） */
+.subtitle-local-submenu {
+    position: fixed; /* 改为 fixed，避免被父容器裁剪或受滚动影响 */
+    top: 0;
+    left: 0;
+    min-width: 180px;
+    background: var(--secondary-bg);
+    border-radius: 8px;
+    box-shadow: 0 6px 12px var(--shadow-color);
+    padding: 6px 0;
+    z-index: 10000;
+    display: none;
+    max-height: 60vh;
+    overflow: auto;
+    box-sizing: border-box;
+    max-width: calc(100vw - 16px);
+}
+
+/* 子菜单内项 */
+.subtitle-local-submenu a {
+    display: block;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--primary-text);
+    text-decoration: none;
+    white-space: nowrap; /* 保持单行，超出显示省略或滚动 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.subtitle-local-submenu a:hover {
+    background-color: rgba(255,255,255,0.03);
+    color: var(--accent-hover);
+}
+
+/* 移动端：子菜单改为在父项下方展开并靠左（避免超出屏幕） */
+@media (max-width: 768px) {
+    .subtitle-local-submenu {
+        /* left: 0 !important; */
+        /* right: auto; */
+        /* top: 110% !important; */
+        min-width: 160px;
+        max-width: calc(100vw - 16px);
+        max-height: 50vh;
     }
 }

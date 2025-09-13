@@ -76,6 +76,102 @@ def jaccard_similarity(s1, s2):
 
 
 # ==============================================================================
+# 中文键名映射和翻译函数
+# ==============================================================================
+KEY_TRANSLATION_MAP = {
+    # 通用
+    "type": "类型",
+    "title": "标题",
+    "original_title": "原始标题",
+    "release_date": "发行日期",
+    "genres": "类型",
+    "poster_path": "海报路径",
+    "backdrop_path": "背景路径",
+    "rating": "评分",
+    "overview": "简介",
+    "source": "来源",
+    "id": "番号",
+    "duration": "时长",
+    "director": "导演",
+    "studio": "制作商",
+    "series": "系列",
+    "actors": "演员",
+    "poster_url": "海报链接",
+    "plot": "剧情",
+    "url": "链接",
+    "tags": "标签",
+    "summary": "摘要",
+    "score": "匹配度",
+
+    # TMDB 电影
+    "tagline": "标语",
+    "tmdb_id": "TMDb ID",
+    "imdb_id": "IMDb ID",
+
+    # TMDB 电视剧
+    "series_title": "剧集标题",
+    "series_original_title": "剧集原始标题",
+    "series_overview": "剧集简介",
+    "series_genres": "剧集类型",
+    "series_poster_path": "剧集海报路径",
+    "series_backdrop_path": "剧集背景路径",
+    "series_tmdb_id": "剧集 TMDb ID",
+    "series_imdb_id": "剧集 IMDb ID",
+    "series_info": "系列信息",
+    "episode": "剧集信息",
+    "season_number": "季号",
+    "episode_number": "集号",
+    "air_date": "播出日期",
+    "still_path": "剧照路径",
+
+    # JAV
+    "sample_images": "预览图",
+    "product_id": "产品ID",
+    "comment": "评论",
+    "rating_text": "评分文本",
+
+    # FC2
+    "cover_image_url": "封面图片链接",
+    "seller": "销售商",
+    "preview_image_urls": "预览图链接",
+    "source_url": "来源链接",
+
+    # 动漫
+    "title_cn": "中文标题",
+    "anime_type": "动画类型",
+    "episode_count": "总集数",
+    "cover_url": "封面链接",
+    "infobox": "信息框",
+    "characters": "角色",
+    "character": "角色",
+    "cv": "声优",
+    "story": "故事",
+    "staff": "制作人员",
+
+    # 刮削器内部
+    "file_info": "文件信息",
+    "path": "路径",
+    "parsed_by_guessit": "Guessit解析信息",
+    "error": "错误",
+    "jav_results": "JAV刮削结果",
+    "data": "数据",
+}
+
+def translate_keys(obj, translation_map):
+    """递归地翻译字典或列表中的字典的键"""
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            new_key = translation_map.get(k, k)
+            new_dict[new_key] = translate_keys(v, translation_map)
+        return new_dict
+    elif isinstance(obj, list):
+        return [translate_keys(elem, translation_map) for elem in obj]
+    else:
+        return obj
+
+
+# ==============================================================================
 # 刮削器模块
 # ==============================================================================
 
@@ -247,7 +343,7 @@ class Scraper:
         
         # 新增：通过文件名特征判断是否为动漫
         # 很多动漫文件名包含字幕组或分辨率等方括号标签
-        anime_pattern = r'\[[a-zA-Z0-9\s\._-]+\]'
+        anime_pattern = r'\[[^\]]+\]'
         if re.search(anime_pattern, filename):
             return 'anime'
             
@@ -1181,21 +1277,94 @@ class Scraper:
             anime_type = infobox.get('メディア', '未知')
             tags = [tag.strip() for tag in infobox.get('サブジャンル', '').replace('[一覧]', '').split()]
 
+            # 提取封面图
+            cover_url = None
+            cover_link = detail_soup.select_one('a.highslide[href*="package.jpg"]')
+            if cover_link and cover_link.has_attr('href'):
+                cover_url = urllib.parse.urljoin(detail_url, cover_link['href'])
+
+            # 提取预览图
+            sample_images = []
+            sample_links = detail_soup.select('a.highslide[href*="sample"]')
+            for link in sample_links:
+                if link.has_attr('href'):
+                    img_url = urllib.parse.urljoin(detail_url, link['href'])
+                    sample_images.append(img_url)
+
+            # 提取系列信息
+            series_info = []
+            episode_count = 1 # 默认为1
+
+            # 优先尝试从 script 标签中寻找由JS加载的系列数据
+            found_data_in_script = False
+            for script in detail_soup.find_all('script'):
+                if script.string:
+                    # 寻找一个看起来像数据数组的JS变量赋值
+                    match = re.search(r'var\s+\w+\s*=\s*(\[[\s\S]+?\]);', script.string)
+                    if match:
+                        json_str = match.group(1)
+                        try:
+                            items_data = json.loads(json_str)
+                            # 简单验证一下数据结构是不是我们想要的
+                            if items_data and isinstance(items_data, list) and 'title' in items_data[0]:
+                                for item in items_data:
+                                    item_url = urllib.parse.urljoin(detail_url, item.get('url', ''))
+                                    series_info.append({
+                                        "title": item.get('title', '未知标题'),
+                                        "url": item_url,
+                                        "release_date": item.get('release_date', '未知日期')
+                                    })
+                                found_data_in_script = True
+                                break
+                        except (json.JSONDecodeError, TypeError, KeyError):
+                            continue
+            
+            # 如果 script 中没有找到数据，则回退到直接解析HTML结构的方法
+            if not found_data_in_script:
+                series_container = detail_soup.find('div', class_='item-series-container')
+                if series_container:
+                    series_items = series_container.select('ul.item-series-list > li')
+                    for item in series_items:
+                        if 'bx-clone' in item.get('class', []):
+                            continue
+                        
+                        title_tag = item.select_one('.table-003-title a')
+                        url_tag = item.select_one('.item-series-img a')
+                        date_tag = item.select_one('.table-003-releasedate')
+
+                        if title_tag and url_tag and date_tag:
+                            title = title_tag.get_text(strip=True)
+                            relative_url = url_tag['href']
+                            item_url = urllib.parse.urljoin(detail_url, relative_url)
+                            release_date_text = date_tag.get_text(strip=True)
+                            release_date = release_date_text.replace('発売日：', '').strip()
+                            series_info.append({
+                                "title": title,
+                                "url": item_url,
+                                "release_date": release_date
+                            })
+            
+            # 如果成功解析出系列信息，则根据解析出的数量更新总集数
+            if series_info:
+                episode_count = len(series_info)
+
             return {
                 "type": "Anime",
                 "source": "Getchu",
                 "title": title,
-                "title_cn": title,
+                "cover_url": cover_url,
+                "sample_images": sample_images,
                 "summary": summary,
                 "story": story,
                 "anime_type": anime_type,
-                "episode_count": 1, # Getchu usually has 1 episode for OVAs
+                "episode_count": episode_count,
                 "air_date": air_date,
                 "rating": "无评分",
                 "tags": tags,
                 "infobox": infobox,
                 "staff": staff,
-                "url": detail_url
+                "url": detail_url,             
+                "series_info": series_info
             }
 
         except requests.RequestException as e:
@@ -1315,8 +1484,11 @@ def main():
     # 传递 video_type
     final_data = scraper.scrape(scrape_target, video_type=video_type)
 
+    # --- 新增：翻译结果的键 ---
+    translated_data = translate_keys(final_data, KEY_TRANSLATION_MAP)
+
     # --- 输出结果 ---
-    json_output = json.dumps(final_data, indent=4, ensure_ascii=False, cls=CustomEncoder)
+    json_output = json.dumps(translated_data, indent=4, ensure_ascii=False, cls=CustomEncoder)
     print("\n刮削结果 (JSON格式):")
     print(json_output)
     

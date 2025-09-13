@@ -245,22 +245,80 @@ const server = http.createServer((req, res) => {
     // 新增：图片代理
     if (pathname === '/api/proxy-image' && req.method === 'GET') {
         const imageUrl = parsedUrl.query.url;
+        const refererParam = parsedUrl.query.referer; // 可选的 referer 覆盖
         if (!imageUrl) {
             res.statusCode = 400;
             res.end('Missing image URL');
             return;
         }
 
-        const proxyRequest = https.get(imageUrl, (proxyRes) => {
-            res.writeHead(proxyRes.statusCode, proxyRes.headers);
-            proxyRes.pipe(res, { end: true });
-        });
+        try {
+            const urlObject = new URL(imageUrl);
+            // 选择协议模块
+            const client = urlObject.protocol === 'http:' ? http : https;
 
-        proxyRequest.on('error', (err) => {
-            console.error('Proxy request error:', err);
-            res.statusCode = 500;
-            res.end('Failed to proxy image');
-        });
+            // 智能选择 Referer：优先使用查询参数，其次按 hostname 映射（对 getchu 特殊处理），否则使用目标站点根域
+            let refererHeader = refererParam;
+            if (!refererHeader) {
+                const host = urlObject.hostname.toLowerCase();
+                if (host.includes('getchu')) {
+                    refererHeader = 'https://www.getchu.com/';
+                } else if (host.includes('javbus')) {
+                    refererHeader = 'https://www.javbus.com/';
+                } else {
+                    refererHeader = `${urlObject.protocol}//${urlObject.hostname}/`;
+                }
+            }
+
+            const options = {
+                hostname: urlObject.hostname,
+                path: urlObject.pathname + urlObject.search,
+                port: urlObject.port || (urlObject.protocol === 'http:' ? 80 : 443),
+                method: 'GET',
+                headers: {
+                    // 模拟常见浏览器 UA
+                    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': refererHeader,
+                    'Accept': 'image/*,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Connection': 'keep-alive',
+                    'Host': urlObject.host
+                },
+                timeout: 10000
+            };
+
+            const proxyRequest = client.request(options, (proxyRes) => {
+                // 只透传可安全的响应头（避免带入目标站点的 set-cookie 等敏感头）
+                res.statusCode = proxyRes.statusCode || 200;
+                const safeHeaders = {};
+                const allowed = ['content-type', 'content-length', 'last-modified', 'etag', 'cache-control', 'expires'];
+                Object.keys(proxyRes.headers).forEach(h => {
+                    if (allowed.includes(h.toLowerCase())) safeHeaders[h] = proxyRes.headers[h];
+                });
+                // 如果目标返回 403/401，仍把状态和少量头返回给客户端以便调试
+                Object.entries(safeHeaders).forEach(([k, v]) => res.setHeader(k, v));
+                proxyRes.pipe(res, { end: true });
+            });
+
+            proxyRequest.on('timeout', () => {
+                proxyRequest.abort();
+            });
+
+            proxyRequest.on('error', (err) => {
+                console.error('Proxy request error:', err);
+                if (!res.headersSent) {
+                    res.statusCode = 502;
+                    res.end('Failed to proxy image');
+                } else {
+                    try { res.end(); } catch (e) {}
+                }
+            });
+
+            proxyRequest.end();
+        } catch (e) {
+            res.statusCode = 400;
+            res.end('Invalid image URL');
+        }
         return;
     }
 
@@ -679,6 +737,77 @@ const server = http.createServer((req, res) => {
         });
         return;
     }
+
+   if (pathname === '/api/scrape-video' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => {
+           body += chunk.toString();
+       });
+       req.on('end', () => {
+           try {
+               const { src, mediaDir, type } = JSON.parse(body);
+               if (!src || !mediaDir) {
+                   res.statusCode = 400;
+                   res.end(JSON.stringify({ error: 'Missing src or mediaDir' }));
+                   return;
+               }
+
+               const fullVideoPath = path.join(mediaDir, src);
+               const args = ['video_scraper.py', fullVideoPath];
+               if (type) {
+                   args.push(type);
+               }
+
+               const pythonProcess = spawn('python', args, {
+                   env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+               });
+
+               let stdoutData = '';
+               let stderrData = '';
+
+               pythonProcess.stdout.on('data', (data) => {
+                   stdoutData += data.toString();
+               });
+
+               pythonProcess.stderr.on('data', (data) => {
+                   stderrData += data.toString();
+               });
+
+               pythonProcess.on('close', (code) => {
+                   if (stderrData) {
+                       console.error(`video_scraper.py stderr: ${stderrData}`);
+                   }
+                   if (code !== 0) {
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ error: `Scraper script exited with code ${code}`, details: stderrData }));
+                       return;
+                   }
+                   try {
+                       // 尝试找到有效的JSON输出
+                       const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                       if (jsonMatch && jsonMatch[1]) {
+                           const scrapedData = JSON.parse(jsonMatch[1]);
+                           res.setHeader('Content-Type', 'application/json');
+                           res.end(JSON.stringify(scrapedData));
+                       } else {
+                           res.setHeader('Content-Type', 'application/json');
+                           res.end(JSON.stringify({ error: 'Could not parse scraper output.', details: stdoutData }));
+                       }
+                   } catch (e) {
+                       console.error('Error parsing python script output:', e);
+                       console.error('Raw stdout:', stdoutData);
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ error: 'Error parsing scraper output' }));
+                   }
+               });
+
+           } catch (e) {
+               res.statusCode = 400;
+               res.end(JSON.stringify({ error: 'Invalid JSON' }));
+           }
+       });
+       return;
+   }
 
     // 新增：处理 /node_modules 的请求
     if (pathname.startsWith('/node_modules/')) {
