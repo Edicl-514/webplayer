@@ -1,3 +1,49 @@
+# -*- coding: utf-8 -*-
+
+"""
+功能:
+    本脚本是一个基于 Everything SDK 的 Python 封装，用于在 Windows 系统上进行高速的文件和文件夹搜索。
+    它提供了两种操作模式：
+    1. 交互式命令行模式：直接运行脚本，用户可以根据提示输入搜索条件并查看结果。
+    2. 命令行工具模式：通过命令行参数执行搜索，并将结果以 JSON 格式输出，便于与其他程序集成。
+
+环境要求:
+    - 操作系统：Windows
+    - 依赖软件：必须安装并运行 "Everything" 搜索工具 (https://www.voidtools.com/)。
+    - DLL 文件：需要将 Everything SDK 中的 `Everything64.dll` 或 `Everything32.dll` 放置在 `everything_sdk/dll/` 目录下。
+
+用法:
+
+1. 交互式模式:
+   - 直接运行脚本:
+     python search.py
+   - 根据提示输入搜索关键词，例如 `*.txt` 或 `folder:downloads`。
+   - 可以设置是否区分大小写、全词匹配、使用正则表达式以及最大结果数。
+   - 输入 `help` 查看更多 Everything 搜索语法。
+   - 输入 `quit` 退出程序。
+
+2. 命令行工具模式 (用于脚本集成):
+   - 命令格式:
+     python search.py --query "<search_query>" [options]
+
+   - 主要参数:
+     --query:            必需。搜索关键词，复杂的查询建议使用双引号包裹。
+     --max-results:      可选。返回的最大结果数量，默认为 100。
+     --dirs:             可选。指定搜索的目录，多个目录用逗号分隔，例如 `"C:\\Users,D:\\Data"`。
+     --match-case:       可选。启用区分大小写搜索。
+     --match-whole-word: 可选。启用全词匹配。
+     --use-regex:        可选。启用正则表达式搜索。
+
+   - 示例:
+     # 搜索 C:\Windows 目录下所有 .log 文件，并返回最多 50 个结果
+     python search.py --query "*.log" --dirs "C:\\Windows" --max-results 50
+
+     # 搜索所有大于 10MB 的 "backup" 文件夹
+     python search.py --query "folder:backup size:>10mb"
+
+   - 输出:
+     结果将以单行 JSON 字符串的形式输出到标准输出，包含成功状态、查询详情和结果列表。
+"""
 import ctypes
 from ctypes import wintypes
 import os

@@ -1,3 +1,75 @@
+# -*- coding: utf-8 -*-
+"""
+@功能描述:
+一个多来源的视频信息刮削器脚本。
+本脚本能够根据视频文件名或番号，自动从多个在线数据库刮削元数据，
+包括电影、电视剧、动漫(Anime)以及 JAV 和 FC2 影片。
+刮削结果以 JSON 格式输出，并支持将封面图片下载到本地缓存。
+
+@主要功能:
+1.  **文件名解析**: 使用 `guessit` 库从文件名中智能提取标题、年份、季号、集号等信息。
+2.  **类型自动识别**: 能够根据文件名特征（如番号格式、括号标签等）自动判断视频类型（Movie, TV, Anime, JAV, FC2）。
+3.  **多数据源支持**:
+    -   **电影/电视剧**: The Movie Database (TMDb)
+    -   **JAV**: Javbus, FANZA, Jav321, JavDB
+    -   **FC2**: adult.contents.fc2.com
+    -   **动漫(Anime)**: Bangumi(bgm.tv), Getchu, Hanime1
+4.  **结果聚合与筛选**:
+    -   对于 JAV 和动漫，脚本会从所有支持的来源刮削信息。
+    -   使用 Jaccard 相似度算法比较标题，自动选择与查询最匹配的结果。
+5.  **本地缓存**:
+    -   使用 SQLite 数据库缓存刮削到的元数据，避免对同一文件重复进行网络请求。
+    -   自动下载并缓存影片封面/海报到本地 `cache/videoinfo/images` 目录。
+    -   支持强制在线刮削，忽略现有缓存。
+6.  **结果翻译**: 将输出的 JSON 数据的键名翻译为中文，便于阅读。
+
+@依赖库:
+-   requests
+-   beautifulsoup4
+-   guessit
+-   tmdbv3api
+-   cloudscraper (用于 Hanime 刮削)
+-   urllib3
+
+@配置:
+在使用前，请务必在脚本的“全局配置”部分填入你自己的 TMDb API 密钥：
+`TMDB_API_KEY = 'YOUR_TMDB_API_KEY'`
+
+@用法说明:
+本脚本可以通过命令行直接运行。
+
+1.  **基本用法 (自动识别类型)**:
+    ```bash
+    python video_scraper.py "你的视频文件名.mkv"
+    ```
+    或者直接提供番号：
+    ```bash
+    python video_scraper.py "SSIS-123"
+    ```
+
+2.  **指定视频类型**:
+    如果自动识别不准确，可以手动指定类型。支持的类型包括: `movie`, `tv`, `anime`, `jav`, `fc2`。
+    ```bash
+    python video_scraper.py "Some Anime Title 01.mp4" anime
+    ```
+
+3.  **强制在线刮削 (忽略缓存)**:
+    使用 `-f` 或 `--force` 参数可以强制脚本联网搜索，即使用于已有缓存记录的文件。
+    ```bash
+    python video_scraper.py "SSIS-123" --force
+    ```
+    或者
+    ```bash
+    python video_scraper.py "文件名.mkv" jav -f
+    ```
+
+4.  **交互模式**:
+    如果不带任何参数直接运行脚本，它会提示你输入文件路径或番号。
+    ```bash
+    python video_scraper.py
+    # 然后根据提示输入: 请输入视频文件的完整路径、文件名或番号:
+    ```
+"""
 import os
 import json
 import re

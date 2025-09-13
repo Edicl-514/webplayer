@@ -252,6 +252,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. 先用播放列表中的基本信息填充UI
         songTitle.textContent = song.title;
         songArtist.textContent = song.artist;
+        checkMarquee(songTitle);
+        checkMarquee(songArtist);
         albumCover.src = getCacheBustedUrl(song.cover); // 使用默认封面
         playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
 
@@ -343,6 +345,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 用获取到的信息更新UI
                 songTitle.textContent = info.title || song.title;
                 songArtist.textContent = info.artist || song.artist;
+                checkMarquee(songTitle);
+                checkMarquee(songArtist);
                 
                 // BUGFIX: 更新播放列表和localStorage中的元数据
                 const hasChanged = (song.title !== songTitle.textContent) || (song.artist !== songArtist.textContent);
@@ -356,31 +360,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 检查后端是否返回了封面文件名
                 if (info.cover_filename) {
-                    const coverUrl = `/cache/covers/${encodeURIComponent(info.cover_filename)}`;
+                    const safeCoverFilename = info.cover_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                    const coverUrl = `/cache/covers/${safeCoverFilename}`;
                     
                     // 使用一个技巧来检查图片是否存在，如果404则不更新
-                    const img = new Image();
-                    img.onload = () => {
-                        albumCover.src = getCacheBustedUrl(coverUrl);
-                        playerBg.style.backgroundImage = `url(${getCacheBustedUrl(coverUrl)})`;
-                        // 封面加载后重新设置主题色
-                        // 传入已经加载完成的img对象，而不是albumCover DOM元素
-                        // 避免因DOM更新延迟导致colorthief读取不到图像数据
-                        setThemeColor(img);
-                    };
-                    img.onerror = () => {
-                        console.warn(`Cover image not found at ${coverUrl}, using default.`);
-                        // 如果封面加载失败，确保主题色被重置或使用默认封面
-                        albumCover.src = getCacheBustedUrl(song.cover);
-                        playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
-                        // Ensure the default cover is loaded before getting color
-                        if (albumCover.complete) {
-                            setThemeColor(albumCover);
-                        } else {
-                            albumCover.onload = () => setThemeColor(albumCover);
-                        }
-                    };
-                    img.src = getCacheBustedUrl(coverUrl);
+                   // The new cover URL is ready. We'll assign it to the main album cover
+                   // element and use its onload event to trigger background and theme updates.
+                   albumCover.onload = () => {
+                       playerBg.style.backgroundImage = `url(${albumCover.src})`;
+                       setThemeColor(albumCover);
+                       albumCover.onload = null; // Clean up
+                       albumCover.onerror = null;
+                   };
+                   albumCover.onerror = () => {
+                       console.warn(`Cover image not found at ${coverUrl}, using default.`);
+                       // If the new cover fails, revert to the default one.
+                       albumCover.src = getCacheBustedUrl(song.cover);
+                       playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
+                       
+                       // We need to ensure the default cover is loaded before getting its color.
+                       // The simplest way is to attach a new onload for the default cover.
+                       albumCover.onload = () => {
+                           setThemeColor(albumCover);
+                           albumCover.onload = null; // Final cleanup
+                       };
+                       albumCover.onerror = null; // Final cleanup
+                   };
+
+                   // Trigger the load process
+                   albumCover.src = getCacheBustedUrl(coverUrl);
                 } else {
                     // 如果后端没有返回封面文件名，保持原有逻辑或使用默认封面
                     console.warn("No cover_filename in API response, using default cover.");
@@ -391,7 +399,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 新增：检查并处理返回的歌词文件或内容
                 if (info.lyrics_filename) {
-                    const lrcUrl = `/cache/lyrics/${encodeURIComponent(info.lyrics_filename)}`;
+                    const safeLrcFilename = info.lyrics_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                    const lrcUrl = `/cache/lyrics/${safeLrcFilename}`;
                     console.log(`Found lyrics file from API: ${lrcUrl}`);
                     
                     // 更新当前歌曲对象的lrc路径
@@ -999,6 +1008,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- 辅助函数 ---
+
+    function checkMarquee(element) {
+        // 1. 总是先移除类，将元素重置到一个已知的基准状态。
+        element.classList.remove('marquee');
+
+        // 2. 使用 requestAnimationFrame 来确保浏览器有时间应用上面的样式更改（移除类）
+        //    并重新计算布局，然后再进行宽度检查。
+        requestAnimationFrame(() => {
+            const isOverflowing = element.scrollWidth > element.clientWidth;
+            if (isOverflowing) {
+                // 3. 如果确实溢出，现在才添加 marquee 类来启动动画。
+                element.classList.add('marquee');
+            }
+        });
+    }
 
     function formatTime(secs) {
         const minutes = Math.floor(secs / 60) || 0;
