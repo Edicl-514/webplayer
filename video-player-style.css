@@ -9,6 +9,7 @@
     --accent-hover: #00e5ff;
     --shadow-color: rgba(0, 0, 0, 0.5);
     --accent-text-color: #1a1a1a;
+    --accent-color-rgb: 0, 188, 212;
 }
 
 * {
@@ -145,6 +146,9 @@ body {
 .video-title {
     font-size: 24px;
     font-weight: 500;
+    color: var(--accent-color);
+    text-shadow: 0 0 8px rgba(var(--accent-color-rgb), 0.5);
+    transition: all 0.3s ease;
 }
 
 .video-controls-right {
@@ -262,7 +266,7 @@ body {
 
 .subtitle-dropdown-content a:hover {
     background-color: var(--accent-color);
-    color: var(--primary-bg);
+    color: var(--accent-text-color);
 }
 
 /* Scraper Dropdown */
@@ -303,7 +307,7 @@ body {
 
 .scraper-dropdown-content a:hover {
    background-color: var(--accent-color);
-   color: var(--primary-bg);
+   color: var(--accent-text-color);
 }
 
 /* Video Info Panel (previously Sidebar) */
@@ -533,7 +537,7 @@ body {
 #startConversionBtn:hover, #modalDownloadBtn:hover {
     background: var(--accent-color);
     border-color: var(--accent-color);
-    color: var(--primary-bg);
+    color: var(--accent-text-color);
 }
 
 #cancelConversionBtn:hover {

@@ -245,80 +245,72 @@ const server = http.createServer((req, res) => {
     // 新增：图片代理
     if (pathname === '/api/proxy-image' && req.method === 'GET') {
         const imageUrl = parsedUrl.query.url;
-        const refererParam = parsedUrl.query.referer; // 可选的 referer 覆盖
         if (!imageUrl) {
             res.statusCode = 400;
             res.end('Missing image URL');
             return;
         }
 
-        try {
-            const urlObject = new URL(imageUrl);
-            // 选择协议模块
-            const client = urlObject.protocol === 'http:' ? http : https;
+        const maxRedirects = 5;
+        let currentRedirects = 0;
 
-            // 智能选择 Referer：优先使用查询参数，其次按 hostname 映射（对 getchu 特殊处理），否则使用目标站点根域
-            let refererHeader = refererParam;
-            if (!refererHeader) {
-                const host = urlObject.hostname.toLowerCase();
-                if (host.includes('getchu')) {
-                    refererHeader = 'https://www.getchu.com/';
-                } else if (host.includes('javbus')) {
-                    refererHeader = 'https://www.javbus.com/';
-                } else {
-                    refererHeader = `${urlObject.protocol}//${urlObject.hostname}/`;
-                }
+        function fetchImage(imageUrl, referer) {
+            if (currentRedirects >= maxRedirects) {
+                res.statusCode = 500;
+                res.end('Too many redirects');
+                return;
             }
+            currentRedirects++;
 
-            const options = {
-                hostname: urlObject.hostname,
-                path: urlObject.pathname + urlObject.search,
-                port: urlObject.port || (urlObject.protocol === 'http:' ? 80 : 443),
-                method: 'GET',
-                headers: {
-                    // 模拟常见浏览器 UA
-                    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Referer': refererHeader,
-                    'Accept': 'image/*,*/*;q=0.8',
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Connection': 'keep-alive',
-                    'Host': urlObject.host
-                },
-                timeout: 10000
-            };
+            try {
+                const urlObject = new URL(imageUrl);
+                const client = urlObject.protocol === 'https:' ? https : http;
 
-            const proxyRequest = client.request(options, (proxyRes) => {
-                // 只透传可安全的响应头（避免带入目标站点的 set-cookie 等敏感头）
-                res.statusCode = proxyRes.statusCode || 200;
-                const safeHeaders = {};
-                const allowed = ['content-type', 'content-length', 'last-modified', 'etag', 'cache-control', 'expires'];
-                Object.keys(proxyRes.headers).forEach(h => {
-                    if (allowed.includes(h.toLowerCase())) safeHeaders[h] = proxyRes.headers[h];
+                const options = {
+                    headers: {
+                        'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Referer': referer,
+                        'Accept': 'image/*,*/*;q=0.8',
+                    }
+                };
+
+                const proxyRequest = client.get(imageUrl, options, (proxyRes) => {
+                    if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+                        // 处理重定向
+                        const newUrl = new URL(proxyRes.headers.location, imageUrl).href;
+                        fetchImage(newUrl, imageUrl); // 使用当前URL作为下一次请求的Referer
+                    } else {
+                        // 成功获取图片
+                        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                        proxyRes.pipe(res);
+                    }
                 });
-                // 如果目标返回 403/401，仍把状态和少量头返回给客户端以便调试
-                Object.entries(safeHeaders).forEach(([k, v]) => res.setHeader(k, v));
-                proxyRes.pipe(res, { end: true });
-            });
 
-            proxyRequest.on('timeout', () => {
-                proxyRequest.abort();
-            });
-
-            proxyRequest.on('error', (err) => {
-                console.error('Proxy request error:', err);
-                if (!res.headersSent) {
-                    res.statusCode = 502;
-                    res.end('Failed to proxy image');
-                } else {
-                    try { res.end(); } catch (e) {}
-                }
-            });
-
-            proxyRequest.end();
-        } catch (e) {
-            res.statusCode = 400;
-            res.end('Invalid image URL');
+                proxyRequest.on('error', (err) => {
+                    console.error('Proxy request error:', err);
+                    if (!res.headersSent) {
+                        res.statusCode = 502;
+                        res.end('Failed to proxy image');
+                    }
+                });
+            } catch (e) {
+                res.statusCode = 400;
+                res.end('Invalid image URL');
+            }
         }
+
+        // 初始Referer逻辑
+        let initialReferer = 'https://www.javbus.com/';
+        try {
+            const initialUrlObject = new URL(imageUrl);
+            if (initialUrlObject.hostname.includes('getchu')) {
+                initialReferer = 'https://www.getchu.com/';
+            }
+        } catch (e) {
+            // URL无效，让后续逻辑处理
+        }
+        
+        fetchImage(imageUrl, initialReferer);
         return;
     }
 

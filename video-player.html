@@ -26,6 +26,7 @@
                            <a href="#" data-type="tv">电视剧</a>
                            <a href="#" data-type="anime">动漫</a>
                            <a href="#" data-type="jav">JAV</a>
+                           <a href="#" data-type="FC2">FC2</a>
                        </div>
                    </div>
                    <div class="subtitle-dropdown">
@@ -755,22 +756,58 @@
              }
        }
 
-       function getContrastColor(dominantColor, palette) {
-            const getBrightness = (c) => (c[0] * 299 + c[1] * 587 + c[2] * 114) / 1000;
-            const dominantBrightness = getBrightness(dominantColor);
-            
-            let bestColor = palette[1] || dominantColor; // Fallback to second color or dominant
-            let maxDiff = 0;
+       function findBestAccentColor(palette) {
+            // Helper to convert RGB to HSL
+            function rgbToHsl(r, g, b) {
+                r /= 255, g /= 255, b /= 255;
+                const max = Math.max(r, g, b), min = Math.min(r, g, b);
+                let h = 0, s = 0, l = (max + min) / 2;
+                if (max !== min) {
+                    const d = max - min;
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    switch (max) {
+                        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                        case g: h = (b - r) / d + 2; break;
+                        case b: h = (r - g) / d + 4; break;
+                    }
+                    h /= 6;
+                }
+                return [h, s, l];
+            }
 
+            let suitableColors = [];
+            // Start from index 1 to skip the dominant color, which is often a background color
             for (let i = 1; i < palette.length; i++) {
-                const currentBrightness = getBrightness(palette[i]);
-                const diff = Math.abs(dominantBrightness - currentBrightness);
-                if (diff > maxDiff) {
-                    maxDiff = diff;
-                    bestColor = palette[i];
+                const color = palette[i];
+                const [h, s, l] = rgbToHsl(color[0], color[1], color[2]);
+
+                // Conditions for a "good" accent color:
+                // - Lightness should be in a pleasant range (not too dark, not pure white)
+                // - Saturation should be decent (not grayscale)
+                if (l > 0.55 && l < 0.9 && s > 0.3) {
+                    suitableColors.push({ color: color, s: s, l: l });
                 }
             }
-            return bestColor;
+
+            if (suitableColors.length > 0) {
+                // Prefer colors with higher saturation for more vibrancy
+                suitableColors.sort((a, b) => b.s - a.s);
+                return suitableColors[0].color;
+            }
+
+            // Fallback logic if no suitable color is found
+            // Return the brightest color from the palette that is not the dominant one.
+            let brightestColor = palette[1] || [200, 200, 200]; // A safe fallback
+            let maxL = 0;
+            for (let i = 1; i < palette.length; i++) {
+                const color = palette[i];
+                const [, , l] = rgbToHsl(color[0], color[1], color[2]);
+                if (l > maxL) {
+                    maxL = l;
+                    brightestColor = color;
+                }
+            }
+            return brightestColor;
         }
 
        function updateBackgroundAndTheme(imageUrl) {
@@ -790,9 +827,24 @@
                     // Pass the loaded image object directly to ColorThief
                     const dominantColor = colorThief.getColor(this);
                     const palette = colorThief.getPalette(this, 5);
-                    const accentColor = getContrastColor(dominantColor, palette);
+                    const accentColor = findBestAccentColor(palette);
                     console.log("Dominant color:", dominantColor, "Accent color:", accentColor);
-                    
+
+                    // Determine text color based on the brightness of the dominant color of the background
+                    // A more robust method to determine text color based on perceived brightness (Luma)
+                    function getTextColorForBg(rgbColor) {
+                        // Formula for calculating Luma from sRGB
+                        const luma = (0.299 * rgbColor[0] + 0.587 * rgbColor[1] + 0.114 * rgbColor[2]) / 255;
+                        // Use a threshold of 0.5 - greater than 0.5 is a light color, less is a dark color.
+                        // Return black for light backgrounds, white for dark backgrounds for max contrast.
+                        const newColor = luma > 0.5 ? '#000000' : '#FFFFFF';
+                        console.log(`Color: rgb(${rgbColor.join(',')}), Luma: ${luma.toFixed(2)}, Chosen Text Color: ${newColor}`);
+                        return newColor;
+                    }
+
+                    const newPrimaryTextColor = getTextColorForBg(dominantColor);
+                    const accentTextColor = getTextColorForBg(accentColor);
+
                     const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
                         const hex = x.toString(16);
                         return hex.length === 1 ? '0' + hex : hex;
@@ -805,19 +857,19 @@
                         Math.min(255, accentColor[2] + 20)
                     );
 
-                    const brightness = Math.round(((parseInt(accentColor[0]) * 299) +
-                                                 (parseInt(accentColor[1]) * 587) +
-                                                 (parseInt(accentColor[2]) * 114)) / 1000);
-                    const accentTextColor = (brightness > 125) ? '#1a1a1a' : '#e0e0e0';
+                    const accentRgb = `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`;
 
+                    document.documentElement.style.setProperty('--primary-text', newPrimaryTextColor);
                     document.documentElement.style.setProperty('--accent-color', accentHex);
                     document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
                     document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
+                    document.documentElement.style.setProperty('--accent-color-rgb', accentRgb);
                     
-                    console.log('Theme updated successfully with color:', accentHex);
+                    console.log('Theme updated successfully. New primary text:', newPrimaryTextColor, 'New accent:', accentHex);
                 } catch (e) {
                     console.error("ColorThief error inside onload:", e);
                     // Restore default colors on error
+                    document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
                     document.documentElement.style.setProperty('--accent-color', '#00bcd4');
                     document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
                     document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
@@ -826,6 +878,7 @@
             img.onerror = function(e) {
                 console.error("Failed to load image for ColorThief via proxy. Error event:", e);
                  // Restore default colors on error
+                document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
                 document.documentElement.style.setProperty('--accent-color', '#00bcd4');
                 document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
                 document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
