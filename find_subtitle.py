@@ -1,3 +1,51 @@
+"""
+字幕查找与转换工具
+=================
+
+此工具用于查找视频文件关联的字幕，并将非VTT格式的字幕转换为WebVTT格式以便在网页播放器中使用。
+
+功能特性：
+---------
+1. 自动查找与视频同名的字幕文件（支持.vtt, .ass, .srt格式）
+2. 可选择查找目录中所有字幕文件
+3. 自动将.srt和.ass格式转换为WebVTT格式
+4. 生成可在Web播放器中使用的字幕URL
+5. 使用FFmpeg进行格式转换
+
+用法：
+-----
+命令行调用：
+python find_subtitle.py <video_path> [media_dir] [--all]
+
+参数说明：
+----------
+1. video_path (必需) - 视频文件的路径
+2. media_dir (可选) - 媒体目录路径，用于生成相对URL
+3. --all (可选) - 查找目录中所有字幕文件，而不仅仅是同名字幕
+
+输出格式：
+----------
+JSON对象，包含以下字段：
+- success (bool): 是否成功执行
+- subtitles (list): 找到的字幕文件列表，每个元素包含：
+  - url (str): 字幕文件的URL路径
+  - lang (str): 字幕语言（固定为'webvtt'）
+  - name (str): 字幕文件原始名称
+- video_path (str): 输入的视频路径
+- media_dir (str): 输入的媒体目录路径
+
+示例：
+------
+1. 查找指定视频的同名字幕：
+   python find_subtitle.py "/path/to/video.mp4"
+   
+2. 查找指定视频的所有字幕：
+   python find_subtitle.py "/path/to/video.mp4" --all
+   
+3. 指定媒体目录：
+   python find_subtitle.py "/path/to/video.mp4" "/media/dir" --all
+"""
+
 import sys
 import os
 import json

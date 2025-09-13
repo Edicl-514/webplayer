@@ -6,6 +6,7 @@ import sys
 from bs4 import BeautifulSoup, NavigableString, Tag
 from guessit import guessit
 from tmdbv3api import TMDb, Movie, TV
+import sqlite3
 import urllib3
 import urllib.parse
 
@@ -54,6 +55,13 @@ HEADERS = {
 tmdb = TMDb()
 tmdb.api_key = TMDB_API_KEY
 tmdb.language = TMDB_LANGUAGE
+# 缓存配置
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'videoinfo') if '__file__' in locals() else os.path.join('.', 'cache', 'videoinfo')
+IMAGE_DIR = os.path.join(CACHE_DIR, 'images')
+DB_PATH = os.path.join(CACHE_DIR, 'videocache.db')
+
+# 创建缓存目录
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
 # ==============================================================================
 # 工具函数
@@ -86,6 +94,7 @@ KEY_TRANSLATION_MAP = {
     "release_date": "发行日期",
     "genres": "类型",
     "poster_path": "海报路径",
+    "local_poster_path": "本地海报路径",
     "backdrop_path": "背景路径",
     "rating": "评分",
     "overview": "简介",
@@ -172,13 +181,168 @@ def translate_keys(obj, translation_map):
 
 
 # ==============================================================================
+# 缓存管理器
+# ==============================================================================
+
+class CacheManager:
+    def __init__(self, db_path, image_dir):
+        self.db_path = db_path
+        self.image_dir = image_dir
+        self.conn = sqlite3.connect(self.db_path)
+        self.create_table()
+
+    def create_table(self):
+        """创建数据库表"""
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS video_info (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filename TEXT UNIQUE NOT NULL,
+                    scraped_data TEXT NOT NULL,
+                    poster_path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # 创建触发器以自动更新 updated_at
+            self.conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS update_video_info_updated_at
+                AFTER UPDATE ON video_info
+                FOR EACH ROW
+                BEGIN
+                    UPDATE video_info SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+                END;
+            """)
+
+    def get_info(self, filename):
+        """从数据库获取缓存信息"""
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT scraped_data, poster_path FROM video_info WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row[0]), row[1]
+        return None, None
+
+    def save_info(self, filename, data):
+        """保存或更新刮削信息到数据库"""
+        poster_url = self._find_poster_url(data)
+        poster_path = None
+        if poster_url:
+            poster_path = self.download_image(poster_url, filename)
+
+        # 根据用户要求，不修改原始刮削数据，仅额外下载封面并记录本地路径
+        data_json = json.dumps(data, ensure_ascii=False, cls=CustomEncoder)
+        
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT id FROM video_info WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            if row:
+                # 更新现有记录
+                cursor.execute(
+                    "UPDATE video_info SET scraped_data = ?, poster_path = ? WHERE filename = ?",
+                    (data_json, poster_path, filename)
+                )
+                print(f"  [缓存] 已更新 '{filename}' 的数据库记录。")
+            else:
+                # 插入新记录
+                cursor.execute(
+                    "INSERT INTO video_info (filename, scraped_data, poster_path) VALUES (?, ?, ?)",
+                    (filename, data_json, poster_path)
+                )
+                print(f"  [缓存] 已为 '{filename}' 创建新的数据库记录。")
+
+    def _find_poster_url(self, data):
+        """在刮削结果中找到海报URL"""
+        # 优先使用 jav_results 中的最佳匹配
+        if 'jav_results' in data and data['jav_results']:
+            best_result = data['jav_results'][0]
+            return best_result.get('poster_url')
+        
+        # 检查顶层键
+        possible_keys = ['poster_path', 'series_poster_path', 'poster_url', 'cover_image_url', 'cover_url']
+        for key in possible_keys:
+            if data.get(key) and isinstance(data[key], str) and data[key].startswith('http'):
+                return data[key]
+        return None
+
+    def download_image(self, url, filename):
+        """下载图片并保存到本地"""
+        try:
+            # 从文件名中提取一个安全的基本名称
+            base_filename = os.path.splitext(os.path.basename(filename))[0]
+            # 从URL获取文件扩展名
+            url_path = urllib.parse.urlparse(url).path
+            extension = os.path.splitext(url_path)[1]
+            if not extension:
+                extension = '.jpg' # 默认扩展名
+            
+            # 创建一个安全且唯一的文件名
+            safe_filename = f"{re.sub(r'[^a-zA-Z0-9_-]', '', base_filename)}{extension}"
+            save_path = os.path.join(self.image_dir, safe_filename)
+            
+            # 如果文件已存在，直接返回路径
+            if os.path.exists(save_path):
+                print(f"  [缓存] 图片 '{safe_filename}' 已存在，跳过下载。")
+                return save_path
+
+            # 根据URL设置Referer
+            download_headers = HEADERS.copy()
+            try:
+                url_object = urllib.parse.urlparse(url)
+                if 'javbus.com' in url_object.hostname:
+                    download_headers['Referer'] = 'https://www.javbus.com/'
+                elif 'getchu.com' in url_object.hostname:
+                    download_headers['Referer'] = 'https://www.getchu.com/'
+            except Exception:
+                pass # URL无效则不设置Referer
+
+            print(f"  [缓存] 正在下载封面: {url}")
+            response = requests.get(url, headers=download_headers, timeout=20, stream=True, verify=False)
+            response.raise_for_status()
+            
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            print(f"  [缓存] 封面已保存到: {save_path}")
+            return save_path
+        except requests.exceptions.RequestException as e:
+            print(f"  [缓存] 下载图片失败: {e}", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"  [缓存] 保存图片时发生错误: {e}", file=sys.stderr)
+            return None
+
+    def close(self):
+        """关闭数据库连接"""
+        self.conn.close()
+
+
+# ==============================================================================
 # 刮削器模块
 # ==============================================================================
 
 class Scraper:
-    def scrape(self, file_path, video_type=None):
+    def __init__(self, cache_manager):
+        self.cache = cache_manager
+
+    def scrape(self, file_path, video_type=None, force_online=False):
         """主刮削方法"""
         filename = os.path.basename(file_path)
+
+        # 检查缓存
+        if not force_online:
+            cached_data, poster_path = self.cache.get_info(filename)
+            if cached_data:
+                print(f"  [缓存] 找到 '{filename}' 的缓存记录。")
+                # 如果存在本地海报，将其路径添加到返回的数据中以便使用
+                if poster_path:
+                    cached_data['local_poster_path'] = poster_path
+                return cached_data
+
+        print(f"  [网络] 未找到缓存或强制在线刮削，开始联网搜索 '{filename}'...")
         info = guessit(filename)
         
         # 自动判断类型，这也会顺便提取番号到 info 中
@@ -312,6 +476,10 @@ class Scraper:
             scraped_data.update(self.scrape_tmdb(info, video_type))
         else:
             scraped_data.update({"error": "无法确定视频类型或暂不支持"})
+        
+        # 保存到缓存
+        if "error" not in scraped_data:
+            self.cache.save_info(filename, scraped_data)
             
         return scraped_data
 
@@ -1461,12 +1629,20 @@ def main():
     # --- 参数解析 ---
     scrape_target = None
     video_type = None
+    force_online = False
     valid_types = ['fc2', 'jav', 'anime', 'tv', 'movie']
 
-    if len(sys.argv) > 1:
-        scrape_target = sys.argv[1]
-        if len(sys.argv) > 2:
-            video_type = sys.argv[2].lower()
+    # 解析参数
+    args = sys.argv[1:]
+    if '-f' in args or '--force' in args:
+        force_online = True
+        if '-f' in args: args.remove('-f')
+        if '--force' in args: args.remove('--force')
+
+    if len(args) > 0:
+        scrape_target = args[0]
+        if len(args) > 1:
+            video_type = args[1].lower()
             if video_type not in valid_types:
                 print(f"错误: 无效的视频类型 '{video_type}'。有效类型为: {', '.join(valid_types)}")
                 sys.exit(1)
@@ -1477,12 +1653,20 @@ def main():
 
     scrape_target = scrape_target.strip('\'"')
     
+    # --- 初始化缓存管理器 ---
+    cache = CacheManager(DB_PATH, IMAGE_DIR)
+
     # --- 开始刮削 ---
     print(f"\n正在处理: {scrape_target}")
+    if force_online:
+        print("选项: 强制在线刮削")
 
-    scraper = Scraper()
-    # 传递 video_type
-    final_data = scraper.scrape(scrape_target, video_type=video_type)
+    scraper = Scraper(cache)
+    # 传递 video_type 和 force_online
+    final_data = scraper.scrape(scrape_target, video_type=video_type, force_online=force_online)
+    
+    # 关闭数据库连接
+    cache.close()
 
     # --- 新增：翻译结果的键 ---
     translated_data = translate_keys(final_data, KEY_TRANSLATION_MAP)

@@ -1,3 +1,27 @@
+# -*- coding: utf-8 -*-
+"""
+功能：
+本脚本使用 FFmpeg 和 NVIDIA 的 h264_nvenc 硬件编码器将各种格式的视频文件转换为 MP4 格式。
+主要特性包括：
+1.  硬件加速：利用 NVIDIA GPU (h264_nvenc) 进行快速转码。
+2.  参数保留：尝试从源视频中提取并保留原始的分辨率、帧率和比特率。
+3.  进度显示：在转码过程中实时显示进度百分比、已处理时间和转码速度。
+4.  自动清理：转码成功后，如果源文件是 MP4，则会用新文件覆盖；如果不是，则会删除源文件。
+5.  信息获取：使用 ffprobe 获取详细的视频元数据。
+
+用法：
+通过命令行运行此脚本，并提供一个视频文件的完整路径作为参数。
+
+示例：
+python convert2mp4.py "C:\\path\\to\\your\\video.mkv"
+python convert2mp4.py /path/to/your/video.mov
+
+依赖：
+- FFmpeg: 必须安装并将其可执行文件路径添加到系统的 PATH 环境变量中。
+- ffprobe: 通常与 FFmpeg 一起分发，同样需要添加到 PATH。
+- NVIDIA 显卡：需要支持 NVENC 的 NVIDIA GPU。
+- NVIDIA 驱动：已安装最新的显卡驱动。
+"""
 import os
 import subprocess
 import sys

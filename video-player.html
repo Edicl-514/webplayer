@@ -37,6 +37,7 @@
                    </div>
                    <button id="externalPlayBtn" class="control-btn extra-btn" title="外部播放"><i class="fas fa-external-link-alt"></i></button>
                    <button id="downloadBtn" class="control-btn extra-btn" title="下载视频"><i class="fas fa-download"></i></button>
+                   <button id="settingsBtn" class="control-btn extra-btn" title="设置"><i class="fas fa-cog"></i></button>
                    <button class="control-btn extra-btn" onclick="window.close()" title="关闭窗口"><i class="fas fa-times"></i></button>
                </div>
             </div>
@@ -74,8 +75,33 @@
         </div>
     </div>
 
-    <script src="vendor/DPlayer.min.js"></script>
-    <script>
+    <div id="settingsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>设置</h2>
+            <div class="settings-list">
+                <div class="setting-item">
+                    <label for="autoScrapeToggle">自动刮削</label>
+                    <label class="switch">
+                        <input type="checkbox" id="autoScrapeToggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label for="forceScrapeToggle">强制联网刮削</label>
+                    <label class="switch">
+                        <input type="checkbox" id="forceScrapeToggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+            <div style="margin-top: 20px;">
+                 <button id="closeSettingsBtn">关闭</button>
+            </div>
+        </div>
+    </div>
+ 
+     <script src="vendor/DPlayer.min.js"></script>
+     <script>
         const videoTitle = document.getElementById('videoTitle');
         const urlParams = new URLSearchParams(window.location.search);
         const videoSrc = urlParams.get('src');
@@ -194,6 +220,10 @@
                     dp = new DPlayer(dpOptions);
                     bindDPlayerEvents(dp);
                     loadAllSubtitles();
+                   if (document.getElementById('autoScrapeToggle').checked) {
+                       console.log('Auto-scraping enabled, starting scrape.');
+                       scrapeVideo('auto', false); // false indicates this is not a manual scrape
+                   }
                     // Set background image only if we don't already have one from scraping
                     const albumCover = urlParams.get('poster');
                     const playerBg = document.querySelector('.player-bg');
@@ -664,7 +694,7 @@
            if (event.target.tagName === 'A') {
                event.preventDefault();
                const type = event.target.dataset.type;
-               scrapeVideo(type);
+               scrapeVideo(type, true); // true indicates this is a manual scrape
                scraperDropdownContent.classList.remove('show');
            }
        });
@@ -677,10 +707,15 @@
            }
        });
 
-       async function scrapeVideo(type) {
+       async function scrapeVideo(type, isManual) {
            const videoInfoContent = document.getElementById('videoInfoContent');
            videoInfoContent.innerHTML = '<p>正在刮削中...</p>';
            
+           // Determine the 'force' flag state
+           // If it's a manual scrape, always force.
+           // If it's automatic, respect the setting.
+           const forceScrape = isManual || document.getElementById('forceScrapeToggle').checked;
+
            try {
                const response = await fetch(`/api/scrape-video`, {
                    method: 'POST',
@@ -690,7 +725,8 @@
                    body: JSON.stringify({
                        src: decodeURIComponent(videoSrc),
                        mediaDir: mediaDir,
-                       type: type === 'auto' ? null : type
+                       type: type === 'auto' ? null : type,
+                       force: forceScrape
                    })
                });
 
@@ -944,8 +980,47 @@
             result += '</ul>';
             return result;
         }
-    </script>
-    <script src="vendor/jquery-3.5.1.min.js"></script>
-    <script src="vendor/jquery.fancybox.min.js"></script>
+
+        // --- Settings Modal Logic ---
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        const autoScrapeToggle = document.getElementById('autoScrapeToggle');
+        const forceScrapeToggle = document.getElementById('forceScrapeToggle');
+
+        function saveSettings() {
+            localStorage.setItem('settings_autoScrape', autoScrapeToggle.checked);
+            localStorage.setItem('settings_forceScrape', forceScrapeToggle.checked);
+        }
+
+        function loadSettings() {
+            const autoScrape = localStorage.getItem('settings_autoScrape');
+            const forceScrape = localStorage.getItem('settings_forceScrape');
+
+            autoScrapeToggle.checked = autoScrape === null ? true : autoScrape === 'true';
+            forceScrapeToggle.checked = forceScrape === 'true';
+        }
+
+        settingsBtn.onclick = () => {
+            settingsModal.style.display = 'block';
+        };
+
+        closeSettingsBtn.onclick = () => {
+            settingsModal.style.display = 'none';
+        };
+
+        autoScrapeToggle.onchange = saveSettings;
+        forceScrapeToggle.onchange = saveSettings;
+
+        window.addEventListener('click', (event) => {
+            if (event.target == settingsModal) {
+                settingsModal.style.display = 'none';
+            }
+        });
+
+        loadSettings();
+     </script>
+     <script src="vendor/jquery-3.5.1.min.js"></script>
+     <script src="vendor/jquery.fancybox.min.js"></script>
 </body>
 </html>

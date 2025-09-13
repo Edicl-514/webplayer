@@ -261,9 +261,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const srcParts = song.src.split('?');
         const path = srcParts[0];
         const query = srcParts.length > 1 ? `?${srcParts[1]}` : '';
-        // Encode each path segment to handle special characters, preventing 403 errors.
-        const encodedPath = path.split('/').map(part => encodeURIComponent(part).replace(/\./g, '%2E')).join('/');
-        const finalSrcForHowler = encodedPath + query;
+        // The path is already partially URL-encoded from the server, but special characters
+        // in filenames might not be. Howler.js handles encoding internally, so we just
+        // need to pass the raw path with its query string.
+        const finalSrcForHowler = path + query;
 
         sound = new Howl({
             src: [finalSrcForHowler],
@@ -355,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 检查后端是否返回了封面文件名
                 if (info.cover_filename) {
-                    const coverUrl = `/cache/covers/${info.cover_filename}`;
+                    const coverUrl = `/cache/covers/${encodeURIComponent(info.cover_filename)}`;
                     
                     // 使用一个技巧来检查图片是否存在，如果404则不更新
                     const img = new Image();
@@ -388,11 +389,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     setThemeColor(albumCover);
                 }
 
-                // 新增：检查并处理返回的歌词
-                if (info.lyrics) {
-                    console.log('Got lyrics from fetchMusicInfo, parsing...');
+                // 新增：检查并处理返回的歌词文件或内容
+                if (info.lyrics_filename) {
+                    const lrcUrl = `/cache/lyrics/${encodeURIComponent(info.lyrics_filename)}`;
+                    console.log(`Found lyrics file from API: ${lrcUrl}`);
+                    
+                    // 更新当前歌曲对象的lrc路径
+                    song.lrc = lrcUrl;
+                    
+                    // 重新加载歌词
+                    loadLyrics(lrcUrl);
+                    
+                    // 更新localStorage
+                    localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                    
+                    showToast('自动匹配歌词成功！', 'success');
+                } else if (info.lyrics) {
+                    console.log('Got lyrics content from fetchMusicInfo, parsing...');
                     currentLyrics = []; // 清空旧歌词
                     parseLrc(info.lyrics);
+                    // 注意：这里没有更新 song.lrc，因为内容是临时的
                     showToast('自动匹配歌词成功！', 'success');
                 }
             }
@@ -1357,21 +1373,21 @@ document.addEventListener('DOMContentLoaded', () => {
     
         try {
             const settings = getSettings();
-            const encodedPath = musicPath.split('/').map(part => encodeURIComponent(part).replace(/\./g, '%2E')).join('/');
             const params = new URLSearchParams({
-                path: encodedPath,
+                path: musicPath,
                 source: source,
                 'no-write': true, // Manual fetch shouldn't write to file
                 'force-match': settings.forceMatch,
                 'limit': settings.searchResultsLimit,
-                'query': settings.queryKeywords
+                'query': settings.queryKeywords,
+                'force-fetch': true
             });
 
             if (type === 'lyrics' && !bilingual) {
-                params.set('original_lyrics', 'true');
+                params.set('original-lyrics', 'true');
             } else if (type === 'lyrics' && bilingual) {
                 // Ensure bilingual lyrics are requested if not original
-                 params.set('original_lyrics', 'false');
+                 params.set('original-lyrics', 'false');
             }
 
             let url = `/api/fetch-info?${params.toString()}`;

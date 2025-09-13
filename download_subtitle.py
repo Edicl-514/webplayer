@@ -1,3 +1,28 @@
+# -*- coding: utf-8 -*-
+
+"""
+功能:
+该脚本用于从 'subtitlecat.com' 或使用 'subliminal' 库下载电影和电视剧的中文字幕。
+下载后的字幕文件将自动使用 ffmpeg 转换为 VTT (.vtt) 格式，并存放在 './cache/subtitles/' 目录下。
+
+依赖:
+- Python 库: requests, beautifulsoup4, subliminal, babelfish
+  安装命令: pip install requests beautifulsoup4 subliminal babelfish
+- 外部工具: ffmpeg
+  请确保 ffmpeg 已安装并配置在系统的 PATH 环境变量中。
+
+用法:
+1. 交互模式:
+   直接运行脚本，程序将引导您选择字幕源并输入相应信息。
+   $ python download_subtitle.py
+
+2. 命令行参数模式:
+   - 从 subtitlecat 下载:
+     $ python download_subtitle.py --site subtitlecat --title "你的影视标题"
+
+   - 使用 subliminal 下载 (需要IMDb ID):
+     $ python download_subtitle.py --site subliminal --title "你的影视标题" --imdb_id "tt1234567"
+"""
 import requests
 from bs4 import BeautifulSoup
 import os

@@ -1,3 +1,47 @@
+"""
+功能:
+该脚本用于从本地音频文件或在线音乐数据库（网易云音乐、MusicBrainz）获取音乐信息。
+
+主要功能包括：
+1.  从多种格式的音频文件（MP3, FLAC, M4A, OGG）中提取现有的元数据（标题、艺术家、专辑）。
+2.  根据提取的元数据，从指定的在线源（网易云音乐或MusicBrainz）搜索更丰富的音乐信息，包括封面、歌词等。
+3.  支持从音频文件中提取内嵌的封面，或在文件所在目录中查找本地封面图片（如 cover.jpg）。
+4.  能够将获取到的封面和元数据嵌入回原始音频文件中。
+5.  将下载的封面和歌词缓存到本地 `cache` 目录，避免重复请求。
+6.  提供 JSON 格式输出，方便与其他工具集成。
+7.  灵活的搜索选项，如强制匹配第一个结果、自定义搜索关键词模板等。
+
+用法:
+该脚本通过命令行运行，并接受多个参数来控制其行为。
+
+基本用法:
+python get_music_info.py [文件路径] [选项]
+
+参数说明:
+  filepath              必需参数，指定要处理的音频文件的路径。
+
+选项:
+  --source {musicbrainz,netease,local}
+                        指定获取音乐信息的来源。默认为 'local'，即只读取本地文件信息。
+  --no-write            一个开关选项，如果使用，则不会将获取到的信息写回音频文件。
+  --json-output         一个开关选项，如果使用，则会将最终的元数据以 JSON 格式打印到标准输出。
+  --original-lyrics     仅获取原始歌词，不合并翻译版本（仅对网易云音乐源有效）。
+  --limit <数字>        指定在线搜索时返回结果的数量限制，默认为 5。
+  --force-match         强制使用搜索结果中的第一项，而不尝试寻找最佳匹配。
+  --query "<模板>"      自定义用于在线搜索的关键词模板。可用变量: {artist}, {title}, {album}。
+                        默认为: "{artist} {title}"
+  --force-fetch         强制从网络重新获取信息，并覆盖本地缓存。
+
+示例:
+1. 从本地文件 'song.mp3' 提取信息并搜索网易云音乐，然后将信息写回文件:
+   python get_music_info.py "path/to/song.mp3" --source netease
+
+2. 搜索 'song.flac' 的信息，但不修改原文件，而是以 JSON 格式输出结果:
+   python get_music_info.py "path/to/song.flac" --source netease --no-write --json-output
+
+3. 只提取 'music.m4a' 的本地内嵌封面和元数据:
+   python get_music_info.py "path/to/music.m4a" --source local --json-output
+"""
 import sys
 import os
 import json
@@ -40,11 +84,11 @@ def main():
     parser.add_argument("--limit", type=int, default=5, help="Number of search results to return.")
     parser.add_argument("--force-match", action="store_true", help="Force match the first result.")
     parser.add_argument("--query", type=str, default="{artist} {title}", help="Keywords to use for searching.")
+    parser.add_argument("--force-fetch", action="store_true", help="Force re-fetching from the internet and overwrite local cache.")
     
     args = parser.parse_args()
 
     # Decode the filepath if it's URL-encoded
-    args.filepath = urllib.parse.unquote(args.filepath)
 
     # Ensure cache directories exist
     os.makedirs(CACHE_LYRICS_DIR, exist_ok=True)
@@ -72,46 +116,43 @@ def main():
         #print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
 
         # --- Cache Check ---
-        # Before fetching, check if we have cached lyrics and cover
         cached_lyrics = None
         cached_cover_filename = None
-        
-        # Use a more unique identifier for cache files
-        artist = track_info.get('artist', 'Unknown Artist')
-        title = track_info.get('title', 'Unknown Title')
-        safe_artist = sanitize_filename(artist)
-        safe_title = sanitize_filename(title)
-        
-        # Check for cached lyrics
-        lrc_filename = f"{safe_artist} - {safe_title}.lrc"
-        lrc_filepath = os.path.join(CACHE_LYRICS_DIR, lrc_filename)
-        if os.path.exists(lrc_filepath):
-            try:
-                with open(lrc_filepath, 'r', encoding='utf-8') as f:
-                    cached_lyrics = f.read()
-                print(f"Found cached lyrics at: {lrc_filepath}", file=sys.stderr)
-            except Exception as e:
-                print(f"Error reading cached lyrics: {e}", file=sys.stderr)
+        # Only check cache if force-fetch is NOT specified
+        if not args.force_fetch:
+            artist = track_info.get('artist', 'Unknown Artist')
+            title = track_info.get('title', 'Unknown Title')
+            safe_artist = sanitize_filename(artist)
+            safe_title = sanitize_filename(title)
+            
+            lrc_filename = f"{safe_artist} - {safe_title}.lrc"
+            lrc_filepath = os.path.join(CACHE_LYRICS_DIR, lrc_filename)
+            if os.path.exists(lrc_filepath):
+                try:
+                    with open(lrc_filepath, 'r', encoding='utf-8') as f:
+                        cached_lyrics = f.read()
+                    print(f"Found cached lyrics at: {lrc_filepath}", file=sys.stderr)
+                except Exception as e:
+                    print(f"Error reading cached lyrics: {e}", file=sys.stderr)
 
-        # Check for cached cover
-        cover_filename_base = f"{safe_artist} - {safe_title}_cover.jpg"
-        cover_filepath = os.path.join(CACHE_COVERS_DIR, cover_filename_base)
-        if os.path.exists(cover_filepath):
-            cached_cover_filename = cover_filename_base
-            print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
+            cover_filename_base = f"{safe_artist} - {safe_title}_cover.jpg"
+            cover_filepath = os.path.join(CACHE_COVERS_DIR, cover_filename_base)
+            if os.path.exists(cover_filepath):
+                cached_cover_filename = cover_filename_base
+                print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
 
-        # If we have both, we can potentially exit early
-        if cached_lyrics and cached_cover_filename and args.json_output:
-            print(json.dumps({
-                "title": title,
-                "artist": artist,
-                "album": track_info.get('album'),
-                "lyrics": cached_lyrics,
-                "cover_filename": cached_cover_filename,
-                "cover_url": None, # No URL for cached items
-                "from_cache": True
-            }, indent=4, ensure_ascii=False))
-            return # Exit after printing JSON if we have everything from cache
+            # If we have everything from cache and we are not fetching new data, we can exit early.
+            if args.source == 'local' and cached_lyrics and cached_cover_filename and args.json_output:
+                print(json.dumps({
+                    "title": title,
+                    "artist": artist,
+                    "album": track_info.get('album'),
+                    "lyrics": cached_lyrics,
+                    "cover_filename": cached_cover_filename,
+                    "cover_url": None,
+                    "from_cache": True
+                }, indent=4, ensure_ascii=False))
+                return
 
         # 2. Get music info from the selected source
         if args.source == 'local':
@@ -154,20 +195,23 @@ def main():
             final_cover_filename = cover_filename or cached_cover_filename
 
             # Save lyrics to cache if they were fetched and not already cached
-            if 'lyrics' in music_info and music_info['lyrics'] and not cached_lyrics:
+            lyrics_filename = None
+            if 'lyrics' in music_info and music_info['lyrics'] and (not cached_lyrics or args.force_fetch):
                 artist_for_save = music_info.get('artist') or track_info.get('artist') or 'Unknown Artist'
                 title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
-                save_lrc_file(music_info['lyrics'], artist_for_save, title_for_save, CACHE_LYRICS_DIR)
+                lyrics_filename = save_lrc_file(music_info['lyrics'], artist_for_save, title_for_save, CACHE_LYRICS_DIR)
 
             # Output JSON if requested
             if args.json_output:
                 json_info = music_info.copy()
                 if 'cover_data' in json_info:
                     del json_info['cover_data']
-                if cover_filename:
+                if final_cover_filename:
                     json_info['cover_filename'] = final_cover_filename
+                if lyrics_filename:
+                    json_info['lyrics_filename'] = lyrics_filename
                 # If lyrics came from cache, make sure they are in the output
-                if cached_lyrics and 'lyrics' not in json_info:
+                if cached_lyrics and 'lyrics' not in json_info and not args.force_fetch:
                     json_info['lyrics'] = cached_lyrics
                 print(json.dumps(json_info, indent=4, ensure_ascii=False))
     except Exception as e:
@@ -268,8 +312,26 @@ def search_musicbrainz(track_info, force_match=False):
                         recording = rec
                         break
             
+            # Print other results
+            if recording and len(recordings) > 1:
+                print("--- Other MusicBrainz Results ---", file=sys.stderr)
+                for rec in recordings:
+                    if rec['id'] != recording['id']:
+                        title = rec.get('title', 'N/A')
+                        artist = rec.get('artist-credit-phrase', 'N/A')
+                        album = rec.get('release-list')[0].get('title', 'N/A') if rec.get('release-list') else 'N/A'
+                        print(f"  - {title} - {artist} ({album})", file=sys.stderr)
+                print("---------------------------------", file=sys.stderr)
+
             if not recording:
-                print(f"Could not find a good match on MusicBrainz for '{track_info.get('title')}' by '{track_info.get('artist')}'. Aborting.", file=sys.stderr)
+                print(f"Could not find a good match on MusicBrainz for '{track_info.get('title')}' by '{track_info.get('artist')}'.", file=sys.stderr)
+                if recordings:
+                    print("Showing all results:", file=sys.stderr)
+                    for i, rec in enumerate(recordings):
+                        title = rec.get('title', 'N/A')
+                        artist = rec.get('artist-credit-phrase', 'N/A')
+                        album = rec.get('release-list')[0].get('title', 'N/A') if rec.get('release-list') else 'N/A'
+                        print(f"  {i+1}. {title} - {artist} ({album})", file=sys.stderr)
                 return None
             release_id = recording.get("release-list", [{}])[0].get("id")
             
@@ -359,7 +421,30 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         }
         
         # Build search term using the query template
-        search_term = query_template.format(artist=artist or '', title=title or '', album=album or '')
+        # Clean artist and title to avoid issues with special characters like '*' in search
+        # japanese_allowed_pattern = r'[^\w\s\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F]'
+        # artist_clean = re.sub(japanese_allowed_pattern, ' ', artist or '').strip()
+        # title_clean = re.sub(japanese_allowed_pattern, ' ', title or '').strip()
+        # search_term = query_template.format(artist=artist_clean, title=title_clean, album=album or '')
+        chars_to_remove_completely = ["＊", "～"]
+        def clean_for_search(text):
+            if text is None:
+                text = ''
+            # 1. 构建正则表达式模式
+            # re.escape() 用于转义所有可能在正则表达式中有特殊含义的字符
+            # 这确保了即使 chars_to_remove 中有 '.*+?[]()|' 等字符也能被正确匹配
+            escaped_chars = [re.escape(char) for char in chars_to_remove_completely]
+            # 将转义后的字符连接起来，并放入一个字符集 `[]` 中
+            # 例如：如果 chars_to_remove_completely 是 ["*", "'"]，模式会是 r"[\*']"
+            pattern = r'[' + ''.join(escaped_chars) + r']'
+            # 2. 执行替换：将匹配到的字符替换为空字符串
+            cleaned_text = re.sub(pattern, '', text)
+            # 3. 最后再次使用 .strip() 移除可能有（原始字符串中就存在）的开头和结尾的空白字符
+            return cleaned_text.strip()
+        artist_clean = clean_for_search(artist)
+        title_clean = clean_for_search(title)
+        search_term = query_template.format(artist=artist_clean, title=title_clean, album=album or '')
+        print(f"DEBUG: Netease search term: '{search_term}'", file=sys.stderr)
         
         params = {
             's': search_term,
@@ -385,12 +470,28 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                     best_song = song
                     break
         
+        # Print search results for debugging
+        if songs:
+            print("--- Netease Search Results ---", file=sys.stderr)
+            for i, song in enumerate(songs):
+                song_name = song.get('name')
+                artist_name = song.get('artists', [{}])[0].get('name')
+                album_name = song.get('album', {}).get('name')
+                marker = " <-- Best Match" if best_song and song['id'] == best_song['id'] else ""
+                print(f"  {i+1}. {song_name} - {artist_name} ({album_name}){marker}", file=sys.stderr)
+            print("-----------------------------", file=sys.stderr)
+
         if not best_song:
             if not songs:
                 print(f"Search for '{search_term}' returned no results from Netease.", file=sys.stderr)
             else:
                 # This means nothing matched, regardless of force_match
-                print(f"Could not find a good match for '{title}' by '{artist}'. Aborting.", file=sys.stderr)
+                print(f"Could not find a good match for '{title}' by '{artist}'. Showing all results:", file=sys.stderr)
+                for i, song in enumerate(songs):
+                    song_name = song.get('name')
+                    artist_name = song.get('artists', [{}])[0].get('name')
+                    album_name = song.get('album', {}).get('name')
+                    print(f"  {i+1}. {song_name} - {artist_name} ({album_name})", file=sys.stderr)
             return None, None, None
 
         song_id = best_song['id']
@@ -474,7 +575,8 @@ def is_match(a, b):
 
 def sanitize_filename(name):
     """Removes characters that are invalid for filenames."""
-    return re.sub(r'[\\/*?:"<>|]', '_', name)
+    # Add full-width colon and question mark to the list of sanitized characters
+    return re.sub(r'[\\/*?:"<>|：？]', '_', name)
 
 
 def save_cover_art(image_data, artist, title, output_dir):
@@ -489,11 +591,6 @@ def save_cover_art(image_data, artist, title, output_dir):
     filename = f"{safe_artist} - {safe_title}_cover.jpg"
     filepath = os.path.join(output_dir, filename)
     
-    # Avoid re-saving if it already exists
-    if os.path.exists(filepath):
-        print(f"Cover art already exists at: {filepath}", file=sys.stderr)
-        return filename
-
     try:
         img = Image.open(image_data)
         if img.mode == 'RGBA':
@@ -508,24 +605,21 @@ def save_cover_art(image_data, artist, title, output_dir):
 def save_lrc_file(lyrics, artist, title, output_dir):
     """Saves lyrics to an LRC file using artist and title."""
     if not lyrics:
-        return
+        return None
         
     safe_artist = sanitize_filename(artist)
     safe_title = sanitize_filename(title)
     filename = f"{safe_artist} - {safe_title}.lrc"
     filepath = os.path.join(output_dir, filename)
 
-    # Avoid re-saving if it already exists
-    if os.path.exists(filepath):
-        print(f"Lyrics file already exists at: {filepath}", file=sys.stderr)
-        return
-
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(lyrics)
         print(f"Lyrics saved to: {filepath}", file=sys.stderr)
+        return filename
     except Exception as e:
         print(f"Error saving LRC file: {e}", file=sys.stderr)
+        return None
 
 def embed_info_to_audio(file_path, music_info):
     """Embeds cover art and metadata into the audio file."""

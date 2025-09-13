@@ -1,3 +1,41 @@
+# -*- coding: utf-8 -*-
+
+"""
+@功能描述:
+本脚本用于高效地对指定目录下的文件和文件夹进行排序。
+它不使用文件夹本身的修改时间，而是通过扫描文件夹内的所有文件，找出其中“真实”的最新修改时间作为排序依据。
+这对于管理包含大量子文件和子文件夹的项目目录非常有用，可以准确地反映出每个项目的近期活跃度。
+
+@核心特性:
+1.  **并发扫描**:
+    -   为了最大限度地提高效率，脚本会并发执行两种扫描方法：
+        a) **Everything (es.exe)**: 利用 Everything 桌面搜索引擎的命令行工具快速查询文件修改时间。此方法通常在驱动器已建立索引的情况下速度极快。
+        b) **Pathlib (本地扫描)**: 使用 Python 内置的 `pathlib` 库进行深度递归扫描。这是一个可靠的后备方法，不依赖任何外部工具。
+    -   脚本会采用这两种方法中最先返回结果的那个，并立即中止另一个，以确保最佳性能。
+
+2.  **智能缓存**:
+    -   首次计算出的文件夹“真实”修改时间会被存储在一个 SQLite 数据库 (`folder_cache.db`) 中。
+    -   在后续运行中，脚本会优先从缓存中读取数据，并设置了缓存过期策略（例如24小时），同时还会检查文件夹本身的元数据是否有变化，以确保缓存的有效性。这极大地加快了对已处理目录的重复排序速度。
+
+3.  **批量并行处理**:
+    -   当处理一个包含多个子目录的路径时，脚本会使用线程池 (`ThreadPoolExecutor`) 并行处理多个子目录，充分利用多核CPU的性能。
+
+4.  **灵活的命令行接口**:
+    -   提供了丰富的命令行参数，可以轻松集成到其他工具或脚本中。
+
+@依赖:
+-   **外部工具**: `Everything` 命令行工具 (`es.exe`)。脚本默认会从 `./everything_sdk/es.exe` 路径加载。如果 Everything 未运行或 `es.exe` 不存在，脚本会自动回退到较慢但通用的 `pathlib` 扫描方法。
+
+@用法示例:
+1.  **按降序对目录 'D:\my_projects' 下的项目进行排序**:
+    python concurrent-time-sort.py -path "D:\my_projects"
+
+2.  **按升序排序**:
+    python concurrent-time-sort.py -path "D:\my_projects" -s asc
+
+3.  **以 JSON 格式输出结果 (方便其他程序调用)**:
+    python concurrent-time-sort.py -path "D:\my_projects" -j
+"""
 import os
 import sqlite3
 import subprocess
@@ -14,6 +52,7 @@ import json
 import argparse
 import hashlib
 import logging
+import shutil
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,7 +67,7 @@ class FolderInfo:
     method_used: str
 
 class SmartFolderModTimeManager:
-    def __init__(self, everything_path="./everything_sdk/es.exe", cache_db="folder_cache.db", max_workers=8, use_database_cache=True):
+    def __init__(self, everything_path="./everything_sdk/es.exe", cache_db=os.path.join("cache", "foldercache.db"), max_workers=8, use_database_cache=True):
         self.everything_path = everything_path
         self.cache_db = cache_db
         # 增加最大工作线程数以提高并行度
@@ -37,6 +76,19 @@ class SmartFolderModTimeManager:
         self.cache = {}  # 内存缓存
         
         if self.use_database_cache:
+            # 确保缓存目录存在
+            db_path = Path(self.cache_db)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 迁移旧数据库
+            old_db_path = "folder_cache.db"
+            if os.path.exists(old_db_path) and not db_path.exists():
+                try:
+                    shutil.move(old_db_path, self.cache_db)
+                    logger.info(f"成功将旧数据库 '{old_db_path}' 迁移到 '{self.cache_db}'")
+                except Exception as e:
+                    logger.error(f"迁移数据库失败: {e}")
+            
             self.init_database()
         
         # 性能阈值配置

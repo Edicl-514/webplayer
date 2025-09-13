@@ -38,14 +38,22 @@ const server = http.createServer((req, res) => {
     if (pathname === '/api/music') {
         getFilesRecursively(MUSIC_DIR)
             .then(allFiles => {
-                const musicFiles = allFiles.filter(file => file.endsWith('.mp3') || file.endsWith('.flac'));
-                const lyricsFiles = allFiles.filter(file => file.endsWith('.lrc') || file.endsWith('.vtt'));
+                const musicFiles = allFiles.filter(file => {
+                    const lowerFile = file.toLowerCase();
+                    return lowerFile.endsWith('.mp3') || lowerFile.endsWith('.flac');
+                });
+                const lyricsFiles = allFiles.filter(file => {
+                    const lowerFile = file.toLowerCase();
+                    return lowerFile.endsWith('.lrc') || lowerFile.endsWith('.vtt');
+                });
 
                 const playlist = musicFiles.map(musicFile => {
                     const baseName = path.parse(musicFile).name;
                     const dirName = path.dirname(musicFile);
                     const lrcFile = lyricsFiles.find(lyric => {
-                        return path.dirname(lyric) === dirName && path.parse(lyric).name === baseName;
+                        // Case-insensitive matching for filenames and directories
+                        return path.dirname(lyric).toLowerCase() === dirName.toLowerCase() &&
+                               path.parse(lyric).name.toLowerCase() === baseName.toLowerCase();
                     });
                     return {
                         music: musicFile.replace(/\\/g, '/'), // Ensure forward slashes for URLs
@@ -175,7 +183,7 @@ const server = http.createServer((req, res) => {
         const fullMusicPath = path.join(MUSIC_DIR, musicPath);
 
         // 为了安全性和一致性，从 exec 改为 spawn，并添加所有参数
-        const { 'original_lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
+        const { 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query, 'force-fetch': forceFetch } = parsedUrl.query;
 
         const args = [
             'get_music_info.py',
@@ -196,6 +204,9 @@ const server = http.createServer((req, res) => {
         }
         if (query) {
             args.push('--query', query);
+        }
+        if (forceFetch === 'true') {
+            args.push('--force-fetch');
         }
         
         const pythonProcess = spawn('python', args, {
@@ -737,7 +748,7 @@ const server = http.createServer((req, res) => {
        });
        req.on('end', () => {
            try {
-               const { src, mediaDir, type } = JSON.parse(body);
+               const { src, mediaDir, type, force } = JSON.parse(body);
                if (!src || !mediaDir) {
                    res.statusCode = 400;
                    res.end(JSON.stringify({ error: 'Missing src or mediaDir' }));
@@ -749,7 +760,10 @@ const server = http.createServer((req, res) => {
                if (type) {
                    args.push(type);
                }
-
+               if (force) {
+                   args.push('--force');
+               }
+ 
                const pythonProcess = spawn('python', args, {
                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
                });
@@ -818,7 +832,7 @@ const server = http.createServer((req, res) => {
 
     // 处理静态文件请求 (例如：/style.css, /script.js) 和媒体文件流
     if (pathname.startsWith('/music/')) {
-        const relativeMusicPath = decodeURIComponent(pathname.substring('/music/'.length));
+        const relativeMusicPath = pathname.substring('/music/'.length);
         const fullMusicPath = path.join(MUSIC_DIR, relativeMusicPath);
 
         // Security check to prevent path traversal attacks
