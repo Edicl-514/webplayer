@@ -410,8 +410,8 @@ class Scraper:
             if cached_data:
                 print(f"  [缓存] 找到 '{filename}' 的缓存记录。")
                 # 如果存在本地海报，将其路径添加到返回的数据中以便使用
-                if poster_path:
-                    cached_data['local_poster_path'] = poster_path
+                # if poster_path:
+                #     cached_data['local_poster_path'] = poster_path
                 return cached_data
 
         print(f"  [网络] 未找到缓存或强制在线刮削，开始联网搜索 '{filename}'...")
@@ -1702,10 +1702,15 @@ def main():
     scrape_target = None
     video_type = None
     force_online = False
+    check_only = False
     valid_types = ['fc2', 'jav', 'anime', 'tv', 'movie']
 
     # 解析参数
     args = sys.argv[1:]
+    if '--check-only' in args:
+        check_only = True
+        args.remove('--check-only')
+        
     if '-f' in args or '--force' in args:
         force_online = True
         if '-f' in args: args.remove('-f')
@@ -1727,6 +1732,18 @@ def main():
     
     # --- 初始化缓存管理器 ---
     cache = CacheManager(DB_PATH, IMAGE_DIR)
+
+    if check_only:
+        filename = os.path.basename(scrape_target)
+        cached_data, _ = cache.get_info(filename)
+        if cached_data:
+            translated_data = translate_keys(cached_data, KEY_TRANSLATION_MAP)
+            json_output = json.dumps(translated_data, ensure_ascii=False, cls=CustomEncoder)
+            print(json_output)
+        else:
+            print(json.dumps({"status": "not_found"}))
+        cache.close()
+        sys.exit(0)
 
     # --- 开始刮削 ---
     print(f"\n正在处理: {scrape_target}")

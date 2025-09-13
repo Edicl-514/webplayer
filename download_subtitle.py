@@ -48,11 +48,12 @@ def convert_to_vtt(input_path, output_path):
     """
     try:
         # Use ffmpeg to convert subtitle to VTT format
+        # 使用 ffmpeg 将字幕转换为 VTT 格式，并指定编码以避免解码错误
         result = subprocess.run([
             'ffmpeg', '-i', input_path,
-            '-y',  # Overwrite output file
+            '-y',  # 覆盖输出文件
             output_path
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, encoding='utf-8', errors='ignore')
         
         if result.returncode != 0:
             print(f"ffmpeg error: {result.stderr}", file=sys.stderr)

@@ -200,7 +200,7 @@ body {
 
 /* 新增：分组标题样式 */
 .subtitle-section-header {
-    padding: 8px 12px;
+    padding: 8px 15px;
     font-size: 13px;
     color: var(--accent-color);
     border-bottom: 1px solid rgba(255,255,255,0.03);
@@ -261,7 +261,7 @@ body {
     font-size: 14px;
     color: var(--primary-text);
     text-decoration: none;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s, color 0.2s;
 }
 
 .subtitle-dropdown-content a:hover {
@@ -727,11 +727,21 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 8px 15px;
     cursor: pointer;
     font-size: 14px;
     color: var(--primary-text);
     user-select: none;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.subtitle-local-toggle:hover {
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
+}
+
+.subtitle-local-toggle:hover::after {
+    border-left-color: var(--accent-text-color);
 }
 
 /* 小箭头（改为指向右侧，展开时旋转） */
@@ -773,17 +783,18 @@ input:checked + .slider:before {
 /* 子菜单内项 */
 .subtitle-local-submenu a {
     display: block;
-    padding: 8px 12px;
-    font-size: 13px;
+    padding: 8px 15px;
+    font-size: 14px;
     color: var(--primary-text);
     text-decoration: none;
     white-space: nowrap; /* 保持单行，超出显示省略或滚动 */
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background-color 0.2s, color 0.2s;
 }
 .subtitle-local-submenu a:hover {
-    background-color: rgba(255,255,255,0.03);
-    color: var(--accent-hover);
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
 }
 
 /* 移动端：子菜单改为在父项下方展开并靠左（避免超出屏幕） */

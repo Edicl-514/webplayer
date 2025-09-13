@@ -22,7 +22,7 @@ const MUSIC_DIR = MEDIA_DIRS.find(d => d.alias === 'MUSIC')?.path || path.join(_
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     // 安全地解码路径，处理可能的编码错误
     let pathname;
@@ -718,9 +718,11 @@ const server = http.createServer((req, res) => {
 
                 pythonProcess.on('close', (code) => {
                     if (code === 0) {
+                        const pathInfo = path.parse(relativePath);
+                        const newRelativePath = path.join(pathInfo.dir, `${pathInfo.name}.mp4`).replace(/\\/g, '/');
                         broadcast({
                             type: 'complete',
-                            newPath: relativePath.replace(/\.avi$/i, '.mp4')
+                            newPath: newRelativePath
                         });
                     } else {
                         broadcast({
@@ -815,8 +817,227 @@ const server = http.createServer((req, res) => {
        return;
    }
 
-    // 新增：处理 /node_modules 的请求
-    if (pathname.startsWith('/node_modules/')) {
+   if (pathname === '/api/check-scraped-info' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => {
+           body += chunk.toString();
+       });
+       req.on('end', () => {
+           try {
+               const { src, mediaDir } = JSON.parse(body);
+               if (!src || !mediaDir) {
+                   res.statusCode = 400;
+                   res.end(JSON.stringify({ error: 'Missing src or mediaDir' }));
+                   return;
+               }
+
+               const fullVideoPath = path.join(mediaDir, src);
+               const args = ['video_scraper.py', fullVideoPath, '--check-only'];
+
+               const pythonProcess = spawn('python', args, {
+                   env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+               });
+
+               let stdoutData = '';
+               let stderrData = '';
+
+               pythonProcess.stdout.on('data', (data) => {
+                   stdoutData += data.toString();
+               });
+
+               pythonProcess.stderr.on('data', (data) => {
+                   stderrData += data.toString();
+               });
+
+               pythonProcess.on('close', (code) => {
+                   if (stderrData) {
+                       console.error(`video_scraper.py --check-only stderr: ${stderrData}`);
+                   }
+                   if (code !== 0) {
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ error: `Scraper check script exited with code ${code}`, details: stderrData }));
+                       return;
+                   }
+                   try {
+                       const checkData = JSON.parse(stdoutData);
+                       res.setHeader('Content-Type', 'application/json');
+                       res.end(JSON.stringify(checkData));
+                   } catch (e) {
+                       console.error('Error parsing python script output for check:', e);
+                       console.error('Raw stdout for check:', stdoutData);
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ error: 'Error parsing scraper check output' }));
+                   }
+               });
+
+           } catch (e) {
+               res.statusCode = 400;
+               res.end(JSON.stringify({ error: 'Invalid JSON' }));
+           }
+       });
+       return;
+   }
+
+   // API to get cache info
+   if (pathname === '/api/cache-info' && req.method === 'GET') {
+       const dirSizePromises = CACHE_SUB_DIRS.map(async (dir) => {
+           const dirPath = path.join(CACHE_DIR, dir);
+           const size = await getDirectorySize(dirPath);
+           let fileCount = 0;
+           try {
+               fileCount = (await fs.promises.readdir(dirPath)).length;
+           } catch (e) {
+               // Ignore error if directory doesn't exist
+           }
+           return { name: dir, size, fileCount, isDir: true };
+       });
+
+       const fileSizePromises = CACHE_FILES.map(async (file) => {
+           const filePath = path.join(CACHE_DIR, file);
+           let size = 0;
+           let fileCount = 0;
+           try {
+               const stats = await fs.promises.stat(filePath);
+               size = stats.size;
+               fileCount = 1;
+           } catch (e) {
+               // Ignore error if file doesn't exist
+           }
+           return { name: file, size, fileCount, isDir: false };
+       });
+
+       try {
+           const dirSizes = await Promise.all(dirSizePromises);
+           const fileSizes = await Promise.all(fileSizePromises);
+           const allSizes = [...dirSizes, ...fileSizes];
+           const totalSize = allSizes.reduce((acc, curr) => acc + curr.size, 0);
+           res.setHeader('Content-Type', 'application/json');
+           res.end(JSON.stringify({ success: true, cacheSizes: allSizes, totalSize }));
+       } catch (error) {
+           console.error('Error getting cache info:', error);
+           res.statusCode = 500;
+           res.end(JSON.stringify({ success: false, message: 'Failed to get cache info' }));
+       }
+       return;
+   }
+
+   // API to delete all files in a cache subdirectory or a cache file
+   if (pathname === '/api/clear-cache-item' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => { body += chunk.toString(); });
+       req.on('end', async () => {
+           try {
+               const { item } = JSON.parse(body);
+               const isDir = CACHE_SUB_DIRS.includes(item);
+               const isFile = CACHE_FILES.includes(item);
+
+               if (!isDir && !isFile) {
+                   res.statusCode = 400;
+                   res.end(JSON.stringify({ success: false, message: 'Invalid cache item' }));
+                   return;
+               }
+
+               if (isDir) {
+                   const dirPath = path.join(CACHE_DIR, item);
+                   const files = await fs.promises.readdir(dirPath);
+                   const deletePromises = files.map(file => fs.promises.unlink(path.join(dirPath, file)));
+                   await Promise.all(deletePromises);
+                   res.statusCode = 200;
+                   res.end(JSON.stringify({ success: true, message: `Cache directory '${item}' cleared.` }));
+               } else { // isFile
+                   const filePath = path.join(CACHE_DIR, item);
+                   await fs.promises.unlink(filePath);
+                   res.statusCode = 200;
+                   res.end(JSON.stringify({ success: true, message: `Cache file '${item}' deleted.` }));
+               }
+
+           } catch (e) {
+               if (e.code === 'ENOENT') { // File or directory not found, which is fine
+                   const { item } = JSON.parse(body);
+                   res.statusCode = 200;
+                   res.end(JSON.stringify({ success: true, message: `Cache item '${item}' was already empty or deleted.` }));
+               } else {
+                   console.error(`Error clearing cache item:`, e);
+                   res.statusCode = 500;
+                   res.end(JSON.stringify({ success: false, message: 'Failed to clear cache item' }));
+               }
+           }
+       });
+       return;
+   }
+
+
+    if (pathname === '/api/download-subtitle' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const { method, title, imdb_id } = JSON.parse(body);
+                if (!method || !title) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Missing method or title' }));
+                    return;
+                }
+                if (method === 'subliminal' && !imdb_id) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'IMDb ID is required for subliminal' }));
+                    return;
+                }
+
+                const args = ['download_subtitle.py', '--site', method, '--title', title];
+                if (method === 'subliminal') {
+                    args.push('--imdb_id', imdb_id);
+                }
+
+                console.log(`Executing subtitle download: python ${args.join(' ')}`);
+
+                const pythonProcess = spawn('python', args, {
+                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                });
+
+                let stdoutData = '';
+                let stderrData = '';
+
+                pythonProcess.stdout.on('data', (data) => {
+                    stdoutData += data.toString();
+                    console.log(`[download_subtitle.py stdout]: ${data.toString()}`);
+                });
+
+                pythonProcess.stderr.on('data', (data) => {
+                    stderrData += data.toString();
+                    console.error(`[download_subtitle.py stderr]: ${data.toString()}`);
+                });
+
+                pythonProcess.on('close', (code) => {
+                    if (code !== 0) {
+                        res.statusCode = 500;
+                        res.end(JSON.stringify({ success: false, message: `Subtitle download script exited with code ${code}`, details: stderrData }));
+                        return;
+                    }
+                    
+                    // 检查标准输出中是否包含成功信息
+                    if (stdoutData.includes("successfully downloaded") || stdoutData.includes("成功下载")) {
+                         res.setHeader('Content-Type', 'application/json');
+                         res.end(JSON.stringify({ success: true, message: 'Subtitle downloaded successfully.', output: stdoutData }));
+                    } else {
+                         res.setHeader('Content-Type', 'application/json');
+                         res.end(JSON.stringify({ success: false, message: 'Subtitle download failed or no subtitles found.', output: stdoutData, details: stderrData }));
+                    }
+                });
+
+            } catch (e) {
+                console.error('Error processing /api/download-subtitle:', e);
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+            }
+        });
+        return;
+    }
+ 
+     // 新增：处理 /node_modules 的请求
+     if (pathname.startsWith('/node_modules/')) {
         const filePath = path.join(__dirname, pathname);
         fs.readFile(filePath, (err, data) => {
             if (err) {
@@ -976,6 +1197,29 @@ function getContentType(filePath) {
     return mimeTypes[extname] || 'application/octet-stream';
 }
 
+// Helper function to get directory size
+async function getDirectorySize(directoryPath) {
+    let totalSize = 0;
+    try {
+        const files = await fs.promises.readdir(directoryPath);
+        for (const file of files) {
+            const filePath = path.join(directoryPath, file);
+            const stats = await fs.promises.stat(filePath);
+            if (stats.isDirectory()) {
+                totalSize += await getDirectorySize(filePath);
+            } else {
+                totalSize += stats.size;
+            }
+        }
+    } catch (err) {
+        if (err.code !== 'ENOENT') {
+            console.error(`Error calculating size for ${directoryPath}:`, err);
+        }
+        return 0; // Return 0 if dir doesn't exist or on error
+    }
+    return totalSize;
+}
+
 async function getFilesRecursively(dir, baseDir = null) {
     if (baseDir === null) {
         baseDir = dir;
@@ -1044,7 +1288,10 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
 // 缩略图缓存目录
-const THUMBNAIL_DIR = path.join(__dirname, 'cache', 'thumbnails');
+const CACHE_DIR = path.join(__dirname, 'cache');
+const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo'];
+const CACHE_FILES = ['foldercache.db'];
+const THUMBNAIL_DIR = path.join(CACHE_DIR, 'thumbnails');
 
 /**
  * 执行搜索操作
@@ -1116,9 +1363,13 @@ function performSearch(query, maxResults, matchCase, matchWholeWord, useRegex, d
 }
 
 // 确保缩略图目录存在
-if (!fs.existsSync(THUMBNAIL_DIR)) {
-    fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
-}
+// 确保缓存子目录存在
+CACHE_SUB_DIRS.forEach(dir => {
+    const dirPath = path.join(CACHE_DIR, dir);
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+    }
+});
 
 // 缩略图生成队列和并发控制
 const thumbnailQueue = []; // 待处理的缩略图任务队列
@@ -1283,53 +1534,6 @@ function stopAllThumbnailGenerations() {
     //console.log('Thumbnail queue cleared.');
 }
 
-// 定期清理过期缩略图的间隔（毫秒）- 默认每6小时清理一次
-const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6小时
-
-/**
- * 清理过期的缩略图文件
- * @param {number} maxAge - 缩略图的最大保留时间（毫秒），默认7天
- */
-function cleanupOldThumbnails(maxAge = 7 * 24 * 60 * 60 * 1000) {
-    fs.readdir(THUMBNAIL_DIR, (err, files) => {
-        if (err) {
-            console.error('Error reading thumbnail directory:', err);
-            return;
-        }
-
-        const now = Date.now();
-        let cleanedCount = 0;
-
-        files.forEach(file => {
-            const filePath = path.join(THUMBNAIL_DIR, file);
-            
-            fs.stat(filePath, (statErr, stats) => {
-                if (statErr) {
-                    console.error(`Error getting stats for ${filePath}:`, statErr);
-                    return;
-                }
-
-                // 检查文件是否超过最大保留时间
-                if (now - stats.mtime.getTime() > maxAge) {
-                    fs.unlink(filePath, unlinkErr => {
-                        if (unlinkErr) {
-                            console.error(`Error deleting old thumbnail ${filePath}:`, unlinkErr);
-                        } else {
-                            cleanedCount++;
-                            //console.log(`Deleted old thumbnail: ${file}`);
-                        }
-                    });
-                }
-            });
-        });
-
-        // 记录清理结果
-        setTimeout(() => {
-            console.log(`Thumbnail cleanup completed. Removed ${cleanedCount} old files.`);
-        }, 1000); // 等待所有异步删除操作完成
-    });
-}
-
 // 启动服务器
 server.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
@@ -1338,17 +1542,4 @@ server.listen(PORT, () => {
     const displayName = currentDirObj ? (currentDirObj.alias || currentDirObj.path) : currentMediaDir;
     console.log(`Serving files from: ${displayName} (${currentMediaDir})`);
     console.log(`Thumbnails will be cached in: ${THUMBNAIL_DIR}`);
-    
-    // 启动定期清理任务
-    console.log(`Starting thumbnail cleanup task every ${CLEANUP_INTERVAL / 1000 / 60 / 60} hours`);
-    setInterval(() => {
-        console.log('Running thumbnail cleanup task...');
-        cleanupOldThumbnails();
-    }, CLEANUP_INTERVAL);
-    
-    // 立即执行一次清理
-    setTimeout(() => {
-        console.log('Running initial thumbnail cleanup...');
-        cleanupOldThumbnails();
-    }, 30000); // 服务器启动30秒后执行第一次清理
 });

@@ -135,64 +135,85 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
     video_filename = os.path.basename(video_path)
     video_basename = os.path.splitext(video_filename)[0]
     
-    subtitle_files = []
+    # Define and add the cache directory to the search paths
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cache_dir = os.path.join(script_dir, 'cache', 'subtitles')
     
-    try:
-        # List files in the video directory
-        for filename in os.listdir(video_dir):
-            original_filename = filename # Keep original filename for display
-            basename, ext = os.path.splitext(filename)
-            # Check if it's a supported subtitle format
-            if ext.lower() in ['.vtt', '.ass', '.srt']:
-                # If not find_all, we need an exact match, otherwise we take all subs
-                if find_all or basename == video_basename:
-                    # For non-VTT formats, convert to VTT
-                    if ext.lower() != '.vtt':
-                        # Generate path for converted VTT file
-                        original_path = os.path.join(video_dir, filename)
-                        vtt_path = get_converted_vtt_path(original_path)
-                        
-                        # Convert subtitle to VTT format
-                        if convert_to_vtt(original_path, vtt_path):
-                            # Use converted VTT file
-                            filepath = vtt_path
+    search_dirs = [video_dir]
+    if os.path.isdir(cache_dir):
+        search_dirs.append(cache_dir)
+
+    subtitle_files = []
+    found_sub_names = set()  # To avoid duplicates
+
+    for directory in search_dirs:
+        try:
+            # List files in the directory
+            for filename in os.listdir(directory):
+                original_filename = filename # Keep original filename for display
+                if original_filename in found_sub_names:
+                    continue # Skip if already found
+
+                basename, ext = os.path.splitext(filename)
+                # Check if it's a supported subtitle format
+                if ext.lower() in ['.vtt', '.ass', '.srt']:
+                    # If not find_all, we need a name match, otherwise we take all subs
+                    # For cache dir, we always check all files if find_all is true
+                    is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
+                    
+                    # Match同名 or 匹配文件名(忽略后缀) or find_all
+                    if find_all or basename == video_basename or video_basename in basename:
+                        # For non-VTT formats, convert to VTT
+                        if ext.lower() != '.vtt':
+                            # Generate path for converted VTT file
+                            original_path = os.path.join(directory, filename)
+                            vtt_path = get_converted_vtt_path(original_path)
+                            
+                            # Convert subtitle to VTT format
+                            if convert_to_vtt(original_path, vtt_path):
+                                # Use converted VTT file
+                                filepath = vtt_path
+                            else:
+                                # If conversion fails, skip this subtitle file
+                                print(f"Warning: Failed to convert {filename} to VTT format", file=sys.stderr)
+                                continue
                         else:
-                            # If conversion fails, skip this subtitle file
-                            print(f"Warning: Failed to convert {filename} to VTT format", file=sys.stderr)
-                            continue
-                    else:
-                        # For VTT files, use as is
-                        filepath = os.path.join(video_dir, filename)
-                    
-                    # Construct the URL for the subtitle file
-                    if media_dir:
-                        # Calculate relative path from media directory
-                        relative_path = os.path.relpath(filepath, media_dir)
-                        # URL encode the path, keeping slashes intact
-                        encoded_path = urllib.parse.quote(relative_path.replace('\\', '/'), safe='/')
-                        # Prepend a slash to make it an absolute path from the server root
-                        subtitle_url = f"/{encoded_path}"
-                    else:
-                        # This case is unlikely to be hit with current server.js implementation
-                        subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
-                    
-                    subtitle_files.append({
-                        'url': subtitle_url,
-                        'lang': 'webvtt',
-                        'name': original_filename
-                    })
-    except FileNotFoundError:
-        # If the directory doesn't exist, return empty list
-        print(f"Warning: Directory not found: {video_dir}", file=sys.stderr)
-        return []
-    except PermissionError:
-        # If we don't have permission to access the directory
-        print(f"Warning: Permission denied accessing directory: {video_dir}", file=sys.stderr)
-        return []
-    except Exception as e:
-        # Handle any other exceptions
-        print(f"Error while searching for subtitles: {str(e)}", file=sys.stderr)
-        return []
+                            # For VTT files, use as is
+                            filepath = os.path.join(directory, filename)
+                        
+                        # Construct the URL for the subtitle file
+                        if is_cache_dir:
+                            vtt_filename = os.path.basename(filepath)
+                            subtitle_url = f"/cache/subtitles/{urllib.parse.quote(vtt_filename)}"
+                        elif media_dir:
+                            # Calculate relative path from media directory
+                            relative_path = os.path.relpath(filepath, media_dir)
+                            # URL encode the path, keeping slashes intact
+                            encoded_path = urllib.parse.quote(relative_path.replace('\\', '/'), safe='/')
+                            # Prepend a slash to make it an absolute path from the server root
+                            subtitle_url = f"/{encoded_path}"
+                        else:
+                            # This case is unlikely to be hit with current server.js implementation
+                            subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
+                        
+                        subtitle_files.append({
+                            'url': subtitle_url,
+                            'lang': 'webvtt',
+                            'name': original_filename
+                        })
+                        found_sub_names.add(original_filename)
+        except FileNotFoundError:
+            # If the directory doesn't exist, continue to the next one
+            print(f"Warning: Directory not found: {directory}", file=sys.stderr)
+            continue
+        except PermissionError:
+            # If we don't have permission to access the directory
+            print(f"Warning: Permission denied accessing directory: {directory}", file=sys.stderr)
+            continue
+        except Exception as e:
+            # Handle any other exceptions
+            print(f"Error while searching for subtitles in {directory}: {str(e)}", file=sys.stderr)
+            continue
     
     return subtitle_files
 
