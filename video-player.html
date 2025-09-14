@@ -1,1216 +1,1852 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebPlayer - Video</Video></title>
-    <link rel="stylesheet" href="vendor/all.min.css">
-    <link rel="stylesheet" href="vendor/DPlayer.min.css">
-    <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
-    <link rel="stylesheet" href="video-player-style.css?v=1">
-</head>
-<body>
-    <script src="vendor/color-thief.min.js"></script>
-    <div class="player-bg"></div>
-    <div class="player-container video-mode">
-
-        <div class="player-main">
-            <div class="video-header">
-                <h2 id="videoTitle" class="video-title">加载中...</h2>
-                <div class="video-controls-right">
-                   <div class="scraper-dropdown">
-                       <button id="scraperBtn" class="control-btn extra-btn" title="刮削视频信息"><i class="fas fa-wand-magic-sparkles"></i></button>
-                       <div id="scraperDropdownContent" class="scraper-dropdown-content">
-                           <a href="#" data-type="auto">自动</a>
-                           <a href="#" data-type="movie">电影</a>
-                           <a href="#" data-type="tv">电视剧</a>
-                           <a href="#" data-type="anime">动漫</a>
-                           <a href="#" data-type="jav">JAV</a>
-                           <a href="#" data-type="FC2">FC2</a>
-                       </div>
-                   </div>
-                   <div class="subtitle-dropdown">
-                       <button id="subtitleBtn" class="control-btn extra-btn"><i class="fas fa-closed-captioning"></i></button>
-                       <div id="subtitleDropdownContent" class="subtitle-dropdown-content">
-                           <!-- Subtitle options will be inserted here -->
-                       </div>
-                   </div>
-                   <button id="externalPlayBtn" class="control-btn extra-btn" title="外部播放"><i class="fas fa-external-link-alt"></i></button>
-                   <button id="downloadBtn" class="control-btn extra-btn" title="下载视频"><i class="fas fa-download"></i></button>
-                   <button id="convertToMp4Btn" class="control-btn extra-btn" title="转为MP4"><i class="fas fa-sync-alt"></i></button>
-                   <button id="settingsBtn" class="control-btn extra-btn" title="设置"><i class="fas fa-cog"></i></button>
-                   <button class="control-btn extra-btn" onclick="window.close()" title="关闭窗口"><i class="fas fa-times"></i></button>
+   <!DOCTYPE html>
+   <html lang="zh-CN">
+   <head>
+       <meta charset="UTF-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+       <title>WebPlayer - Video</Video></title>
+       <link rel="stylesheet" href="vendor/all.min.css">
+       <link rel="stylesheet" href="vendor/DPlayer.min.css">
+       <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
+       <link rel="stylesheet" href="video-player-style.css?v=1">
+   </head>
+   <body>
+       <script src="vendor/color-thief.min.js"></script>
+       <div class="player-bg"></div>
+       <div class="player-container video-mode">
+   
+           <div class="player-main">
+               <div class="video-header">
+                   <h2 id="videoTitle" class="video-title">加载中...</h2>
+                   <div class="video-controls-right">
+                      <div class="scraper-dropdown">
+                          <button id="scraperBtn" class="control-btn extra-btn" title="刮削视频信息"><i class="fas fa-wand-magic-sparkles"></i></button>
+                          <div id="scraperDropdownContent" class="scraper-dropdown-content">
+                              <a href="#" data-type="auto">自动</a>
+                              <a href="#" data-type="movie">电影</a>
+                              <a href="#" data-type="tv">电视剧</a>
+                              <a href="#" data-type="anime">动漫</a>
+                              <a href="#" data-type="jav">JAV</a>
+                              <a href="#" data-type="FC2">FC2</a>
+                          </div>
+                      </div>
+                      <div class="subtitle-dropdown">
+                          <button id="subtitleBtn" class="control-btn extra-btn"><i class="fas fa-closed-captioning"></i></button>
+                          <div id="subtitleDropdownContent" class="subtitle-dropdown-content">
+                              <!-- Subtitle options will be inserted here -->
+                          </div>
+                      </div>
+                      <button id="externalPlayBtn" class="control-btn extra-btn" title="外部播放"><i class="fas fa-external-link-alt"></i></button>
+                      <button id="downloadBtn" class="control-btn extra-btn" title="下载视频"><i class="fas fa-download"></i></button>
+                      <button id="convertToMp4Btn" class="control-btn extra-btn" title="转为MP4"><i class="fas fa-sync-alt"></i></button>
+                      <button id="semanticSearchBtn" class="control-btn extra-btn" title="语义搜索"><i class="fas fa-search-plus"></i></button>
+                      <button id="settingsBtn" class="control-btn extra-btn" title="设置"><i class="fas fa-cog"></i></button>
+                      <button class="control-btn extra-btn" onclick="window.close()" title="关闭窗口"><i class="fas fa-times"></i></button>
+                  </div>
                </div>
-            </div>
-
-            <div class="video-content-area">
-                <div id="dplayer"></div>
-            </div>
-        </div>
-
-       <div class="video-info-panel">
-           <h3 class="panel-title">视频信息</h3>
-           <div id="videoInfoContent" class="panel-content">
-               <p>点击刮削按钮获取视频信息。</p>
+   
+               <div class="video-content-area">
+                   <div id="dplayer"></div>
+               </div>
+           </div>
+   
+          <div class="video-info-panel">
+              <h3 class="panel-title">视频信息</h3>
+              <div id="videoInfoContent" class="panel-content">
+                  <p>点击刮削按钮获取视频信息。</p>
+              </div>
+          </div>
+          
+          <div class="chat-panel">
+              <div class="chat-header">
+                  <h3 id="chatTitle">语义搜索</h3>
+                  <button id="closeChatBtn" class="control-btn" title="关闭"><i class="fas fa-times"></i></button>
+              </div>
+              <div class="chat-container">
+                  <div class="chat-messages" id="chatMessages">
+                      <!-- Messages will be dynamically inserted here -->
+                  </div>
+                  <div class="chat-input-container">
+                      <input type="text" id="chatInput" placeholder="输入...">
+                      <button id="sendChatBtn"><i class="fas fa-paper-plane"></i></button>
+                  </div>
+              </div>
+          </div>
+      </div>
+   
+       <div id="conversionModal" class="modal" style="display: none;">
+           <div class="modal-content">
+               <h2 id="modalTitle">需要转码</h2>
+               <p id="modalText">此视频格式可能存在兼容性问题。是否要将其转换为 MP4？</p>
+               <div id="progressContainer" style="display:none;">
+                   <div class="progress-bar-container">
+                       <div id="progressBar" class="progress-bar-inner">0%</div>
+                   </div>
+                   <p id="progressInfo"></p>
+               </div>
+               <div id="modalActions" style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
+                   <button id="startConversionBtn">开始转码</button>
+                   <button id="cancelConversionBtn">取消</button>
+               </div>
+               <div style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
+                   <button id="modalDownloadBtn" class="download-btn">下载</button>
+               </div>
            </div>
        </div>
-   </div>
+   
+       <div id="settingsModal" class="modal" style="display: none;">
+           <div class="modal-content">
+               <h2>设置</h2>
+               <div class="settings-list">
+                   <div class="setting-item">
+                       <label for="autoScrapeToggle">自动刮削</label>
+                       <label class="switch">
+                           <input type="checkbox" id="autoScrapeToggle">
+                           <span class="slider round"></span>
+                       </label>
+                   </div>
+                   <div class="setting-item">
+                       <label for="forceScrapeToggle">强制联网刮削</label>
+                       <label class="switch">
+                           <input type="checkbox" id="forceScrapeToggle">
+                           <span class="slider round"></span>
+                       </label>
+                   </div>
+               </div>
+               <div style="margin-top: 20px;">
+                    <button id="closeSettingsBtn">关闭</button>
+               </div>
+           </div>
+       </div>
+    
+        <script src="vendor/DPlayer.min.js"></script>
+        <script>
+           const videoTitle = document.getElementById('videoTitle');
+           const urlParams = new URLSearchParams(window.location.search);
+           const videoSrc = urlParams.get('src');
+           const title = urlParams.get('title') || '未知视频';
+   
+           videoTitle.textContent = title;
+   
+           const mediaDir = urlParams.get('mediaDir'); // 获取 mediaDir 参数
+           let dp; // 将dp声明移到这里，使其在整个脚本作用域内可访问
+           let scrapedInfo = null; // 用于存储刮削到的视频信息
+           let decodedVideoSrc; // 提升作用域以便全局访问
+           let dpOptions; // 提升作用域以便全局访问
+           let currentSubtitleUrl = null; // 用于存储当前字幕的URL
+   
+           // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
+           function buildVideoUrl(src, mediaDir) {
+               if (!mediaDir) return src;
+               
+               try {
+                   let url;
+                   try {
+                       url = new URL(src);
+                   } catch (urlError) {
+                       url = new URL(src, window.location.origin);
+                   }
+                   
+                   url.searchParams.set('mediaDir', mediaDir);
+                   return url.toString();
+               } catch (e) {
+                   const separator = src.includes('?') ? '&' : '?';
+                   return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+               }
+           }
+   
+           function bindDPlayerEvents(player) {
+               player.on('error', function () {
+                   console.error('DPlayer error occurred:', arguments);
+                   //videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
+               });
+   
+           }
+           
+           async function setTempMediaDirAndPlay() {
+               if (mediaDir) {
+                   try {
+                       const response = await fetch('/api/set-temp-media-dir', {
+                           method: 'POST',
+                           headers: {
+                               'Content-Type': 'application/json'
+                           },
+                           body: JSON.stringify({ dir: mediaDir })
+                       });
+                       if (!response.ok) {
+                           throw new Error(`HTTP error! status: ${response.status}`);
+                       }
+                       const result = await response.json();
+                       if (!result.success) {
+                           throw new Error(result.message || 'Failed to set temporary media directory.');
+                       }
+                       console.log('Temporary media directory set:', mediaDir);
+                   } catch (error) {
+                       console.error('Error setting temporary media directory:', error);
+                       videoTitle.textContent = `视频加载失败: ${error.message}`;
+                       return; // 如果设置失败，则不播放视频
+                   }
+               }
+   
+               if (videoSrc) {
+                   const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
+   
+                   decodedVideoSrc = decodeURIComponent(videoSrc); // 赋值给全局变量
+                   const subtitleResponse = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
+                   const subtitleData = await subtitleResponse.json();
+                   console.log('Received subtitle data from server:', subtitleData);
+   
+                   dpOptions = {
+                       container: document.getElementById('dplayer'),
+                       video: {
+                           url: fullVideoUrl,
+                           playsinline: true,
+                           'webkit-playsinline': true
+                       },
+                       autoplay: true,
+                       theme: 'var(--accent-color)',
+                       lang: 'zh-cn',
+                       hotkey: true,
+                       screenshot: true,
+                       playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
+                       loop: false,
+                   };
+   
+                   const poster = urlParams.get('poster');
+                   if (poster) {
+                       dpOptions.video.pic = poster;
+                   }
+   
+                   const thumbnails = urlParams.get('thumbnails');
+                   if (thumbnails) {
+                       dpOptions.video.thumbnails = thumbnails;
+                   }
+   
+                   if (subtitleData.success && subtitleData.subtitles.length > 0) {
+                       const subtitleUrl = subtitleData.subtitles[0].url;
+                       let fullSubtitleUrl;
+                       if (mediaDir) {
+                           const separator = subtitleUrl.includes('?') ? '&' : '?';
+                           fullSubtitleUrl = `${subtitleUrl}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                       } else {
+                           fullSubtitleUrl = subtitleUrl;
+                       }
+                       
+                       console.log('Subtitle URL:', fullSubtitleUrl);
+                       // 优先使用 .path，如果不存在则回退到 .url，并移除可能存在的前导斜杠
+                       let subtitlePath = subtitleData.subtitles[0].path || subtitleData.subtitles[0].url;
+                       if (subtitlePath && subtitlePath.startsWith('/')) {
+                           subtitlePath = subtitlePath.substring(1);
+                       }
+                       currentSubtitleUrl = subtitlePath; // 存储相对路径用于搜索
+                       dpOptions.subtitle = {
+                           url: fullSubtitleUrl,
+                           type: 'webvtt',
+                           fontSize: '2vw',
+                           fontfamily: 'Noto Sans SC, sans-serif',
+                           background:'rgba(0, 0, 0, 0.5)',
+                           bottom: '5%',
+                           color: '#FFFFFF'
+                       };
+                   }
+   
+                   async function checkAndLoadScrapedInfo() {
+                       try {
+                           const response = await fetch(`/api/check-scraped-info`, {
+                               method: 'POST',
+                               headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify({
+                                   src: decodeURIComponent(videoSrc),
+                                   mediaDir: mediaDir
+                               })
+                           });
+                           const data = await response.json();
+   
+                           if (data && data.status !== 'not_found') {
+                               console.log('Found cached info, displaying it.');
+                               displayScrapedData(data);
+                           } else {
+                               console.log('No cached info found.');
+                               // If no cache, then check auto-scrape setting
+                               if (document.getElementById('autoScrapeToggle').checked) {
+                                   console.log('Auto-scraping enabled, starting network scrape.');
+                                   scrapeVideo('auto', false); // false indicates this is not a manual scrape
+                               }
+                           }
+                       } catch (error) {
+                           console.error('Error checking for scraped info:', error);
+                           // Fallback to default behavior if check fails
+                           if (document.getElementById('autoScrapeToggle').checked) {
+                               scrapeVideo('auto', false);
+                           }
+                       }
+                   }
+   
+                   function initDPlayer() {
+                       dp = new DPlayer(dpOptions);
+                       bindDPlayerEvents(dp);
+                       loadAllSubtitles();
+                       checkAndLoadScrapedInfo(); // Replace the original auto-scrape logic
+                       // Set background image only if we don't already have one from scraping
+                       const albumCover = urlParams.get('poster');
+                       const playerBg = document.querySelector('.player-bg');
+                       if (albumCover && (!playerBg.style.backgroundImage || playerBg.style.backgroundImage === 'none' || playerBg.style.backgroundImage === '')) {
+                           const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(albumCover)}`;
+                           playerBg.style.backgroundImage = `url('${proxyUrl}')`;
+                       }
+                   }
+   
+                   const subtitleBtn = document.getElementById('subtitleBtn');
+                   const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
+   
+                   subtitleBtn.onclick = () => {
+                       subtitleDropdownContent.classList.toggle("show");
+                   };
+   
+                   window.onclick = function(event) {
+                       if (!event.target.closest('.subtitle-dropdown')) {
+                           if (subtitleDropdownContent.classList.contains('show')) {
+                               subtitleDropdownContent.classList.remove('show');
+                           }
+                       }
+                   }
+   
+                   initDPlayer();
+   
+               } else {
+                   videoTitle.textContent = '未找到视频源';
+               }
+           }
+   
+           async function loadAllSubtitles() {
+               let activeSubmenuCloser = null;
+               const subtitleDropdown = document.querySelector('.subtitle-dropdown');
+               const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
+               try {
+                   const response = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}&all=true`);
+                   const data = await response.json();
+                   subtitleDropdownContent.innerHTML = '';
+                   // 关闭字幕项
+                   const offOption = document.createElement('a');
+                   offOption.textContent = '关闭字幕';
+                   offOption.href = '#';
+                   offOption.onclick = (ev) => {
+                       ev.preventDefault();
+                       if (dp && dp.subtitle) {
+                           dp.subtitle.hide();
+                           currentSubtitleUrl = null; // 清除当前字幕
+                       }
+                       subtitleDropdownContent.classList.remove('show');
+                   };
+                   subtitleDropdownContent.appendChild(offOption);
+   
+                   const subtitles = (data && Array.isArray(data.subtitles)) ? data.subtitles : [];
+   
+                   const isLocalSubtitle = (sub) => {
+                       if (!sub || !sub.url) return false;
+                       const u = sub.url;
+                       return u.startsWith('/') || u.startsWith('./') || u.startsWith('file:') || !/^https?:\/\//i.test(u);
+                   };
+   
+                   const localSubs = subtitles.filter(isLocalSubtitle);
+                   const remoteSubs = subtitles.filter(s => !isLocalSubtitle(s));
+   
+                   // 同文件夹字幕：标题（可点击） + 浮动子菜单（右侧弹出，类似 Windows 右键菜单）
+                   const localToggle = document.createElement('div');
+                   localToggle.className = 'subtitle-local-toggle';
+                   localToggle.tabIndex = 0;
+                   localToggle.setAttribute('role', 'button');
+                   localToggle.textContent = '本地字幕';
+   
+                   // 浮动子菜单（默认隐藏），追加到 document.body，避免被下拉容器裁剪
+                   const localSubmenu = document.createElement('div');
+                   localSubmenu.className = 'subtitle-local-submenu';
+                   localSubmenu.style.position = 'fixed';
+                   localSubmenu.style.display = 'none';
+                   localSubmenu.setAttribute('role', 'menu');
+                   localSubmenu.setAttribute('aria-hidden', 'true');
+   
+                   if (localSubs.length > 0) {
+                       const buildFullUrl = (subUrl) => {
+                           if (mediaDir) {
+                               try {
+                                   const url = new URL(subUrl, window.location.origin);
+                                   url.searchParams.set('mediaDir', mediaDir);
+                                   return url.toString();
+                               } catch (e) {
+                                   const separator = subUrl.includes('?') ? '&' : '?';
+                                   return `${subUrl}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                               }
+                           }
+                           return subUrl;
+                       };
 
-    <div id="conversionModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <h2 id="modalTitle">需要转码</h2>
-            <p id="modalText">此视频格式可能存在兼容性问题。是否要将其转换为 MP4？</p>
-            <div id="progressContainer" style="display:none;">
-                <div class="progress-bar-container">
-                    <div id="progressBar" class="progress-bar-inner">0%</div>
-                </div>
-                <p id="progressInfo"></p>
-            </div>
-            <div id="modalActions" style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
-                <button id="startConversionBtn">开始转码</button>
-                <button id="cancelConversionBtn">取消</button>
-            </div>
-            <div style="margin-bottom: 10px; display: flex; justify-content: center; gap: 15px;">
-                <button id="modalDownloadBtn" class="download-btn">下载</button>
-            </div>
-        </div>
-    </div>
+                       localSubs.forEach(sub => {
+                           const container = document.createElement('div');
+                           container.className = 'subtitle-menu-item-container';
 
-    <div id="settingsModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <h2>设置</h2>
-            <div class="settings-list">
-                <div class="setting-item">
-                    <label for="autoScrapeToggle">自动刮削</label>
-                    <label class="switch">
-                        <input type="checkbox" id="autoScrapeToggle">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="setting-item">
-                    <label for="forceScrapeToggle">强制联网刮削</label>
-                    <label class="switch">
-                        <input type="checkbox" id="forceScrapeToggle">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-            </div>
-            <div style="margin-top: 20px;">
-                 <button id="closeSettingsBtn">关闭</button>
-            </div>
-        </div>
-    </div>
- 
-     <script src="vendor/DPlayer.min.js"></script>
-     <script>
-        const videoTitle = document.getElementById('videoTitle');
-        const urlParams = new URLSearchParams(window.location.search);
-        const videoSrc = urlParams.get('src');
-        const title = urlParams.get('title') || '未知视频';
+                           const link = document.createElement('a');
+                           link.textContent = sub.name || (sub.url ? sub.url.split('/').pop() : '本地字幕');
+                           link.href = '#';
+                           link.setAttribute('role', 'menuitem');
+                           link.onclick = (ev) => {
+                               ev.preventDefault();
+                               const fullSubtitleUrl = buildFullUrl(sub.url);
+                               console.log(`Switching to local subtitle: ${fullSubtitleUrl}`);
+                               
+                               let subtitlePath = sub.path || sub.url;
+                               if (subtitlePath && subtitlePath.startsWith('/')) {
+                                   subtitlePath = subtitlePath.substring(1);
+                               }
+                               currentSubtitleUrl = subtitlePath;
+                               
+                               const subtitleOptions = {
+                                   type: 'webvtt',
+                                   fontSize: '2vw',
+                                   fontfamily: 'Noto Sans SC, sans-serif',
+                                   background:'rgba(0, 0, 0, 0.5)',
+                                   bottom: '5%',
+                                   color: '#FFFFFF'
+                               };
 
-        videoTitle.textContent = title;
+                               if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
+                                   dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
+                               } else if (dp) {
+                                   const currentTime = dp.video.currentTime;
+                                   const wasPaused = dp.video.paused;
+                                   dp.destroy();
+                                   dpOptions.subtitle = { ...subtitleOptions, url: fullSubtitleUrl };
+                                   dp = new DPlayer(dpOptions);
+                                   bindDPlayerEvents(dp);
+                                   dp.on('loadeddata', () => {
+                                       dp.seek(currentTime);
+                                       if (!wasPaused) dp.play();
+                                   });
+                               }
+                               subtitleDropdownContent.classList.remove('show');
+                               hideLocalSubmenu();
+                           };
 
-        const mediaDir = urlParams.get('mediaDir'); // 获取 mediaDir 参数
-        let dp; // 将dp声明移到这里，使其在整个脚本作用域内可访问
-        let scrapedInfo = null; // 用于存储刮削到的视频信息
-        let decodedVideoSrc; // 提升作用域以便全局访问
-        let dpOptions; // 提升作用域以便全局访问
+                           const deleteBtn = document.createElement('button');
+                           deleteBtn.className = 'delete-subtitle-btn';
+                           deleteBtn.innerHTML = '&times;';
+                           deleteBtn.title = '删除此字幕';
+                           deleteBtn.onclick = async (ev) => {
+                               ev.preventDefault();
+                               ev.stopPropagation();
 
-        // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
-        function buildVideoUrl(src, mediaDir) {
-            if (!mediaDir) return src;
-            
-            try {
-                let url;
-                try {
-                    url = new URL(src);
-                } catch (urlError) {
-                    url = new URL(src, window.location.origin);
-                }
-                
-                url.searchParams.set('mediaDir', mediaDir);
-                return url.toString();
-            } catch (e) {
-                const separator = src.includes('?') ? '&' : '?';
-                return `${src}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-            }
-        }
+                               // 使用 sub.path (更可靠的相对路径) 或回退到 sub.url
+                               const subtitleRelativePath = sub.path || sub.url;
+                               if (!subtitleRelativePath) {
+                                   alert('无法确定字幕文件的路径。');
+                                   return;
+                               }
 
-        function bindDPlayerEvents(player) {
-            player.on('error', function () {
-                console.error('DPlayer error occurred:', arguments);
-                //videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
-            });
+                               // 禁用按钮防止重复点击
+                               deleteBtn.disabled = true;
+                               deleteBtn.style.cursor = 'wait';
 
-        }
-        
-        async function setTempMediaDirAndPlay() {
-            if (mediaDir) {
-                try {
-                    const response = await fetch('/api/set-temp-media-dir', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ dir: mediaDir })
+                               try {
+                                   const response = await fetch('/api/delete-subtitle', {
+                                       method: 'POST',
+                                       headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({
+                                           path: subtitleRelativePath,
+                                           mediaDir: mediaDir
+                                       })
+                                   });
+                                   const result = await response.json();
+
+                                   if (!result.success) {
+                                       throw new Error(result.message || '服务器未能删除文件。');
+                                   }
+
+                                   // --- 只有在后端成功删除后，才更新UI ---
+                                   const fullSubtitleUrl = buildFullUrl(sub.url);
+                                   if (dp && dp.subtitle && dp.subtitle.options && dp.subtitle.options.url === fullSubtitleUrl) {
+                                       dp.subtitle.hide();
+                                       currentSubtitleUrl = null;
+                                   }
+                                   
+                                   container.remove();
+
+                                   if (localSubmenu.childElementCount === 0) {
+                                       const disabled = document.createElement('a');
+                                       disabled.textContent = '无同文件夹字幕';
+                                       disabled.className = 'disabled';
+                                       disabled.href = '#';
+                                       disabled.onclick = (e) => e.preventDefault();
+                                       localSubmenu.appendChild(disabled);
+                                   }
+                                   // --- UI更新结束 ---
+
+                               } catch (error) {
+                                   console.error('删除字幕时出错:', error);
+                                   alert(`删除字幕失败: ${error.message}`);
+                               } finally {
+                                   // 重新启用按钮
+                                   deleteBtn.disabled = false;
+                                   deleteBtn.style.cursor = 'pointer';
+                               }
+                           };
+
+                           container.appendChild(link);
+                           container.appendChild(deleteBtn);
+                           localSubmenu.appendChild(container);
+                       });
+                   } else {
+                       const disabled = document.createElement('a');
+                       disabled.textContent = '无同文件夹字幕';
+                       disabled.className = 'disabled';
+                       disabled.href = '#';
+                       disabled.onclick = (ev) => ev.preventDefault();
+                       localSubmenu.appendChild(disabled);
+                   }
+   
+                   function hideLocalSubmenu() {
+                       if (localSubmenu && localSubmenu.style) {
+                           localSubmenu.style.display = 'none';
+                           localSubmenu.setAttribute('aria-hidden', 'true');
+                       }
+                       localToggle.classList.remove('open');
+                   }
+   
+                   function showLocalSubmenu() {
+                       // 确保父下拉处于打开状态（移动端需要）
+                       subtitleDropdownContent.classList.add('show');
+   
+                       // 确保 submenu 在 DOM 中以便测量
+                       if (!document.body.contains(localSubmenu)) {
+                           document.body.appendChild(localSubmenu);
+                       }
+   
+                       // 以不可见但可测量方式显示
+                       localSubmenu.style.display = 'block';
+                       localSubmenu.style.visibility = 'hidden';
+                       localSubmenu.setAttribute('aria-hidden', 'false');
+   
+                       // 测量尺寸
+                       const submenuRect = localSubmenu.getBoundingClientRect();
+                       const submenuW = submenuRect.width || localSubmenu.offsetWidth;
+                       const submenuH = submenuRect.height || localSubmenu.offsetHeight;
+   
+                       const toggleRect = localToggle.getBoundingClientRect();
+                       const vw = window.innerWidth || document.documentElement.clientWidth;
+                       const vh = window.innerHeight || document.documentElement.clientHeight;
+   
+                       // 可用空间
+                       const spaceRight = vw - toggleRect.right;
+                       const spaceLeft = toggleRect.left;
+                       const spaceBottom = vh - toggleRect.bottom;
+                       const spaceTop = toggleRect.top;
+   
+                       const margin = 8;
+                       let top = 0;
+                       let left = 0;
+   
+                       // 优先右侧，其次左侧，其次下方，其次上方
+                       if (spaceRight >= submenuW + margin) {
+                           left = Math.min(vw - submenuW - margin, toggleRect.right + margin);
+                           // try align top with toggle top, but keep within viewport
+                           top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
+                       } else if (spaceLeft >= submenuW + margin) {
+                           left = Math.max(margin, toggleRect.left - submenuW - margin);
+                           top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
+                       } else if (spaceBottom >= submenuH + margin) {
+                           top = Math.min(vh - submenuH - margin, toggleRect.bottom + margin);
+                           left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
+                       } else if (spaceTop >= submenuH + margin) {
+                           top = Math.max(margin, toggleRect.top - submenuH - margin);
+                           left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
+                       } else {
+                           // 都不足：尽量展示并做边界修正
+                           left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
+                           top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
+                       }
+   
+                       // 最终应用位置（fixed 相对于视口）
+                       localSubmenu.style.left = `${Math.round(left)}px`;
+                       localSubmenu.style.top = `${Math.round(top)}px`;
+                       localSubmenu.style.visibility = 'visible';
+                       localSubmenu.style.display = 'block';
+                       localToggle.classList.add('open');
+   
+                       // 保证 toggle 在可见区域（移动设备上可能需要滚动以使 toggle 可见）
+                       try {
+                           localToggle.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+                       } catch (e) { /* ignore */ }
+                   }
+   
+                   // 点击标题显示/隐藏浮动子菜单，并在移动端支持 touchstart
+                   const toggleHandler = (e) => {
+                       e.preventDefault();
+                       e.stopPropagation();
+                       if (localSubmenu.style.display === 'block') {
+                           hideLocalSubmenu();
+                           activeSubmenuCloser = null;
+                       } else {
+                           if (activeSubmenuCloser) {
+                               activeSubmenuCloser();
+                           }
+                           showLocalSubmenu();
+                           activeSubmenuCloser = hideLocalSubmenu;
+                       }
+                   };
+   
+                   localToggle.addEventListener('click', toggleHandler);
+                   localToggle.addEventListener('touchstart', (ev) => {
+                       ev.preventDefault();
+                       ev.stopPropagation();
+                       toggleHandler(ev); // Use the main handler for consistency
+                   }, { passive: false });
+   
+                   localToggle.addEventListener('keydown', (e) => {
+                       if (e.key === 'Enter' || e.key === ' ') {
+                           e.preventDefault();
+                           localToggle.click();
+                       }
+                   });
+   
+                   // 将父项加入下拉容器（子菜单不再作为下拉容器的子元素）
+                   subtitleDropdownContent.appendChild(localToggle);
+   
+   
+                   // 隐藏在窗口变化、滚动或方向变更时，避免位置不可见
+                   const hideOnWindowChange = () => hideLocalSubmenu();
+                   window.addEventListener('resize', hideOnWindowChange);
+                   window.addEventListener('orientationchange', hideOnWindowChange);
+                   window.addEventListener('scroll', hideOnWindowChange, true); // 捕获模式，处理容器滚动
+   
+                   // 监听下拉容器 class 变化：当主下拉被关闭时同时隐藏浮动子菜单
+                   const mo = new MutationObserver(() => {
+                       if (!subtitleDropdownContent.classList.contains('show')) {
+                           if (activeSubmenuCloser) {
+                               activeSubmenuCloser();
+                               activeSubmenuCloser = null;
+                           }
+                       }
+                   });
+                   mo.observe(subtitleDropdownContent, { attributes: true, attributeFilter: ['class'] });
+   
+                   // 其他来源字幕（保持原有逻辑）
+                   if (remoteSubs.length > 0) {
+                       const remoteHeader = document.createElement('div');
+                       remoteHeader.className = 'subtitle-section-header';
+                       remoteHeader.textContent = '其他字幕来源';
+                       subtitleDropdownContent.appendChild(remoteHeader);
+   
+                       remoteSubs.forEach(sub => {
+                           const link = document.createElement('a');
+                           link.textContent = sub.name || sub.url;
+                           link.href = '#';
+                           link.onclick = (ev) => {
+                               ev.preventDefault();
+                               let fullSubtitleUrl = sub.url;
+                               if (mediaDir) {
+                                   try {
+                                       const url = new URL(sub.url, window.location.origin);
+                                       url.searchParams.set('mediaDir', mediaDir);
+                                       fullSubtitleUrl = url.toString();
+                                   } catch (e) {
+                                       const separator = sub.url.includes('?') ? '&' : '?';
+                                       fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                                   }
+                               }
+                               console.log(`Switching to remote subtitle: ${fullSubtitleUrl}`);
+                               // 优先使用 .path，如果不存在则回退到 .url，并移除可能存在的前导斜杠
+                               let subtitlePath = sub.path || sub.url;
+                               if (subtitlePath && subtitlePath.startsWith('/')) {
+                                   subtitlePath = subtitlePath.substring(1);
+                               }
+                               currentSubtitleUrl = subtitlePath; // 存储相对路径
+                               const subtitleOptions = {
+                                   type: 'webvtt',
+                                   fontSize: '2vw',
+                                   fontfamily: 'Noto Sans SC, sans-serif',
+                                   background:'rgba(0, 0, 0, 0.5)',
+                                   bottom: '5%',
+                                   color: '#FFFFFF'
+                               };
+                               if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
+                                   dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
+                               } else if (dp) {
+                                   const currentTime = dp.video.currentTime;
+                                   const wasPaused = dp.video.paused;
+                                   dp.destroy();
+                                   dpOptions.subtitle = { ...subtitleOptions, url: fullSubtitleUrl };
+                                   dp = new DPlayer(dpOptions);
+                                   bindDPlayerEvents(dp);
+                                   dp.on('loadeddata', () => {
+                                       dp.seek(currentTime);
+                                       if (!wasPaused) dp.play();
+                                   });
+                               }
+                               subtitleDropdownContent.classList.remove('show');
+                           };
+                           subtitleDropdownContent.appendChild(link);
+                       });
+                   }
+   
+                   // 操作项占位（保持原有逻辑）
+                   const actionsHeader = document.createElement('div');
+                   actionsHeader.className = 'subtitle-section-header';
+                   //actionsHeader.textContent = '操作';
+                   //subtitleDropdownContent.appendChild(actionsHeader);
+   
+                   const actions = [
+                       { name: '本地转录', action: 'local-transcribe' },
+                       {
+                           name: '联网下载',
+                           action: 'download-online',
+                           submenu: [
+                               { name: 'Subtitlecat', action: 'download-subtitlecat' },
+                               { name: 'Subliminal', action: 'download-subliminal' }
+                           ]
+                       },
+                       { name: '上传', action: 'upload-subtitle' }
+                   ];
+   
+                   actions.forEach(a => {
+                       if (a.submenu) {
+                           const toggle = document.createElement('div');
+                           toggle.className = 'subtitle-local-toggle'; // Re-use style
+                           toggle.textContent = a.name;
+                           
+                           const submenu = document.createElement('div');
+                           submenu.className = 'subtitle-local-submenu';
+                           submenu.style.position = 'fixed';
+                           submenu.style.display = 'none';
+   
+                           a.submenu.forEach(subItem => {
+                               const subLink = document.createElement('a');
+                               subLink.textContent = subItem.name;
+                               subLink.href = '#';
+                               subLink.onclick = (ev) => {
+                                   ev.preventDefault();
+                                   subtitleDropdownContent.classList.remove('show');
+                                   submenu.style.display = 'none';
+                                   handleSubtitleAction(subItem.action);
+                               };
+                               submenu.appendChild(subLink);
+                           });
+   
+                           subtitleDropdownContent.appendChild(toggle);
+                           document.body.appendChild(submenu);
+   
+                           const hideThisSubmenu = () => {
+                               submenu.style.display = 'none';
+                               toggle.classList.remove('open');
+                           };
+
+                           const showThisSubmenu = () => {
+                               // Position and show submenu
+                               const toggleRect = toggle.getBoundingClientRect();
+                               submenu.style.display = 'block';
+                               const submenuRect = submenu.getBoundingClientRect();
+                               const vw = window.innerWidth;
+                               
+                               let left = toggleRect.right + 8;
+                               if (left + submenuRect.width > vw) {
+                                   left = toggleRect.left - submenuRect.width - 8;
+                               }
+                               
+                               submenu.style.left = `${left}px`;
+                               submenu.style.top = `${toggleRect.top}px`;
+                               toggle.classList.add('open');
+                           };
+
+                           const actionToggleHandler = (e) => {
+                               e.preventDefault();
+                               e.stopPropagation();
+                               if (submenu.style.display === 'block') {
+                                   hideThisSubmenu();
+                                   activeSubmenuCloser = null;
+                               } else {
+                                   if (activeSubmenuCloser) {
+                                       activeSubmenuCloser();
+                                   }
+                                   showThisSubmenu();
+                                   activeSubmenuCloser = hideThisSubmenu;
+                               }
+                           };
+                           
+                           toggle.addEventListener('click', actionToggleHandler);
+   
+                       } else {
+                           const link = document.createElement('a');
+                           link.textContent = a.name;
+                           link.href = '#';
+                           link.className = 'subtitle-action-item';
+                           link.onclick = (ev) => {
+                               ev.preventDefault();
+                               subtitleDropdownContent.classList.remove('show');
+                               handleSubtitleAction(a.action);
+                           };
+                           subtitleDropdownContent.appendChild(link);
+                       }
+                   });
+   
+                   // Add a consolidated click handler to close submenus when clicking on other dropdown items
+                   document.addEventListener('click', (ev) => {
+                       if (ev.target.closest('#subtitleDropdownContent') && !ev.target.closest('.subtitle-local-toggle')) {
+                            if (activeSubmenuCloser) {
+                               activeSubmenuCloser();
+                               activeSubmenuCloser = null;
+                           }
+                       }
+                   });
+               } catch (error) {
+                   console.error('Error loading all subtitles:', error);
+                   subtitleDropdownContent.innerHTML = '';
+                   const disabled = document.createElement('a');
+                   disabled.textContent = '加载字幕失败';
+                   disabled.className = 'disabled';
+                   disabled.href = '#';
+                   disabled.onclick = (ev) => ev.preventDefault();
+                   subtitleDropdownContent.appendChild(disabled);
+               }
+           }
+   
+           // --- Conversion Modal Logic ---
+           const conversionModal = document.getElementById('conversionModal');
+           const startConversionBtn = document.getElementById('startConversionBtn');
+           const cancelConversionBtn = document.getElementById('cancelConversionBtn');
+           const modalTitle = document.getElementById('modalTitle');
+           const modalText = document.getElementById('modalText');
+           const progressContainer = document.getElementById('progressContainer');
+           const progressBar = document.getElementById('progressBar');
+           const progressInfo = document.getElementById('progressInfo');
+           const convertToMp4Btn = document.getElementById('convertToMp4Btn');
+           const modalDownloadBtn = document.getElementById('modalDownloadBtn');
+   
+           const ws = new WebSocket(`ws://${window.location.host}`);
+   
+           ws.onmessage = function(event) {
+               const data = JSON.parse(event.data);
+               if (data.type === 'progress') {
+                   progressBar.style.width = data.progress + '%';
+                   progressBar.textContent = data.progress.toFixed(2) + '%';
+                   progressInfo.textContent = `时间: ${data.time}, 速度: ${data.speed}`;
+               } else if (data.type === 'complete') {
+                   modalTitle.textContent = '转码完成!';
+                   modalText.textContent = '页面即将刷新...';
+                   setTimeout(() => {
+                       const newUrl = new URL(window.location.href);
+                       newUrl.searchParams.set('src', data.newPath);
+                       // 移除旧的 poster 和 thumbnails 参数，因为新文件可能没有这些
+                       newUrl.searchParams.delete('poster');
+                       newUrl.searchParams.delete('thumbnails');
+                       window.location.href = newUrl.href;
+                   }, 2000);
+               } else if (data.type === 'error') {
+                   modalTitle.textContent = '转码失败';
+                   modalText.textContent = data.message;
+               }
+           };
+   
+           function showConversionModal() {
+               // Reset modal state
+               modalTitle.textContent = '需要转码';
+               modalText.textContent = '此视频格式可能存在兼容性问题。是否要将其转换为 MP4？';
+               modalText.style.display = 'block';
+               document.getElementById('modalActions').style.display = 'flex';
+               document.getElementById('modalDownloadBtn').style.display = 'flex';
+               progressContainer.style.display = 'none';
+               conversionModal.style.display = 'block';
+           }
+   
+           convertToMp4Btn.addEventListener('click', () => {
+               if (confirm('确定要将此视频转换为 MP4 吗？这个过程可能需要一些时间。')) {
+                   showConversionModal();
+               }
+           });
+   
+           startConversionBtn.onclick = async () => {
+               document.getElementById('modalActions').style.display = 'none';
+               document.getElementById('modalDownloadBtn').style.display = 'none';
+               modalText.style.display = 'none';
+               progressContainer.style.display = 'block';
+               modalTitle.textContent = '正在转码...';
+   
+               await fetch('/api/convert-video', {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({
+                       mediaDir: mediaDir,
+                       relativePath: decodeURIComponent(videoSrc)
+                   })
+               });
+           };
+   
+           cancelConversionBtn.onclick = () => {
+               conversionModal.style.display = 'none';
+               // If it was an auto-popup for AVI, we might want to try playing anyway.
+               // If it was a manual click, just closing is fine.
+               if (!document.body.classList.contains('manual-conversion')) {
+                    setTempMediaDirAndPlay();
+               }
+               document.body.classList.remove('manual-conversion');
+           };
+   
+           modalDownloadBtn.onclick = () => {
+               const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
+               console.log(`Attempting to download from modal: ${fullVideoUrl}`);
+               window.open(fullVideoUrl, '_blank');
+           };
+   
+           if (videoSrc && videoSrc.toLowerCase().endsWith('.avi')) {
+               showConversionModal();
+           } else {
+               setTempMediaDirAndPlay();
+           }
+   
+           const externalPlayBtn = document.getElementById('externalPlayBtn');
+           const downloadBtn = document.getElementById('downloadBtn');
+   
+           function playVideoExternally(videoUrl) {
+               const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+   
+               if (/android/i.test(userAgent)) {
+                   const intentUrl = 'intent:' + videoUrl + '#Intent;action=android.intent.action.VIEW;type=video/*;end';
+                   window.location.href = intentUrl;
+   
+               } else if (/win/i.test(userAgent)) {
+                   window.location.href = 'potplayer://' + videoUrl;
+   
+               } else {
+                   alert('此功能目前主要支持Windows和Android设备。您的浏览器将尝试直接打开视频链接。');
+                   window.open(videoUrl, '_blank');
+               }
+           }
+   
+           externalPlayBtn.addEventListener('click', () => {
+               const fullVideoUrl = dp.video.currentSrc;
+               if (fullVideoUrl) {
+                   console.log(`Attempting to play externally: ${fullVideoUrl}`);
+                   playVideoExternally(fullVideoUrl);
+               } else {
+                   alert('无法获取当前视频的URL。');
+                   console.error('Could not get video source for external playback.');
+               }
+           });
+           
+           downloadBtn.addEventListener('click', () => {
+               const fullVideoUrl = dp.video.currentSrc;
+               if (fullVideoUrl) {
+                   console.log(`Attempting to download: ${fullVideoUrl}`);
+                   window.open(fullVideoUrl, '_blank');
+               } else {
+                   alert('无法获取当前视频的URL。');
+                   console.error('Could not get video source for download.');
+               }
+           });
+   
+          const scraperBtn = document.getElementById('scraperBtn');
+          const scraperDropdownContent = document.getElementById('scraperDropdownContent');
+   
+          scraperBtn.onclick = () => {
+              scraperDropdownContent.classList.toggle("show");
+          };
+   
+          scraperDropdownContent.addEventListener('click', (event) => {
+              if (event.target.tagName === 'A') {
+                  event.preventDefault();
+                  const type = event.target.dataset.type;
+                  scrapeVideo(type, true); // true indicates this is a manual scrape
+                  scraperDropdownContent.classList.remove('show');
+              }
+          });
+   
+          window.addEventListener('click', function(event) {
+              if (!event.target.closest('.scraper-dropdown')) {
+                  if (scraperDropdownContent.classList.contains('show')) {
+                      scraperDropdownContent.classList.remove('show');
+                  }
+              }
+          });
+   
+          async function scrapeVideo(type, isManual) {
+              const videoInfoContent = document.getElementById('videoInfoContent');
+              videoInfoContent.innerHTML = '<p>正在刮削中...</p>';
+              
+              // Determine the 'force' flag state
+              // If it's a manual scrape, always force.
+              // If it's automatic, respect the setting.
+              const forceScrape = isManual || document.getElementById('forceScrapeToggle').checked;
+   
+              try {
+                  const response = await fetch(`/api/scrape-video`, {
+                      method: 'POST',
+                      headers: {
+                          'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                          src: decodeURIComponent(videoSrc),
+                          mediaDir: mediaDir,
+                          type: type === 'auto' ? null : type,
+                          force: forceScrape
+                      })
+                  });
+   
+                  if (!response.ok) {
+                      throw new Error(`HTTP error! status: ${response.status}`);
+                  }
+   
+                  const data = await response.json();
+                  displayScrapedData(data);
+   
+              } catch (error) {
+                  console.error('Error scraping video:', error);
+                  videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${error.message}</p>`;
+              }
+          }
+   
+          function displayScrapedData(data) {
+              console.log("Received scraped data:", JSON.stringify(data, null, 2));
+              const videoInfoContent = document.getElementById('videoInfoContent');
+              if (data.错误) {
+                  videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${data.错误}</p>`;
+                  scrapedInfo = null; // Clear scraped info on error
+                  return;
+              }
+              
+              // Store the first valid result for subtitle download
+              if (data.JAV刮削结果 && data.JAV刮削结果.length > 0) {
+                  scrapedInfo = data.JAV刮削结果[0];
+              } else if (!data.JAV刮削结果) {
+                  scrapedInfo = data;
+              } else {
+                  scrapedInfo = null;
+              }
+              console.log("Stored scraped info for subtitle download:", scrapedInfo);
+     
+                 // Special handling for JAV results which is an array of sources
+                 if (data.JAV刮削结果) {
+                    let html = '';
+                    data.JAV刮削结果.forEach(sourceData => {
+                        html += '<div class="source-container">';
+                        // Use optional chaining for safety
+                        html += `<h3>${sourceData?.来源 || '未知来源'} (匹配度: ${(sourceData?.匹配度 ?? 0).toFixed(2)})</h3>`;
+                        html += buildHtml(sourceData);
+                        html += '</div>';
                     });
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                    videoInfoContent.innerHTML = html;
+                    // Try to set background from the first JAV result that has a poster
+                    const firstResultWithPoster = data.JAV刮削结果.find(r => r.海报链接 && isImageUrl(r.海报链接));
+                    if (firstResultWithPoster) {
+                        console.log("Found poster in JAV results:", firstResultWithPoster.海报链接);
+                        updateBackgroundAndTheme(firstResultWithPoster.海报链接);
+                    } else {
+                        console.log("No valid poster found in JAV results.");
                     }
-                    const result = await response.json();
-                    if (!result.success) {
-                        throw new Error(result.message || 'Failed to set temporary media directory.');
-                    }
-                    console.log('Temporary media directory set:', mediaDir);
-                } catch (error) {
-                    console.error('Error setting temporary media directory:', error);
-                    videoTitle.textContent = `视频加载失败: ${error.message}`;
-                    return; // 如果设置失败，则不播放视频
+    
+                } else {
+                    videoInfoContent.innerHTML = buildHtml(data);
+                    // Define possible keys for the poster image
+                   const posterKeys = ['海报链接', '海报路径', '封面图片链接', '封面链接', '剧集海报路径'];
+                   let posterUrl = null;
+                   for (const key of posterKeys) {
+                       if (data[key] && isImageUrl(data[key])) {
+                           posterUrl = data[key];
+                           break;
+                       }
+                   }
+   
+                   if (posterUrl) {
+                       console.log("Found poster in single result:", posterUrl);
+                       updateBackgroundAndTheme(posterUrl);
+                   } else {
+                       console.log("No valid poster found in single result data.");
+                   }
                 }
+          }
+   
+          function findBestAccentColor(palette) {
+               // Helper to convert RGB to HSL
+               function rgbToHsl(r, g, b) {
+                   r /= 255, g /= 255, b /= 255;
+                   const max = Math.max(r, g, b), min = Math.min(r, g, b);
+                   let h = 0, s = 0, l = (max + min) / 2;
+                   if (max !== min) {
+                       const d = max - min;
+                       s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                       switch (max) {
+                           case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                           case g: h = (b - r) / d + 2; break;
+                           case b: h = (r - g) / d + 4; break;
+                       }
+                       h /= 6;
+                   }
+                   return [h, s, l];
+               }
+   
+               let suitableColors = [];
+               // Start from index 1 to skip the dominant color, which is often a background color
+               for (let i = 1; i < palette.length; i++) {
+                   const color = palette[i];
+                   const [h, s, l] = rgbToHsl(color[0], color[1], color[2]);
+   
+                   // Conditions for a "good" accent color:
+                   // - Lightness should be in a pleasant range (not too dark, not pure white)
+                   // - Saturation should be decent (not grayscale)
+                   if (l > 0.55 && l < 0.9 && s > 0.3) {
+                       suitableColors.push({ color: color, s: s, l: l });
+                   }
+               }
+   
+               if (suitableColors.length > 0) {
+                   // Prefer colors with higher saturation for more vibrancy
+                   suitableColors.sort((a, b) => b.s - a.s);
+                   return suitableColors[0].color;
+               }
+   
+               // Fallback logic if no suitable color is found
+               // Return the brightest color from the palette that is not the dominant one.
+               let brightestColor = palette[1] || [200, 200, 200]; // A safe fallback
+               let maxL = 0;
+               for (let i = 1; i < palette.length; i++) {
+                   const color = palette[i];
+                   const [, , l] = rgbToHsl(color[0], color[1], color[2]);
+                   if (l > maxL) {
+                       maxL = l;
+                       brightestColor = color;
+                   }
+               }
+               return brightestColor;
+           }
+   
+          function updateBackgroundAndTheme(imageUrl) {
+               console.log('Attempting to update background and theme with image:', imageUrl);
+               const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+               console.log('Using proxy URL:', proxyUrl);
+               const playerBg = document.querySelector('.player-bg');
+               const colorThief = new ColorThief();
+               const img = new Image();
+   
+               // Set background immediately
+               playerBg.style.backgroundImage = `url('${proxyUrl}')`;
+   
+               img.onload = function() {
+                   console.log(`Image loaded successfully. Dimensions: ${this.naturalWidth}x${this.naturalHeight}. Applying theme.`);
+                   try {
+                       // Pass the loaded image object directly to ColorThief
+                       const dominantColor = colorThief.getColor(this);
+                       const palette = colorThief.getPalette(this, 5);
+                       const accentColor = findBestAccentColor(palette);
+                       console.log("Dominant color:", dominantColor, "Accent color:", accentColor);
+   
+                       // Determine text color based on the brightness of the dominant color of the background
+                       // A more robust method to determine text color based on perceived brightness (Luma)
+                       function getTextColorForBg(rgbColor) {
+                           // Formula for calculating Luma from sRGB
+                           const luma = (0.299 * rgbColor[0] + 0.587 * rgbColor[1] + 0.114 * rgbColor[2]) / 255;
+                           // Use a threshold of 0.5 - greater than 0.5 is a light color, less is a dark color.
+                           // Return black for light backgrounds, white for dark backgrounds for max contrast.
+                           const newColor = luma > 0.5 ? '#000000' : '#FFFFFF';
+                           console.log(`Color: rgb(${rgbColor.join(',')}), Luma: ${luma.toFixed(2)}, Chosen Text Color: ${newColor}`);
+                           return newColor;
+                       }
+   
+                       const newPrimaryTextColor = getTextColorForBg(dominantColor);
+                       const accentTextColor = getTextColorForBg(accentColor);
+   
+                       const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
+                           const hex = x.toString(16);
+                           return hex.length === 1 ? '0' + hex : hex;
+                       }).join('');
+                       
+                       const accentHex = rgbToHex(accentColor[0], accentColor[1], accentColor[2]);
+                       const accentHoverHex = rgbToHex(
+                           Math.min(255, accentColor[0] + 20),
+                           Math.min(255, accentColor[1] + 20),
+                           Math.min(255, accentColor[2] + 20)
+                       );
+   
+                       const accentRgb = `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`;
+   
+                       document.documentElement.style.setProperty('--primary-text', newPrimaryTextColor);
+                       document.documentElement.style.setProperty('--accent-color', accentHex);
+                       document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
+                       document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
+                       document.documentElement.style.setProperty('--accent-color-rgb', accentRgb);
+                       
+                       console.log('Theme updated successfully. New primary text:', newPrimaryTextColor, 'New accent:', accentHex);
+                   } catch (e) {
+                       console.error("ColorThief error inside onload:", e);
+                       // Restore default colors on error
+                       document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
+                       document.documentElement.style.setProperty('--accent-color', '#00bcd4');
+                       document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
+                       document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
+                   }
+               };
+               img.onerror = function(e) {
+                   console.error("Failed to load image for ColorThief via proxy. Error event:", e);
+                    // Restore default colors on error
+                   document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
+                   document.documentElement.style.setProperty('--accent-color', '#00bcd4');
+                   document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
+                   document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
+               };
+   
+               img.crossOrigin = 'Anonymous';
+               img.src = proxyUrl;
+           }
+    
+           function isImageUrl(url) {
+               if (typeof url !== 'string') return false;
+               return /\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url);
+           }
+    
+           function buildHtml(obj) {
+               const keysToSkip = ['来源', '匹配度', 'JAV刮削结果', '文件信息'];
+               let result = '<ul class="info-list">';
+               for (const key in obj) {
+                   if (obj.hasOwnProperty(key) && !keysToSkip.includes(key)) {
+                       const value = obj[key];
+                       
+                       if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+                           continue;
+                       }
+    
+                       result += `<li><strong>${key}:</strong> `;
+                       if (typeof value === 'object' && value !== null) {
+                           if (Array.isArray(value)) {
+                               if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+                                   result += '<ul class="info-list nested-list">';
+                                   value.forEach(item => {
+                                       result += '<li>' + buildHtml(item) + '</li>';
+                                   });
+                                   result += '</ul>';
+                               } else {
+                                   if (value.every(isImageUrl)) {
+                                       result += '<div class="image-gallery">';
+                                       value.forEach(imgUrl => {
+                                           const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imgUrl)}`;
+                                           result += `<a data-fancybox="gallery" data-caption="${imgUrl.split('/').pop()}" href="${proxyUrl}"><img src="${proxyUrl}" alt="sample image"></a>`;
+                                       });
+                                       result += '</div>';
+                                   } else {
+                                       result += `<span>${value.join(', ')}</span>`;
+                                   }
+                               }
+                           } else {
+                               result += buildHtml(value);
+                           }
+                       } else {
+                           if (isImageUrl(value)) {
+                               const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(value)}`;
+                               result += `<div class="image-container"><a data-fancybox="gallery" data-caption="${key}" href="${proxyUrl}"><img src="${proxyUrl}" alt="cover image"></a></div>`;
+                           } else if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
+                               result += `<a href="${value}" target="_blank">${value}</a>`;
+                           } else {
+                               result += `<span>${value}</span>`;
+                           }
+                       }
+                       result += '</li>';
+                   }
+               }
+               result += '</ul>';
+               return result;
+           }
+   
+           function handleSubtitleAction(action) {
+                if (action === 'upload-subtitle') {
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = '.srt,.ass,.vtt';
+                    fileInput.style.display = 'none';
+
+                    fileInput.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) {
+                            if (document.body.contains(fileInput)) {
+                                document.body.removeChild(fileInput);
+                            }
+                            return;
+                        }
+
+                        // Open panel and show message
+                        setupChatPanel('subtitle', { method: 'upload' });
+                        chatTitle.textContent = '上传字幕';
+                        chatInput.style.display = 'none';
+                        sendChatBtn.style.display = 'none';
+                        playerContainer.classList.add('chat-mode');
+                        const uploadMessage = addChatMessage(`正在上传并转换 ${file.name}...`, 'bot');
+
+                        const formData = new FormData();
+                        formData.append('subtitle', file);
+
+                        try {
+                            const response = await fetch('/api/upload-subtitle', {
+                                method: 'POST',
+                                body: formData,
+                            });
+
+                            const result = await response.json();
+                            uploadMessage.remove();
+
+                            if (result.success) {
+                                addChatMessage(`字幕 '${result.filename}' 上传成功！列表已刷新。此面板将在2秒后关闭。`, 'bot');
+                                await loadAllSubtitles();
+                                setTimeout(() => {
+                                    playerContainer.classList.remove('chat-mode');
+                                }, 2000);
+                            } else {
+                                throw new Error(result.message || '上传失败。');
+                            }
+                        } catch (error) {
+                            uploadMessage.remove();
+                            addChatMessage(`上传失败: ${error.message}<br><button class="chat-cancel-btn" onclick="cancelAndExitChat()">关闭</button>`, 'error');
+                            console.error('Error uploading subtitle:', error);
+                        } finally {
+                             if (document.body.contains(fileInput)) {
+                                document.body.removeChild(fileInput);
+                             }
+                        }
+                    };
+
+                    document.body.appendChild(fileInput);
+                    fileInput.click();
+                    document.getElementById('subtitleDropdownContent').classList.remove('show');
+                    return;
+                }
+
+               // Always open the chat panel for subtitle actions
+               setupChatPanel('subtitle', { method: action });
+               playerContainer.classList.add('chat-mode');
+
+               if (action === 'download-subtitlecat') {
+                   // The default chat flow will handle this
+               } else if (action === 'download-subliminal') {
+                   handleSubliminalDownload();
+               } else {
+                   addChatMessage(`功能 '${action}' 尚未实现。`, 'error');
+               }
+           }
+
+           // Helper function to recursively find IMDb ID in scraped data
+           function findImdbId(data) {
+               if (!data || typeof data !== 'object') return null;
+               for (const key in data) {
+                   if (Object.prototype.hasOwnProperty.call(data, key)) {
+                       const value = data[key];
+                       if (typeof value === 'string' && key.toLowerCase().includes('imdb') && value.startsWith('tt')) {
+                           const match = value.match(/(tt\d+)/);
+                           if (match) return match[1];
+                       }
+                       if (typeof value === 'object') {
+                           const result = findImdbId(value);
+                           if (result) return result;
+                       }
+                   }
+               }
+               return null;
+           }
+
+           // Helper function to find a title in scraped data
+           function findTitle(data) {
+               if (!data || typeof data !== 'object') return null;
+               const titleKeys = ['title', '标题', '名称', 'Title'];
+               for (const key of titleKeys) {
+                   if (data[key] && typeof data[key] === 'string') {
+                       return data[key];
+                   }
+               }
+                // Fallback for nested JAV results
+               if (Array.isArray(data.JAV刮削结果) && data.JAV刮削结果.length > 0) {
+                   return findTitle(data.JAV刮削结果[0]);
+               }
+               return null;
+           }
+
+           function handleSubliminalDownload() {
+               subtitleChatState = 'waiting_subliminal_confirmation';
+               chatInput.style.display = 'none'; // Hide input for this flow
+               sendChatBtn.style.display = 'none';
+
+               if (!scrapedInfo) {
+                   addChatMessage('使用 Subliminal 需要先刮削视频信息。<br>请点击魔法棒图标进行刮削。', 'error');
+                   return;
+               }
+
+               const imdbId = findImdbId(scrapedInfo);
+               const title = findTitle(scrapedInfo) || videoTitle.textContent; // Fallback to file title
+
+               if (!imdbId) {
+                   addChatMessage('刮削信息中未找到 IMDb ID，无法使用 Subliminal 下载。', 'error');
+                   return;
+               }
+               
+               const escapedTitle = title.replace(/'/g, "\\'").replace(/"/g, '"');
+               const escapedImdbId = imdbId.replace(/'/g, "\\'");
+
+               let confirmationHtml = `将使用以下刮削信息下载字幕：<br>
+                   <ul>
+                       <li><strong>标题:</strong> ${title}</li>
+                       <li><strong>IMDb ID:</strong> ${imdbId}</li>
+                   </ul>
+                   <div>
+                       <button class="chat-confirm-btn" onclick="proceedWithSubliminalDownload('${escapedTitle}', '${escapedImdbId}')">确认</button>
+                       <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>
+                   </div>`;
+               addChatMessage(confirmationHtml, 'bot');
+           }
+
+           async function proceedWithSubliminalDownload(title, imdbId) {
+               // Disable buttons after click
+               document.querySelectorAll('.chat-confirmation-buttons button').forEach(btn => btn.disabled = true);
+               
+               const downloadMessage = addChatMessage('正在下载字幕，请稍候... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+
+               currentFetchController = new AbortController();
+               try {
+                   const response = await fetch('/api/download-subtitle', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           method: 'subliminal',
+                           title: title,
+                           imdb_id: imdbId
+                       }),
+                       signal: currentFetchController.signal
+                   });
+                   const result = await response.json();
+                   downloadMessage.remove();
+
+                   if (result.success) {
+                       addChatMessage('字幕下载成功！列表已刷新。此面板将在2秒后关闭。', 'bot');
+                       await loadAllSubtitles(); // Refresh the main subtitle list
+                       setTimeout(() => {
+                            playerContainer.classList.remove('chat-mode');
+                       }, 2000);
+                   } else {
+                       addChatMessage(`下载失败: ${result.message || result.details || '未知错误'}`, 'error');
+                       resetSubtitleChat(); // Reset only on actual error
+                   }
+               } catch (error) {
+                   downloadMessage.remove();
+                   if (error.name === 'AbortError') {
+                       console.log('Subliminal download aborted by user.');
+                   } else {
+                       console.error('Error downloading with Subliminal:', error);
+                       addChatMessage(`下载过程中发生网络错误: ${error.message}`, 'error');
+                       resetSubtitleChat(); // Reset only on actual error
+                   }
+               } finally {
+                   currentFetchController = null;
+               }
+           }
+   
+           // --- Settings Modal Logic ---
+           const settingsBtn = document.getElementById('settingsBtn');
+           const settingsModal = document.getElementById('settingsModal');
+           const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+           const autoScrapeToggle = document.getElementById('autoScrapeToggle');
+           const forceScrapeToggle = document.getElementById('forceScrapeToggle');
+   
+           function saveSettings() {
+               localStorage.setItem('settings_autoScrape', autoScrapeToggle.checked);
+               localStorage.setItem('settings_forceScrape', forceScrapeToggle.checked);
+           }
+   
+           function loadSettings() {
+               const autoScrape = localStorage.getItem('settings_autoScrape');
+               const forceScrape = localStorage.getItem('settings_forceScrape');
+   
+               autoScrapeToggle.checked = autoScrape === null ? true : autoScrape === 'true';
+               forceScrapeToggle.checked = forceScrape === 'true';
+           }
+   
+           settingsBtn.onclick = () => {
+               settingsModal.style.display = 'block';
+           };
+   
+           closeSettingsBtn.onclick = () => {
+               settingsModal.style.display = 'none';
+           };
+   
+           autoScrapeToggle.onchange = saveSettings;
+           forceScrapeToggle.onchange = saveSettings;
+   
+           window.addEventListener('click', (event) => {
+               if (event.target == settingsModal) {
+                   settingsModal.style.display = 'none';
+               }
+           });
+   
+           loadSettings();
+           
+           // --- Unified Chat Panel Logic ---
+            const semanticSearchBtn = document.getElementById('semanticSearchBtn');
+            const playerContainer = document.querySelector('.player-container');
+            const chatPanel = document.querySelector('.chat-panel');
+            const chatTitle = document.getElementById('chatTitle');
+            const chatMessages = document.getElementById('chatMessages');
+            const chatInput = document.getElementById('chatInput');
+            const sendChatBtn = document.getElementById('sendChatBtn');
+            const closeChatBtn = document.getElementById('closeChatBtn');
+
+            let currentChatMode = 'none'; // 'semantic' or 'subtitle'
+            
+            // State for subtitle download
+            let subtitleChatState = 'idle'; // idle, waiting_movie_selection, waiting_lang_selection, waiting_subliminal_confirmation
+            let movieCandidates = [];
+            let languageCandidates = [];
+            let selectedMovie = {};
+            let subtitleDownloadMethod = 'download-subtitlecat'; // Default value
+            let currentFetchController = null; // To control cancellable fetches
+
+            function cancelCurrentDownload() {
+               if (currentFetchController) {
+                   currentFetchController.abort();
+                   currentFetchController = null;
+               }
             }
 
-            if (videoSrc) {
-                const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
+            function cancelAndExitChat() {
+               cancelCurrentDownload();
+               resetSubtitleChat(false); // Reset state without showing a message
+               currentChatMode = 'none'; // Fully exit the mode
+               playerContainer.classList.remove('chat-mode'); // Close the panel
+            }
 
-                decodedVideoSrc = decodeURIComponent(videoSrc); // 赋值给全局变量
-                const subtitleResponse = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
-                const subtitleData = await subtitleResponse.json();
-                console.log('Received subtitle data from server:', subtitleData);
+            function setupChatPanel(mode, initialData = {}) {
+                currentChatMode = mode;
+                chatMessages.innerHTML = ''; // Clear messages
+                chatInput.disabled = false;
+                sendChatBtn.disabled = false;
 
-                dpOptions = {
-                    container: document.getElementById('dplayer'),
-                    video: {
-                        url: fullVideoUrl,
-                        playsinline: true,
-                        'webkit-playsinline': true
-                    },
-                    autoplay: true,
-                    theme: 'var(--accent-color)',
-                    lang: 'zh-cn',
-                    hotkey: true,
-                    screenshot: true,
-                    playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
-                    loop: false,
-                };
-
-                const poster = urlParams.get('poster');
-                if (poster) {
-                    dpOptions.video.pic = poster;
-                }
-
-                const thumbnails = urlParams.get('thumbnails');
-                if (thumbnails) {
-                    dpOptions.video.thumbnails = thumbnails;
-                }
-
-                if (subtitleData.success && subtitleData.subtitles.length > 0) {
-                    const subtitleUrl = subtitleData.subtitles[0].url;
-                    let fullSubtitleUrl;
-                    if (mediaDir) {
-                        const separator = subtitleUrl.includes('?') ? '&' : '?';
-                        fullSubtitleUrl = `${subtitleUrl}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
+                if (mode === 'semantic') {
+                    chatTitle.textContent = '语义搜索';
+                    chatInput.placeholder = '输入搜索内容...';
+                    chatInput.style.display = 'block';
+                    sendChatBtn.style.display = 'block';
+                    addChatMessage('你好！输入文本可以搜索视频内容。', 'bot');
+                } else if (mode === 'subtitle') {
+                    const methodName = initialData.method === 'download-subtitlecat' ? 'Subtitlecat' : 'Subliminal';
+                    chatTitle.textContent = `下载字幕 (${methodName})`;
+                    
+                    if (initialData.method === 'download-subtitlecat') {
+                       chatInput.placeholder = '输入影视名称...';
+                       chatInput.style.display = 'block';
+                       sendChatBtn.style.display = 'block';
+                       addChatMessage(`你好！我将引导你从 <strong>${methodName}</strong> 下载字幕。<br>请输入影视名称进行搜索。`, 'bot');
                     } else {
-                        fullSubtitleUrl = subtitleUrl;
+                       // For subliminal, we don't need the input at the start
+                       chatInput.style.display = 'none';
+                       sendChatBtn.style.display = 'none';
                     }
                     
-                    console.log('Subtitle URL:', fullSubtitleUrl);
-                    dpOptions.subtitle = {
-                        url: fullSubtitleUrl,
-                        type: 'webvtt',
-                        fontSize: '2vw',
-                        fontfamily: 'Noto Sans SC, sans-serif',
-                        background:'rgba(0, 0, 0, 0.5)',
-                        bottom: '5%',
-                        color: '#FFFFFF'
-                    };
+                    subtitleChatState = 'idle';
+                    subtitleDownloadMethod = initialData.method; // Store the selected method
                 }
+            }
 
-                async function checkAndLoadScrapedInfo() {
-                    try {
-                        const response = await fetch(`/api/check-scraped-info`, {
+            semanticSearchBtn.addEventListener('click', () => {
+                // If the panel is closed and no mode is active, set it to semantic search.
+                if (!playerContainer.classList.contains('chat-mode') && currentChatMode === 'none') {
+                    setupChatPanel('semantic');
+                }
+                // Always toggle the panel's visibility.
+                playerContainer.classList.toggle('chat-mode');
+            });
+            
+            closeChatBtn.addEventListener('click', () => {
+                playerContainer.classList.remove('chat-mode');
+            });
+   
+           function addChatMessage(message, type, isHtml = true) {
+               const messageEl = document.createElement('div');
+               messageEl.className = `chat-message ${type}-message`;
+               if (isHtml) {
+                   messageEl.innerHTML = message;
+               } else {
+                   messageEl.textContent = message;
+               }
+               chatMessages.appendChild(messageEl);
+               chatMessages.scrollTop = chatMessages.scrollHeight;
+               return messageEl; // Return the element so it can be removed later
+           }
+   
+           function timeStringToSeconds(timeStr) {
+               const parts = timeStr.split(':');
+               const secondsParts = parts[2].split('.');
+               const hours = parseInt(parts[0], 10);
+               const minutes = parseInt(parts[1], 10);
+               const seconds = parseInt(secondsParts[0], 10);
+               const milliseconds = parseInt(secondsParts[1], 10);
+               return (hours * 3600) + (minutes * 60) + seconds + (milliseconds / 1000);
+           }
+
+           async function handleChatInput() {
+               const inputText = chatInput.value.trim();
+               if (!inputText) return;
+
+               if (currentChatMode === 'semantic') {
+                   await handleSemanticSearch(inputText);
+               } else if (currentChatMode === 'subtitle') {
+                   await handleSubtitleSearch(inputText);
+               }
+           }
+   
+           async function handleSemanticSearch(inputText) {
+               if (inputText === '/clc') {
+                   // Keep the first child (welcome message) and remove the rest
+                   while (chatMessages.children.length > 1) {
+                       chatMessages.removeChild(chatMessages.lastChild);
+                   }
+                   chatInput.value = ''; // Clear input
+                   return;
+               }
+
+               if (!currentSubtitleUrl) {
+                   addChatMessage('错误：未加载字幕文件，无法进行搜索。', 'error');
+                   return;
+               }
+
+               addChatMessage(inputText, 'user', false);
+               chatInput.value = '';
+               addChatMessage('正在搜索中...', 'bot');
+
+               let query = inputText;
+               const params = { vtt_file: currentSubtitleUrl, mediaDir: mediaDir };
+
+               if (inputText.startsWith('/s ')) {
+                   const parts = inputText.substring(3).split(' -');
+                   query = parts[0].trim();
+                   for (let i = 1; i < parts.length; i++) {
+                       const [key, ...valueParts] = parts[i].split(' ');
+                       const value = valueParts.join(' ');
+                       if (['score', 'rerank', 'top', 'rebuild', 'gap', 'len'].includes(key)) {
+                            const paramKey = { score: 'min_score', rerank: 'rerank', top: 'top_n_retrieval', rebuild: 'force_rebuild', gap: 'max_gap_seconds', len: 'max_chunk_length' }[key];
+                            params[paramKey] = value;
+                       }
+                   }
+               }
+               params.query = query;
+
+               const queryString = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+
+               try {
+                   const response = await fetch(`/api/semantic-search?${queryString}`);
+                   const results = await response.json();
+                   
+                   chatMessages.lastChild.remove(); // Remove "searching..."
+   
+                   if (results.error) throw new Error(results.error);
+   
+                   if (results.length === 0) {
+                       addChatMessage('没有找到相关的结果。', 'bot');
+                   } else {
+                       let resultsHtml = '找到了以下结果：<ul>';
+                       results.forEach(r => {
+                           const seconds = timeStringToSeconds(r.start);
+                           resultsHtml += `<li class="search-result-item" onclick="dp.seek(${seconds})">
+                               <span class="timestamp">[${r.start}]</span>
+                               <span>${r.text} (相似度: ${r.score.toFixed(2)})</span>
+                           </li>`;
+                       });
+                       resultsHtml += '</ul>';
+                       addChatMessage(resultsHtml, 'bot');
+                   }
+               } catch (error) {
+                   console.error('Semantic search error:', error);
+                   if (chatMessages.lastChild && chatMessages.lastChild.textContent.includes('正在搜索中')) {
+                       chatMessages.lastChild.remove();
+                   }
+                   addChatMessage(`搜索失败: ${error.message}`, 'error');
+               }
+           }
+
+           async function handleSubtitleSearch(inputText) {
+                addChatMessage(inputText, 'user', false);
+                chatInput.value = '';
+                chatInput.disabled = true;
+                sendChatBtn.disabled = true;
+
+                try {
+                    if (subtitleChatState === 'idle') {
+                        const searchMessage = addChatMessage('正在搜索影视... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+                        currentFetchController = new AbortController();
+                        const response = await fetch('/api/subtitle/search', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                src: decodeURIComponent(videoSrc),
-                                mediaDir: mediaDir
-                            })
+                                title: inputText,
+                                method: subtitleDownloadMethod // Pass the selected method to the backend
+                            }),
+                            signal: currentFetchController.signal
                         });
-                        const data = await response.json();
+                        const result = await response.json();
+                        searchMessage.remove();
 
-                        if (data && data.status !== 'not_found') {
-                            console.log('Found cached info, displaying it.');
-                            displayScrapedData(data);
+                        if (result.success && result.results.length > 0) {
+                            movieCandidates = result.results;
+                            let responseHtml = '找到了以下结果，请选择一个：<ul class="chat-selection-list">';
+                            movieCandidates.forEach((movie, index) => {
+                                responseHtml += `<li><button onclick="selectMovieCandidate(${index})">${movie.title}</button></li>`;
+                            });
+                            responseHtml += '</ul><button class="chat-cancel-btn" onclick="resetSubtitleChat()">重新搜索</button><button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>';
+                            addChatMessage(responseHtml, 'bot');
+                            subtitleChatState = 'waiting_movie_selection';
                         } else {
-                            console.log('No cached info found.');
-                            // If no cache, then check auto-scrape setting
-                            if (document.getElementById('autoScrapeToggle').checked) {
-                                console.log('Auto-scraping enabled, starting network scrape.');
-                                scrapeVideo('auto', false); // false indicates this is not a manual scrape
-                            }
+                            addChatMessage(`未找到关于 "${inputText}" 的结果。请重新输入。`, 'bot');
                         }
-                    } catch (error) {
-                        console.error('Error checking for scraped info:', error);
-                        // Fallback to default behavior if check fails
-                        if (document.getElementById('autoScrapeToggle').checked) {
-                            scrapeVideo('auto', false);
-                        }
-                    }
-                }
-
-                function initDPlayer() {
-                    dp = new DPlayer(dpOptions);
-                    bindDPlayerEvents(dp);
-                    loadAllSubtitles();
-                    checkAndLoadScrapedInfo(); // Replace the original auto-scrape logic
-                    // Set background image only if we don't already have one from scraping
-                    const albumCover = urlParams.get('poster');
-                    const playerBg = document.querySelector('.player-bg');
-                    if (albumCover && (!playerBg.style.backgroundImage || playerBg.style.backgroundImage === 'none' || playerBg.style.backgroundImage === '')) {
-                        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(albumCover)}`;
-                        playerBg.style.backgroundImage = `url('${proxyUrl}')`;
-                    }
-                }
-
-                const subtitleBtn = document.getElementById('subtitleBtn');
-                const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
-
-                subtitleBtn.onclick = () => {
-                    subtitleDropdownContent.classList.toggle("show");
-                };
-
-                window.onclick = function(event) {
-                    if (!event.target.closest('.subtitle-dropdown')) {
-                        if (subtitleDropdownContent.classList.contains('show')) {
-                            subtitleDropdownContent.classList.remove('show');
-                        }
-                    }
-                }
-
-                initDPlayer();
-
-            } else {
-                videoTitle.textContent = '未找到视频源';
-            }
-        }
-
-        async function loadAllSubtitles() {
-            const subtitleDropdown = document.querySelector('.subtitle-dropdown');
-            const subtitleDropdownContent = document.getElementById('subtitleDropdownContent');
-            try {
-                const response = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}&all=true`);
-                const data = await response.json();
-                subtitleDropdownContent.innerHTML = '';
-                // 关闭字幕项
-                const offOption = document.createElement('a');
-                offOption.textContent = '关闭字幕';
-                offOption.href = '#';
-                offOption.onclick = (ev) => {
-                    ev.preventDefault();
-                    if (dp && dp.subtitle) {
-                        dp.subtitle.hide();
-                    }
-                    subtitleDropdownContent.classList.remove('show');
-                };
-                subtitleDropdownContent.appendChild(offOption);
-
-                const subtitles = (data && Array.isArray(data.subtitles)) ? data.subtitles : [];
-
-                const isLocalSubtitle = (sub) => {
-                    if (!sub || !sub.url) return false;
-                    const u = sub.url;
-                    return u.startsWith('/') || u.startsWith('./') || u.startsWith('file:') || !/^https?:\/\//i.test(u);
-                };
-
-                const localSubs = subtitles.filter(isLocalSubtitle);
-                const remoteSubs = subtitles.filter(s => !isLocalSubtitle(s));
-
-                // 同文件夹字幕：标题（可点击） + 浮动子菜单（右侧弹出，类似 Windows 右键菜单）
-                const localToggle = document.createElement('div');
-                localToggle.className = 'subtitle-local-toggle';
-                localToggle.tabIndex = 0;
-                localToggle.setAttribute('role', 'button');
-                localToggle.textContent = '本地字幕';
-
-                // 浮动子菜单（默认隐藏），追加到 document.body，避免被下拉容器裁剪
-                const localSubmenu = document.createElement('div');
-                localSubmenu.className = 'subtitle-local-submenu';
-                localSubmenu.style.position = 'fixed';
-                localSubmenu.style.display = 'none';
-                localSubmenu.setAttribute('role', 'menu');
-                localSubmenu.setAttribute('aria-hidden', 'true');
-
-                if (localSubs.length > 0) {
-                    localSubs.forEach(sub => {
-                        const link = document.createElement('a');
-                        link.textContent = sub.name || (sub.url ? sub.url.split('/').pop() : '本地字幕');
-                        link.href = '#';
-                        link.setAttribute('role', 'menuitem');
-                        link.onclick = (ev) => {
-                            ev.preventDefault();
-                            let fullSubtitleUrl = sub.url;
-                            if (mediaDir) {
-                                try {
-                                    const url = new URL(sub.url, window.location.origin);
-                                    url.searchParams.set('mediaDir', mediaDir);
-                                    fullSubtitleUrl = url.toString();
-                                } catch (e) {
-                                    const separator = sub.url.includes('?') ? '&' : '?';
-                                    fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-                                }
-                            }
-                            console.log(`Switching to local subtitle: ${fullSubtitleUrl}`);
-                            const subtitleOptions = {
-                                type: 'webvtt',
-                                fontSize: '2vw',
-                                fontfamily: 'Noto Sans SC, sans-serif',
-                                background:'rgba(0, 0, 0, 0.5)',
-                                bottom: '5%',
-                                color: '#FFFFFF'
-                            };
-                            if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
-                                dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
-                            } else if (dp) {
-                                const currentTime = dp.video.currentTime;
-                                const wasPaused = dp.video.paused;
-                                dp.destroy();
-                                dpOptions.subtitle = { ...subtitleOptions, url: fullSubtitleUrl };
-                                dp = new DPlayer(dpOptions);
-                                bindDPlayerEvents(dp);
-                                dp.on('loadeddata', () => {
-                                    dp.seek(currentTime);
-                                    if (!wasPaused) dp.play();
-                                });
-                            }
-                            // 隐藏下拉与子菜单
-                            subtitleDropdownContent.classList.remove('show');
-                            hideLocalSubmenu();
-                        };
-                        localSubmenu.appendChild(link);
-                    });
-                } else {
-                    const disabled = document.createElement('a');
-                    disabled.textContent = '无同文件夹字幕';
-                    disabled.className = 'disabled';
-                    disabled.href = '#';
-                    disabled.onclick = (ev) => ev.preventDefault();
-                    localSubmenu.appendChild(disabled);
-                }
-
-                function hideLocalSubmenu() {
-                    if (localSubmenu && localSubmenu.style) {
-                        localSubmenu.style.display = 'none';
-                        localSubmenu.setAttribute('aria-hidden', 'true');
-                    }
-                    localToggle.classList.remove('open');
-                }
-
-                function showLocalSubmenu() {
-                    // 确保父下拉处于打开状态（移动端需要）
-                    subtitleDropdownContent.classList.add('show');
-
-                    // 确保 submenu 在 DOM 中以便测量
-                    if (!document.body.contains(localSubmenu)) {
-                        document.body.appendChild(localSubmenu);
-                    }
-
-                    // 以不可见但可测量方式显示
-                    localSubmenu.style.display = 'block';
-                    localSubmenu.style.visibility = 'hidden';
-                    localSubmenu.setAttribute('aria-hidden', 'false');
-
-                    // 测量尺寸
-                    const submenuRect = localSubmenu.getBoundingClientRect();
-                    const submenuW = submenuRect.width || localSubmenu.offsetWidth;
-                    const submenuH = submenuRect.height || localSubmenu.offsetHeight;
-
-                    const toggleRect = localToggle.getBoundingClientRect();
-                    const vw = window.innerWidth || document.documentElement.clientWidth;
-                    const vh = window.innerHeight || document.documentElement.clientHeight;
-
-                    // 可用空间
-                    const spaceRight = vw - toggleRect.right;
-                    const spaceLeft = toggleRect.left;
-                    const spaceBottom = vh - toggleRect.bottom;
-                    const spaceTop = toggleRect.top;
-
-                    const margin = 8;
-                    let top = 0;
-                    let left = 0;
-
-                    // 优先右侧，其次左侧，其次下方，其次上方
-                    if (spaceRight >= submenuW + margin) {
-                        left = Math.min(vw - submenuW - margin, toggleRect.right + margin);
-                        // try align top with toggle top, but keep within viewport
-                        top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
-                    } else if (spaceLeft >= submenuW + margin) {
-                        left = Math.max(margin, toggleRect.left - submenuW - margin);
-                        top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
-                    } else if (spaceBottom >= submenuH + margin) {
-                        top = Math.min(vh - submenuH - margin, toggleRect.bottom + margin);
-                        left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
-                    } else if (spaceTop >= submenuH + margin) {
-                        top = Math.max(margin, toggleRect.top - submenuH - margin);
-                        left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
-                    } else {
-                        // 都不足：尽量展示并做边界修正
-                        left = Math.min(Math.max(margin, toggleRect.left), vw - submenuW - margin);
-                        top = Math.min(Math.max(margin, toggleRect.top), vh - submenuH - margin);
-                    }
-
-                    // 最终应用位置（fixed 相对于视口）
-                    localSubmenu.style.left = `${Math.round(left)}px`;
-                    localSubmenu.style.top = `${Math.round(top)}px`;
-                    localSubmenu.style.visibility = 'visible';
-                    localSubmenu.style.display = 'block';
-                    localToggle.classList.add('open');
-
-                    // 保证 toggle 在可见区域（移动设备上可能需要滚动以使 toggle 可见）
-                    try {
-                        localToggle.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
-                    } catch (e) { /* ignore */ }
-                }
-
-                // 点击标题显示/隐藏浮动子菜单，并在移动端支持 touchstart
-                const toggleHandler = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (localSubmenu.style.display === 'block') {
-                        hideLocalSubmenu();
-                    } else {
-                        showLocalSubmenu();
-                    }
-                };
-
-                localToggle.addEventListener('click', toggleHandler);
-                localToggle.addEventListener('touchstart', (ev) => {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    // 直接切换，避免 click/touch 顺序问题
-                    if (localSubmenu.style.display === 'block') hideLocalSubmenu(); else showLocalSubmenu();
-                }, { passive: false });
-
-                localToggle.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        localToggle.click();
-                    }
-                });
-
-                // 将父项加入下拉容器（子菜单不再作为下拉容器的子元素）
-                subtitleDropdownContent.appendChild(localToggle);
-
-                // 点击下拉外部或选择其他项时隐藏浮动子菜单
-                document.addEventListener('click', (ev) => {
-                    if (!ev.target.closest('.subtitle-dropdown') &&
-                        !ev.target.closest('.subtitle-local-submenu') &&
-                        !ev.target.closest('.subtitle-local-toggle')) {
-                        hideLocalSubmenu();
-                    }
-                });
-
-                // 隐藏在窗口变化、滚动或方向变更时，避免位置不可见
-                const hideOnWindowChange = () => hideLocalSubmenu();
-                window.addEventListener('resize', hideOnWindowChange);
-                window.addEventListener('orientationchange', hideOnWindowChange);
-                window.addEventListener('scroll', hideOnWindowChange, true); // 捕获模式，处理容器滚动
-
-                // 监听下拉容器 class 变化：当主下拉被关闭时同时隐藏浮动子菜单
-                const mo = new MutationObserver(() => {
-                    if (!subtitleDropdownContent.classList.contains('show')) {
-                        hideLocalSubmenu();
-                    }
-                });
-                mo.observe(subtitleDropdownContent, { attributes: true, attributeFilter: ['class'] });
-
-                // 其他来源字幕（保持原有逻辑）
-                if (remoteSubs.length > 0) {
-                    const remoteHeader = document.createElement('div');
-                    remoteHeader.className = 'subtitle-section-header';
-                    remoteHeader.textContent = '其他字幕来源';
-                    subtitleDropdownContent.appendChild(remoteHeader);
-
-                    remoteSubs.forEach(sub => {
-                        const link = document.createElement('a');
-                        link.textContent = sub.name || sub.url;
-                        link.href = '#';
-                        link.onclick = (ev) => {
-                            ev.preventDefault();
-                            let fullSubtitleUrl = sub.url;
-                            if (mediaDir) {
-                                try {
-                                    const url = new URL(sub.url, window.location.origin);
-                                    url.searchParams.set('mediaDir', mediaDir);
-                                    fullSubtitleUrl = url.toString();
-                                } catch (e) {
-                                    const separator = sub.url.includes('?') ? '&' : '?';
-                                    fullSubtitleUrl = `${sub.url}${separator}mediaDir=${encodeURIComponent(mediaDir)}`;
-                                }
-                            }
-                            console.log(`Switching to remote subtitle: ${fullSubtitleUrl}`);
-                            const subtitleOptions = {
-                                type: 'webvtt',
-                                fontSize: '2vw',
-                                fontfamily: 'Noto Sans SC, sans-serif',
-                                background:'rgba(0, 0, 0, 0.5)',
-                                bottom: '5%',
-                                color: '#FFFFFF'
-                            };
-                            if (dp && dp.subtitle && typeof dp.subtitle.switch === 'function') {
-                                dp.subtitle.switch(fullSubtitleUrl, subtitleOptions);
-                            } else if (dp) {
-                                const currentTime = dp.video.currentTime;
-                                const wasPaused = dp.video.paused;
-                                dp.destroy();
-                                dpOptions.subtitle = { ...subtitleOptions, url: fullSubtitleUrl };
-                                dp = new DPlayer(dpOptions);
-                                bindDPlayerEvents(dp);
-                                dp.on('loadeddata', () => {
-                                    dp.seek(currentTime);
-                                    if (!wasPaused) dp.play();
-                                });
-                            }
-                            subtitleDropdownContent.classList.remove('show');
-                        };
-                        subtitleDropdownContent.appendChild(link);
-                    });
-                }
-
-                // 操作项占位（保持原有逻辑）
-                const actionsHeader = document.createElement('div');
-                actionsHeader.className = 'subtitle-section-header';
-                //actionsHeader.textContent = '操作';
-                //subtitleDropdownContent.appendChild(actionsHeader);
-
-                const actions = [
-                    { name: '本地转录', action: 'local-transcribe' },
-                    {
-                        name: '联网下载',
-                        action: 'download-online',
-                        submenu: [
-                            { name: 'Subtitlecat', action: 'download-subtitlecat' },
-                            { name: 'Subliminal', action: 'download-subliminal' }
-                        ]
-                    },
-                    { name: '上传', action: 'upload-subtitle' }
-                ];
-
-                actions.forEach(a => {
-                    if (a.submenu) {
-                        const toggle = document.createElement('div');
-                        toggle.className = 'subtitle-local-toggle'; // Re-use style
-                        toggle.textContent = a.name;
-                        
-                        const submenu = document.createElement('div');
-                        submenu.className = 'subtitle-local-submenu';
-                        submenu.style.position = 'fixed';
-                        submenu.style.display = 'none';
-
-                        a.submenu.forEach(subItem => {
-                            const subLink = document.createElement('a');
-                            subLink.textContent = subItem.name;
-                            subLink.href = '#';
-                            subLink.onclick = (ev) => {
-                                ev.preventDefault();
-                                subtitleDropdownContent.classList.remove('show');
-                                submenu.style.display = 'none';
-                                handleSubtitleAction(subItem.action);
-                            };
-                            submenu.appendChild(subLink);
-                        });
-
-                        subtitleDropdownContent.appendChild(toggle);
-                        document.body.appendChild(submenu);
-
-                        toggle.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (submenu.style.display === 'block') {
-                                submenu.style.display = 'none';
-                            } else {
-                                // Position and show submenu (logic adapted from local subs)
-                                const toggleRect = toggle.getBoundingClientRect();
-                                submenu.style.display = 'block';
-                                const submenuRect = submenu.getBoundingClientRect();
-                                const vw = window.innerWidth;
-                                
-                                let left = toggleRect.right + 8;
-                                if (left + submenuRect.width > vw) {
-                                    left = toggleRect.left - submenuRect.width - 8;
-                                }
-                                
-                                submenu.style.left = `${left}px`;
-                                submenu.style.top = `${toggleRect.top}px`;
-                            }
-                        });
-                        
-                        document.addEventListener('click', (ev) => {
-                            if (!ev.target.closest('.subtitle-local-toggle') && !ev.target.closest('.subtitle-local-submenu')) {
-                                submenu.style.display = 'none';
-                            }
-                        });
-
-                    } else {
-                        const link = document.createElement('a');
-                        link.textContent = a.name;
-                        link.href = '#';
-                        link.className = 'subtitle-action-item';
-                        link.onclick = (ev) => {
-                            ev.preventDefault();
-                            subtitleDropdownContent.classList.remove('show');
-                            handleSubtitleAction(a.action);
-                        };
-                        subtitleDropdownContent.appendChild(link);
-                    }
-                });
-
-            } catch (error) {
-                console.error('Error loading all subtitles:', error);
-                subtitleDropdownContent.innerHTML = '';
-                const disabled = document.createElement('a');
-                disabled.textContent = '加载字幕失败';
-                disabled.className = 'disabled';
-                disabled.href = '#';
-                disabled.onclick = (ev) => ev.preventDefault();
-                subtitleDropdownContent.appendChild(disabled);
-            }
-        }
-
-        // --- Conversion Modal Logic ---
-        const conversionModal = document.getElementById('conversionModal');
-        const startConversionBtn = document.getElementById('startConversionBtn');
-        const cancelConversionBtn = document.getElementById('cancelConversionBtn');
-        const modalTitle = document.getElementById('modalTitle');
-        const modalText = document.getElementById('modalText');
-        const progressContainer = document.getElementById('progressContainer');
-        const progressBar = document.getElementById('progressBar');
-        const progressInfo = document.getElementById('progressInfo');
-        const convertToMp4Btn = document.getElementById('convertToMp4Btn');
-        const modalDownloadBtn = document.getElementById('modalDownloadBtn');
-
-        const ws = new WebSocket(`ws://${window.location.host}`);
-
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'progress') {
-                progressBar.style.width = data.progress + '%';
-                progressBar.textContent = data.progress.toFixed(2) + '%';
-                progressInfo.textContent = `时间: ${data.time}, 速度: ${data.speed}`;
-            } else if (data.type === 'complete') {
-                modalTitle.textContent = '转码完成!';
-                modalText.textContent = '页面即将刷新...';
-                setTimeout(() => {
-                    const newUrl = new URL(window.location.href);
-                    newUrl.searchParams.set('src', data.newPath);
-                    // 移除旧的 poster 和 thumbnails 参数，因为新文件可能没有这些
-                    newUrl.searchParams.delete('poster');
-                    newUrl.searchParams.delete('thumbnails');
-                    window.location.href = newUrl.href;
-                }, 2000);
-            } else if (data.type === 'error') {
-                modalTitle.textContent = '转码失败';
-                modalText.textContent = data.message;
-            }
-        };
-
-        function showConversionModal() {
-            // Reset modal state
-            modalTitle.textContent = '需要转码';
-            modalText.textContent = '此视频格式可能存在兼容性问题。是否要将其转换为 MP4？';
-            modalText.style.display = 'block';
-            document.getElementById('modalActions').style.display = 'flex';
-            document.getElementById('modalDownloadBtn').style.display = 'flex';
-            progressContainer.style.display = 'none';
-            conversionModal.style.display = 'block';
-        }
-
-        convertToMp4Btn.addEventListener('click', () => {
-            if (confirm('确定要将此视频转换为 MP4 吗？这个过程可能需要一些时间。')) {
-                showConversionModal();
-            }
-        });
-
-        startConversionBtn.onclick = async () => {
-            document.getElementById('modalActions').style.display = 'none';
-            document.getElementById('modalDownloadBtn').style.display = 'none';
-            modalText.style.display = 'none';
-            progressContainer.style.display = 'block';
-            modalTitle.textContent = '正在转码...';
-
-            await fetch('/api/convert-video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    mediaDir: mediaDir,
-                    relativePath: decodeURIComponent(videoSrc)
-                })
-            });
-        };
-
-        cancelConversionBtn.onclick = () => {
-            conversionModal.style.display = 'none';
-            // If it was an auto-popup for AVI, we might want to try playing anyway.
-            // If it was a manual click, just closing is fine.
-            if (!document.body.classList.contains('manual-conversion')) {
-                 setTempMediaDirAndPlay();
-            }
-            document.body.classList.remove('manual-conversion');
-        };
-
-        modalDownloadBtn.onclick = () => {
-            const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
-            console.log(`Attempting to download from modal: ${fullVideoUrl}`);
-            window.open(fullVideoUrl, '_blank');
-        };
-
-        if (videoSrc && videoSrc.toLowerCase().endsWith('.avi')) {
-            showConversionModal();
-        } else {
-            setTempMediaDirAndPlay();
-        }
-
-        const externalPlayBtn = document.getElementById('externalPlayBtn');
-        const downloadBtn = document.getElementById('downloadBtn');
-
-        function playVideoExternally(videoUrl) {
-            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-
-            if (/android/i.test(userAgent)) {
-                const intentUrl = 'intent:' + videoUrl + '#Intent;action=android.intent.action.VIEW;type=video/*;end';
-                window.location.href = intentUrl;
-
-            } else if (/win/i.test(userAgent)) {
-                window.location.href = 'potplayer://' + videoUrl;
-
-            } else {
-                alert('此功能目前主要支持Windows和Android设备。您的浏览器将尝试直接打开视频链接。');
-                window.open(videoUrl, '_blank');
-            }
-        }
-
-        externalPlayBtn.addEventListener('click', () => {
-            const fullVideoUrl = dp.video.currentSrc;
-            if (fullVideoUrl) {
-                console.log(`Attempting to play externally: ${fullVideoUrl}`);
-                playVideoExternally(fullVideoUrl);
-            } else {
-                alert('无法获取当前视频的URL。');
-                console.error('Could not get video source for external playback.');
-            }
-        });
-        
-        downloadBtn.addEventListener('click', () => {
-            const fullVideoUrl = dp.video.currentSrc;
-            if (fullVideoUrl) {
-                console.log(`Attempting to download: ${fullVideoUrl}`);
-                window.open(fullVideoUrl, '_blank');
-            } else {
-                alert('无法获取当前视频的URL。');
-                console.error('Could not get video source for download.');
-            }
-        });
-
-       const scraperBtn = document.getElementById('scraperBtn');
-       const scraperDropdownContent = document.getElementById('scraperDropdownContent');
-
-       scraperBtn.onclick = () => {
-           scraperDropdownContent.classList.toggle("show");
-       };
-
-       scraperDropdownContent.addEventListener('click', (event) => {
-           if (event.target.tagName === 'A') {
-               event.preventDefault();
-               const type = event.target.dataset.type;
-               scrapeVideo(type, true); // true indicates this is a manual scrape
-               scraperDropdownContent.classList.remove('show');
-           }
-       });
-
-       window.addEventListener('click', function(event) {
-           if (!event.target.closest('.scraper-dropdown')) {
-               if (scraperDropdownContent.classList.contains('show')) {
-                   scraperDropdownContent.classList.remove('show');
-               }
-           }
-       });
-
-       async function scrapeVideo(type, isManual) {
-           const videoInfoContent = document.getElementById('videoInfoContent');
-           videoInfoContent.innerHTML = '<p>正在刮削中...</p>';
-           
-           // Determine the 'force' flag state
-           // If it's a manual scrape, always force.
-           // If it's automatic, respect the setting.
-           const forceScrape = isManual || document.getElementById('forceScrapeToggle').checked;
-
-           try {
-               const response = await fetch(`/api/scrape-video`, {
-                   method: 'POST',
-                   headers: {
-                       'Content-Type': 'application/json'
-                   },
-                   body: JSON.stringify({
-                       src: decodeURIComponent(videoSrc),
-                       mediaDir: mediaDir,
-                       type: type === 'auto' ? null : type,
-                       force: forceScrape
-                   })
-               });
-
-               if (!response.ok) {
-                   throw new Error(`HTTP error! status: ${response.status}`);
-               }
-
-               const data = await response.json();
-               displayScrapedData(data);
-
-           } catch (error) {
-               console.error('Error scraping video:', error);
-               videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${error.message}</p>`;
-           }
-       }
-
-       function displayScrapedData(data) {
-           console.log("Received scraped data:", JSON.stringify(data, null, 2));
-           const videoInfoContent = document.getElementById('videoInfoContent');
-           if (data.错误) {
-               videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${data.错误}</p>`;
-               scrapedInfo = null; // Clear scraped info on error
-               return;
-           }
-           
-           // Store the first valid result for subtitle download
-           if (data.JAV刮削结果 && data.JAV刮削结果.length > 0) {
-               scrapedInfo = data.JAV刮削结果[0];
-           } else if (!data.JAV刮削结果) {
-               scrapedInfo = data;
-           } else {
-               scrapedInfo = null;
-           }
-           console.log("Stored scraped info for subtitle download:", scrapedInfo);
-  
-              // Special handling for JAV results which is an array of sources
-              if (data.JAV刮削结果) {
-                 let html = '';
-                 data.JAV刮削结果.forEach(sourceData => {
-                     html += '<div class="source-container">';
-                     // Use optional chaining for safety
-                     html += `<h3>${sourceData?.来源 || '未知来源'} (匹配度: ${(sourceData?.匹配度 ?? 0).toFixed(2)})</h3>`;
-                     html += buildHtml(sourceData);
-                     html += '</div>';
-                 });
-                 videoInfoContent.innerHTML = html;
-                 // Try to set background from the first JAV result that has a poster
-                 const firstResultWithPoster = data.JAV刮削结果.find(r => r.海报链接 && isImageUrl(r.海报链接));
-                 if (firstResultWithPoster) {
-                     console.log("Found poster in JAV results:", firstResultWithPoster.海报链接);
-                     updateBackgroundAndTheme(firstResultWithPoster.海报链接);
-                 } else {
-                     console.log("No valid poster found in JAV results.");
-                 }
- 
-             } else {
-                 videoInfoContent.innerHTML = buildHtml(data);
-                 // Define possible keys for the poster image
-                const posterKeys = ['海报链接', '海报路径', '封面图片链接', '封面链接', '剧集海报路径'];
-                let posterUrl = null;
-                for (const key of posterKeys) {
-                    if (data[key] && isImageUrl(data[key])) {
-                        posterUrl = data[key];
-                        break;
-                    }
-                }
-
-                if (posterUrl) {
-                    console.log("Found poster in single result:", posterUrl);
-                    updateBackgroundAndTheme(posterUrl);
-                } else {
-                    console.log("No valid poster found in single result data.");
-                }
-             }
-       }
-
-       function findBestAccentColor(palette) {
-            // Helper to convert RGB to HSL
-            function rgbToHsl(r, g, b) {
-                r /= 255, g /= 255, b /= 255;
-                const max = Math.max(r, g, b), min = Math.min(r, g, b);
-                let h = 0, s = 0, l = (max + min) / 2;
-                if (max !== min) {
-                    const d = max - min;
-                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                    switch (max) {
-                        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                        case g: h = (b - r) / d + 2; break;
-                        case b: h = (r - g) / d + 4; break;
-                    }
-                    h /= 6;
-                }
-                return [h, s, l];
-            }
-
-            let suitableColors = [];
-            // Start from index 1 to skip the dominant color, which is often a background color
-            for (let i = 1; i < palette.length; i++) {
-                const color = palette[i];
-                const [h, s, l] = rgbToHsl(color[0], color[1], color[2]);
-
-                // Conditions for a "good" accent color:
-                // - Lightness should be in a pleasant range (not too dark, not pure white)
-                // - Saturation should be decent (not grayscale)
-                if (l > 0.55 && l < 0.9 && s > 0.3) {
-                    suitableColors.push({ color: color, s: s, l: l });
-                }
-            }
-
-            if (suitableColors.length > 0) {
-                // Prefer colors with higher saturation for more vibrancy
-                suitableColors.sort((a, b) => b.s - a.s);
-                return suitableColors[0].color;
-            }
-
-            // Fallback logic if no suitable color is found
-            // Return the brightest color from the palette that is not the dominant one.
-            let brightestColor = palette[1] || [200, 200, 200]; // A safe fallback
-            let maxL = 0;
-            for (let i = 1; i < palette.length; i++) {
-                const color = palette[i];
-                const [, , l] = rgbToHsl(color[0], color[1], color[2]);
-                if (l > maxL) {
-                    maxL = l;
-                    brightestColor = color;
-                }
-            }
-            return brightestColor;
-        }
-
-       function updateBackgroundAndTheme(imageUrl) {
-            console.log('Attempting to update background and theme with image:', imageUrl);
-            const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
-            console.log('Using proxy URL:', proxyUrl);
-            const playerBg = document.querySelector('.player-bg');
-            const colorThief = new ColorThief();
-            const img = new Image();
-
-            // Set background immediately
-            playerBg.style.backgroundImage = `url('${proxyUrl}')`;
-
-            img.onload = function() {
-                console.log(`Image loaded successfully. Dimensions: ${this.naturalWidth}x${this.naturalHeight}. Applying theme.`);
-                try {
-                    // Pass the loaded image object directly to ColorThief
-                    const dominantColor = colorThief.getColor(this);
-                    const palette = colorThief.getPalette(this, 5);
-                    const accentColor = findBestAccentColor(palette);
-                    console.log("Dominant color:", dominantColor, "Accent color:", accentColor);
-
-                    // Determine text color based on the brightness of the dominant color of the background
-                    // A more robust method to determine text color based on perceived brightness (Luma)
-                    function getTextColorForBg(rgbColor) {
-                        // Formula for calculating Luma from sRGB
-                        const luma = (0.299 * rgbColor[0] + 0.587 * rgbColor[1] + 0.114 * rgbColor[2]) / 255;
-                        // Use a threshold of 0.5 - greater than 0.5 is a light color, less is a dark color.
-                        // Return black for light backgrounds, white for dark backgrounds for max contrast.
-                        const newColor = luma > 0.5 ? '#000000' : '#FFFFFF';
-                        console.log(`Color: rgb(${rgbColor.join(',')}), Luma: ${luma.toFixed(2)}, Chosen Text Color: ${newColor}`);
-                        return newColor;
-                    }
-
-                    const newPrimaryTextColor = getTextColorForBg(dominantColor);
-                    const accentTextColor = getTextColorForBg(accentColor);
-
-                    const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
-                        const hex = x.toString(16);
-                        return hex.length === 1 ? '0' + hex : hex;
-                    }).join('');
-                    
-                    const accentHex = rgbToHex(accentColor[0], accentColor[1], accentColor[2]);
-                    const accentHoverHex = rgbToHex(
-                        Math.min(255, accentColor[0] + 20),
-                        Math.min(255, accentColor[1] + 20),
-                        Math.min(255, accentColor[2] + 20)
-                    );
-
-                    const accentRgb = `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`;
-
-                    document.documentElement.style.setProperty('--primary-text', newPrimaryTextColor);
-                    document.documentElement.style.setProperty('--accent-color', accentHex);
-                    document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
-                    document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
-                    document.documentElement.style.setProperty('--accent-color-rgb', accentRgb);
-                    
-                    console.log('Theme updated successfully. New primary text:', newPrimaryTextColor, 'New accent:', accentHex);
-                } catch (e) {
-                    console.error("ColorThief error inside onload:", e);
-                    // Restore default colors on error
-                    document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
-                    document.documentElement.style.setProperty('--accent-color', '#00bcd4');
-                    document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
-                    document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
-                }
-            };
-            img.onerror = function(e) {
-                console.error("Failed to load image for ColorThief via proxy. Error event:", e);
-                 // Restore default colors on error
-                document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
-                document.documentElement.style.setProperty('--accent-color', '#00bcd4');
-                document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
-                document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
-            };
-
-            img.crossOrigin = 'Anonymous';
-            img.src = proxyUrl;
-        }
- 
-        function isImageUrl(url) {
-            if (typeof url !== 'string') return false;
-            return /\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url);
-        }
- 
-        function buildHtml(obj) {
-            const keysToSkip = ['来源', '匹配度', 'JAV刮削结果', '文件信息'];
-            let result = '<ul class="info-list">';
-            for (const key in obj) {
-                if (obj.hasOwnProperty(key) && !keysToSkip.includes(key)) {
-                    const value = obj[key];
-                    
-                    if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-                        continue;
-                    }
- 
-                    result += `<li><strong>${key}:</strong> `;
-                    if (typeof value === 'object' && value !== null) {
-                        if (Array.isArray(value)) {
-                            if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-                                result += '<ul class="info-list nested-list">';
-                                value.forEach(item => {
-                                    result += '<li>' + buildHtml(item) + '</li>';
-                                });
-                                result += '</ul>';
-                            } else {
-                                if (value.every(isImageUrl)) {
-                                    result += '<div class="image-gallery">';
-                                    value.forEach(imgUrl => {
-                                        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imgUrl)}`;
-                                        result += `<a data-fancybox="gallery" data-caption="${imgUrl.split('/').pop()}" href="${proxyUrl}"><img src="${proxyUrl}" alt="sample image"></a>`;
-                                    });
-                                    result += '</div>';
-                                } else {
-                                    result += `<span>${value.join(', ')}</span>`;
-                                }
-                            }
-                        } else {
-                            result += buildHtml(value);
-                        }
-                    } else {
-                        if (isImageUrl(value)) {
-                            const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(value)}`;
-                            result += `<div class="image-container"><a data-fancybox="gallery" data-caption="${key}" href="${proxyUrl}"><img src="${proxyUrl}" alt="cover image"></a></div>`;
-                        } else if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
-                            result += `<a href="${value}" target="_blank">${value}</a>`;
-                        } else {
-                            result += `<span>${value}</span>`;
-                        }
-                    }
-                    result += '</li>';
-                }
-            }
-            result += '</ul>';
-            return result;
-        }
-
-        async function handleSubtitleAction(action) {
-            console.log(`Subtitle action clicked: ${action}`);
-            if (action === 'download-subtitlecat' || action === 'download-subliminal') {
-                if (!scrapedInfo) {
-                    alert('请先刮削视频信息，以获取标题和 IMDb ID。');
-                    return;
-                }
-
-                const title = scrapedInfo['标题'] || scrapedInfo['番號'] || urlParams.get('title');
-                // 修正：检查多个可能的IMDb ID键名，并处理URL或直接ID的情况
-                const imdb_id_value = scrapedInfo['IMDb ID'] || scrapedInfo['剧集 IMDb ID'] || scrapedInfo['imdb_id'] || scrapedInfo['series_imdb_id'];
-                const imdb_id = imdb_id_value ? String(imdb_id_value).split('/').filter(Boolean).pop() : null;
-                const method = action === 'download-subtitlecat' ? 'subtitlecat' : 'subliminal';
-
-                if (method === 'subliminal' && !imdb_id) {
-                    alert('此视频未找到 IMDb ID，无法使用 Subliminal 下载字幕。');
-                    return;
-                }
-
-                // Show feedback to user
-                const originalTitle = videoTitle.textContent;
-                videoTitle.textContent = '正在下载字幕...';
-
-                try {
-                    const response = await fetch('/api/download-subtitle', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ method, title, imdb_id })
-                    });
-                    const result = await response.json();
-
-                    if (result.success) {
-                        videoTitle.textContent = '字幕下载成功，正在刷新...';
-                        await loadAllSubtitles(); // Refresh subtitle list
-                    } else {
-                        alert(`字幕下载失败: ${result.message || '请查看服务器日志。'}`);
-                        console.error('Subtitle download failed:', result);
+                    } else if (subtitleChatState === 'waiting_movie_selection') {
+                         addChatMessage('请点击上方按钮选择一个影视结果。', 'bot');
+                    } else if (subtitleChatState === 'waiting_lang_selection') {
+                        addChatMessage('请点击上方按钮选择一个语言。', 'bot');
                     }
                 } catch (error) {
-                    alert(`下载请求失败: ${error.message}`);
-                    console.error('Error calling download-subtitle API:', error);
+                   searchMessage.remove();
+                   if (error.name === 'AbortError') {
+                       console.log('Search aborted by user.');
+                   } else {
+                       console.error('Subtitle chat error:', error);
+                       addChatMessage(`发生错误: ${error.message}`, 'error');
+                       resetSubtitleChat(false); // Reset on actual error
+                   }
                 } finally {
-                    // Restore title after a delay
-                    setTimeout(() => {
-                        videoTitle.textContent = originalTitle;
-                    }, 3000);
+                    currentFetchController = null;
                 }
-            } else {
-                // TODO: Implement other actions like 'local-transcribe', 'upload-subtitle'
-                alert(`功能 '${action}' 尚未实现。`);
+           }
+
+           async function selectMovieCandidate(index) {
+               selectedMovie = movieCandidates[index];
+               document.querySelectorAll('.chat-selection-list button, .chat-cancel-btn').forEach(btn => btn.disabled = true);
+               addChatMessage(`你选择了: ${selectedMovie.title}`, 'user', false);
+               const langMessage = addChatMessage('正在获取可用语言... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+
+                try {
+                    currentFetchController = new AbortController();
+                    const response = await fetch('/api/subtitle/languages', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: selectedMovie.url }),
+                        signal: currentFetchController.signal
+                    });
+                    const result = await response.json();
+                    langMessage.remove();
+
+                    if (result.success && result.results.length > 0) {
+                        languageCandidates = result.results;
+                        let responseHtml = '请选择要下载的语言：<ul class="chat-selection-list">';
+                        languageCandidates.forEach((lang, i) => {
+                            responseHtml += `<li><button onclick="selectLanguageCandidate(${i})">${lang.lang}</button></li>`;
+                        });
+                        responseHtml += '</ul><button class="chat-cancel-btn" onclick="goBackToMovieSelection()">返回选择影视</button><button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>';
+                        addChatMessage(responseHtml, 'bot');
+                        subtitleChatState = 'waiting_lang_selection';
+                    } else {
+                       addChatMessage(`在 "${selectedMovie.title}" 中未找到可用的字幕。`, 'bot');
+                       resetSubtitleChat();
+                   }
+               } catch (error) {
+                  langMessage.remove();
+                  if (error.name === 'AbortError') {
+                      console.log('Language fetch aborted by user.');
+                  } else {
+                      console.error('Error fetching languages:', error);
+                      addChatMessage(`获取语言失败: ${error.message}`, 'error');
+                      resetSubtitleChat(false);
+                  }
+               } finally {
+                  currentFetchController = null;
+               }
+           }
+
+           async function selectLanguageCandidate(index) {
+               const selectedLang = languageCandidates[index];
+               document.querySelectorAll('.chat-selection-list button, .chat-cancel-btn').forEach(btn => btn.disabled = true);
+               addChatMessage(`你选择了: ${selectedLang.lang}`, 'user', false);
+               const downloadMessage = addChatMessage('正在下载并转换字幕，请稍候... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+
+               try {
+                   currentFetchController = new AbortController();
+                   const response = await fetch('/api/subtitle/download', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           url: selectedLang.url,
+                           title: selectedMovie.title,
+                           lang: selectedLang.lang
+                       }),
+                       signal: currentFetchController.signal
+                   });
+                   const result = await response.json();
+                   downloadMessage.remove();
+
+                   if (result.success) {
+                       addChatMessage('字幕下载成功！列表已刷新。此面板将在2秒后关闭。', 'bot');
+                       await loadAllSubtitles(); // Refresh the main subtitle list
+                       setTimeout(() => {
+                            playerContainer.classList.remove('chat-mode');
+                       }, 2000);
+                   } else {
+                       addChatMessage(`下载失败: ${result.error || '未知错误'}`, 'error');
+                       resetSubtitleChat(false);
+                   }
+               } catch (error) {
+                  downloadMessage.remove();
+                  if (error.name === 'AbortError') {
+                      console.log('Download aborted by user.');
+                  } else {
+                      console.error('Error downloading subtitle:', error);
+                      addChatMessage(`下载失败: ${error.message}`, 'error');
+                      resetSubtitleChat(false);
+                  }
+               } finally {
+                   currentFetchController = null;
+               }
+           }
+
+           function resetSubtitleChat(showMessage = true) {
+               subtitleChatState = 'idle';
+               if (showMessage) {
+                   addChatMessage('操作已取消。请输入新的影视名称进行搜索。', 'bot');
+               }
+               chatInput.disabled = false;
+               sendChatBtn.disabled = false;
+               chatInput.style.display = 'block';
+               sendChatBtn.style.display = 'block';
+               if (currentChatMode === 'subtitle' && subtitleDownloadMethod === 'download-subtitlecat') {
+                   chatInput.focus();
+               }
+           }
+
+           function goBackToMovieSelection() {
+               subtitleChatState = 'waiting_movie_selection';
+               // Remove the language selection message and buttons
+               const messages = chatMessages.querySelectorAll('.chat-message');
+               messages[messages.length - 1].remove(); // Remove "请选择语言"
+               messages[messages.length - 2].remove(); // Remove "你选择了电影"
+               
+               // Re-enable the movie selection buttons
+               const movieButtons = chatMessages.querySelectorAll('.chat-selection-list button, .chat-cancel-btn');
+               movieButtons.forEach(btn => btn.disabled = false);
+           }
+
+           sendChatBtn.addEventListener('click', handleChatInput);
+           chatInput.addEventListener('keydown', (e) => {
+               if (e.key === 'Enter') {
+                   handleChatInput();
+               }
+           });
+
+        </script>
+        <script src="vendor/jquery-3.5.1.min.js"></script>
+        <script src="vendor/jquery.fancybox.min.js"></script>
+        <script>
+            // --- Sticky Chat Panel Logic ---
+            const playerContainerForScroll = document.querySelector('.player-container');
+            const chatPanelForScroll = document.querySelector('.chat-panel');
+
+            if (playerContainerForScroll && chatPanelForScroll) {
+                playerContainerForScroll.addEventListener('scroll', () => {
+                    const scrollTop = playerContainerForScroll.scrollTop;
+                    chatPanelForScroll.style.top = `${scrollTop}px`;
+                });
             }
-        }
-
-        // --- Settings Modal Logic ---
-        const settingsBtn = document.getElementById('settingsBtn');
-        const settingsModal = document.getElementById('settingsModal');
-        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-        const autoScrapeToggle = document.getElementById('autoScrapeToggle');
-        const forceScrapeToggle = document.getElementById('forceScrapeToggle');
-
-        function saveSettings() {
-            localStorage.setItem('settings_autoScrape', autoScrapeToggle.checked);
-            localStorage.setItem('settings_forceScrape', forceScrapeToggle.checked);
-        }
-
-        function loadSettings() {
-            const autoScrape = localStorage.getItem('settings_autoScrape');
-            const forceScrape = localStorage.getItem('settings_forceScrape');
-
-            autoScrapeToggle.checked = autoScrape === null ? true : autoScrape === 'true';
-            forceScrapeToggle.checked = forceScrape === 'true';
-        }
-
-        settingsBtn.onclick = () => {
-            settingsModal.style.display = 'block';
-        };
-
-        closeSettingsBtn.onclick = () => {
-            settingsModal.style.display = 'none';
-        };
-
-        autoScrapeToggle.onchange = saveSettings;
-        forceScrapeToggle.onchange = saveSettings;
-
-        window.addEventListener('click', (event) => {
-            if (event.target == settingsModal) {
-                settingsModal.style.display = 'none';
-            }
-        });
-
-        loadSettings();
-     </script>
-     <script src="vendor/jquery-3.5.1.min.js"></script>
-     <script src="vendor/jquery.fancybox.min.js"></script>
-</body>
-</html>
+        </script>
+   </body>
+   </html>

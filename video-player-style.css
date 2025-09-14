@@ -58,6 +58,7 @@ body {
         0 20px 50px var(--shadow-color),
         inset 0 0 1px rgba(255, 255, 255, 0.1);
     overflow-y: auto;
+    overflow-x: hidden; /* Prevent horizontal scrollbar */
     display: flex;
     flex-direction: column; /* Change to column layout */
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -93,7 +94,7 @@ body {
    /* height: 65%; */ /* Removed for scrolling */
    flex-shrink: 0;
    gap: 15px;
-   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), margin-right 0.3s ease-in-out;
 }
 
 .control-btn {
@@ -217,17 +218,7 @@ body {
     padding: 8px 15px;
 }
 
-/* 新增：动作项样式（占位） */
-.subtitle-dropdown-content a.subtitle-action-item {
-    display: block;
-    padding: 8px 15px;
-    cursor: pointer;
-    color: var(--accent-text-color);
-    border-top: 1px dashed rgba(255,255,255,0.03);
-}
-.subtitle-dropdown-content a.subtitle-action-item:hover {
-    background-color: rgba(255,255,255,0.03);
-}
+/* 动作项现在使用默认链接样式以保持一致性 */
 
 /* Custom Scrollbar for Subtitle Dropdown */
 .subtitle-dropdown-content::-webkit-scrollbar {
@@ -762,6 +753,11 @@ input:checked + .slider:before {
     border-left-color: var(--accent-color);
 }
 
+/* 新增：当展开的项被悬停时，箭头颜色与文本颜色一致，避免消失 */
+.subtitle-local-toggle.open:hover::after {
+    border-left-color: var(--accent-text-color);
+}
+
 /* 浮动的同文件夹字幕子菜单（桌面：右侧弹出） */
 .subtitle-local-submenu {
     position: fixed; /* 改为 fixed，避免被父容器裁剪或受滚动影响 */
@@ -771,7 +767,7 @@ input:checked + .slider:before {
     background: var(--secondary-bg);
     border-radius: 8px;
     box-shadow: 0 6px 12px var(--shadow-color);
-    padding: 6px 0;
+    padding: 6px 5px; /* 增加左右内边距以容纳按钮的放大效果 */
     z-index: 10000;
     display: none;
     max-height: 60vh;
@@ -797,6 +793,57 @@ input:checked + .slider:before {
     color: var(--accent-text-color);
 }
 
+/* 新增：本地字幕项的容器 */
+.subtitle-menu-item-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background-color 0.2s;
+}
+
+.subtitle-menu-item-container:hover {
+    background-color: var(--accent-color);
+}
+
+/* 容器内的链接样式调整 */
+.subtitle-menu-item-container a {
+    flex-grow: 1; /* 占据尽可能多的空间 */
+    padding-right: 10px; /* 与删除按钮保持间距 */
+}
+
+.subtitle-menu-item-container:hover a {
+    color: var(--accent-text-color);
+    background-color: transparent; /* 避免双重背景色 */
+}
+
+/* 删除按钮样式 */
+.delete-subtitle-btn {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text);
+    font-size: 22px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 12px;
+    border-radius: 50%;
+    line-height: 1;
+    opacity: 0; /* 默认隐藏 */
+    transition: opacity 0.2s, color 0.2s, transform 0.2s;
+    flex-shrink: 0; /* 防止按钮被压缩 */
+}
+
+/* 容器悬停时显示删除按钮 */
+.subtitle-menu-item-container:hover .delete-subtitle-btn {
+    opacity: 0.8;
+    color: var(--accent-text-color);
+}
+
+.delete-subtitle-btn:hover {
+    opacity: 1;
+    color: #ff4b2b; /* 红色以示危险操作 */
+    transform: scale(1.1);
+}
+
 /* 移动端：子菜单改为在父项下方展开并靠左（避免超出屏幕） */
 @media (max-width: 768px) {
     .subtitle-local-submenu {
@@ -807,4 +854,255 @@ input:checked + .slider:before {
         max-width: calc(100vw - 16px);
         max-height: 50vh;
     }
+}
+
+/* --- Unified Chat Panel --- */
+.chat-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    width: 320px;
+    background-color: rgba(20, 20, 20, 0.85);
+    backdrop-filter: blur(15px);
+    transform: translateX(100%);
+    transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: -5px 0px 25px rgba(0, 0, 0, 0.4);
+    border-top-left-radius: 15px;
+    border-bottom-left-radius: 15px;
+}
+
+.player-container.chat-mode .chat-panel {
+    transform: translateX(0);
+    box-shadow: -10px 0px 40px rgba(0, 0, 0, 0.5);
+}
+
+.player-container.chat-mode .player-main {
+   margin-right: 320px;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden; /* Prevent content from spilling out */
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--primary-text);
+    flex-shrink: 0;
+    background-color: rgba(0,0,0,0.2);
+    border-top-left-radius: 15px;
+}
+.chat-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+#closeChatBtn {
+    background: none;
+    border: none;
+    color: var(--primary-text);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px;
+    transition: color 0.2s;
+}
+#closeChatBtn:hover {
+    color: var(--accent-color);
+}
+
+.chat-messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    color: var(--primary-text);
+    padding: 15px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-color) rgba(0,0,0,0.2);
+}
+
+.chat-messages::-webkit-scrollbar {
+    width: 8px;
+}
+.chat-messages::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+}
+.chat-messages::-webkit-scrollbar-thumb {
+    background: var(--accent-color);
+    border-radius: 4px;
+}
+.chat-messages::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover);
+}
+
+.chat-input-container {
+    display: flex;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 10px;
+    background-color: rgba(0,0,0,0.2);
+    border-bottom-left-radius: 15px;
+}
+
+#chatInput {
+    flex-grow: 1;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid #333;
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 20px;
+    margin-right: 10px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+#chatInput:focus {
+     border-color: var(--accent-color);
+ }
+
+#sendChatBtn {
+    background: var(--accent-color);
+    color: var(--accent-text-color, #1a1a1a);
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+}
+#sendChatBtn:hover {
+    background: var(--accent-hover);
+}
+
+#sendChatBtn:disabled {
+   background: #555;
+   cursor: not-allowed;
+}
+
+.chat-message {
+    margin-bottom: 12px;
+    padding: 10px 15px;
+    border-radius: 18px;
+    max-width: 90%;
+    word-wrap: break-word;
+    display: flex; /* Use flex for alignment */
+    flex-direction: column;
+}
+.user-message {
+    background-color: var(--accent-color);
+    color: var(--accent-text-color, #1a1a1a);
+    align-self: flex-end;
+}
+.bot-message {
+    background-color: #2a2a2a;
+    align-self: flex-start;
+}
+.error-message {
+     background-color: #4e2a2a;
+     color: #ffbaba;
+     align-self: flex-start;
+}
+.search-result-item {
+    cursor: pointer;
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+    border: 1px solid #3a3a3a;
+}
+.search-result-item:hover {
+    background-color: #383838;
+}
+.search-result-item .timestamp {
+    font-weight: bold;
+    color: var(--accent-color);
+    margin-right: 8px;
+}
+
+/* --- Subtitle Chat Specific Styles --- */
+
+.chat-selection-list {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+}
+
+.chat-selection-list li {
+    margin-bottom: 5px;
+}
+
+.chat-selection-list button {
+    background: #3a3a3a;
+    border: 1px solid #555;
+    color: var(--primary-text);
+    padding: 8px 12px;
+    width: 100%;
+    text-align: left;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.chat-selection-list button:hover {
+    background-color: #4a4a4a;
+    border-color: var(--accent-color);
+}
+
+.chat-selection-list button:disabled {
+    background-color: #2a2a2a;
+    color: #777;
+    cursor: not-allowed;
+    border-color: #444;
+}
+
+.chat-cancel-btn {
+    background: transparent;
+    border: 1px solid #555;
+    color: #aaa;
+    padding: 6px 10px;
+    width: auto;
+    text-align: center;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    margin-top: 10px;
+    font-size: 12px;
+}
+
+.chat-cancel-btn:hover {
+    background-color: #444;
+    color: #fff;
+    border-color: #777;
+}
+
+.chat-confirm-btn {
+    background: transparent;
+    border: 1px solid var(--darkreader-border-555555, #70685c);
+    color: #aaa;
+    padding: 6px 10px;
+    width: auto;
+    text-align: center;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    margin-top: 10px;
+    font-size: 12px;
+    margin-right: 5px; /* Add some space between buttons */
+}
+
+.chat-confirm-btn:hover {
+    background-color: #444;
+    color: #fff;
+    border-color: #777;
 }

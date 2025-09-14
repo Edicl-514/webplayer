@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const WebSocket = require('ws');
 const { exec } = require('child_process');
 const https = require('https');
+const formidable = require('formidable');
 
 const PORT = 8080;
 // 定义媒体目录及其别名
@@ -662,6 +663,115 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 新增：处理删除字幕文件的请求
+    if (pathname === '/api/delete-subtitle' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', async () => {
+            try {
+                const { path: subtitlePath, mediaDir } = JSON.parse(body);
+                if (!subtitlePath || !mediaDir) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: '缺少字幕路径或媒体目录参数。' }));
+                    return;
+                }
+
+                let pathToDelete = null;
+                const subtitleFilename = path.basename(subtitlePath);
+                
+                // 路径1: 检查全局缓存目录
+                const cachePath = path.join(CACHE_DIR, 'subtitles', subtitleFilename);
+                
+                // 路径2: 检查视频所在媒体目录
+                const mediaPath = path.join(mediaDir, subtitlePath);
+
+                try {
+                    // 优先检查缓存路径是否存在
+                    await fs.promises.access(cachePath, fs.constants.F_OK);
+                    pathToDelete = cachePath;
+                    console.log(`找到要删除的字幕于缓存目录: ${pathToDelete}`);
+                } catch (e) {
+                    // 如果缓存中不存在，则检查媒体目录
+                    try {
+                        await fs.promises.access(mediaPath, fs.constants.F_OK);
+                        pathToDelete = mediaPath;
+                        console.log(`找到要删除的字幕于媒体目录: ${pathToDelete}`);
+                    } catch (e2) {
+                        // 两个地方都找不到
+                        console.log(`请求删除的字幕文件在缓存和媒体目录中均未找到: ${subtitlePath}`);
+                        res.statusCode = 200;
+                        res.end(JSON.stringify({ success: true, message: '文件未找到，可能已被删除。' }));
+                        return;
+                    }
+                }
+
+                // 对最终确定的路径执行安全检查
+                const isCachePathSafe = path.resolve(pathToDelete).startsWith(path.resolve(CACHE_DIR));
+                const isMediaPathSafe = MEDIA_DIRS.some(dir => path.resolve(pathToDelete).startsWith(dir.path));
+
+                if (!isCachePathSafe && !isMediaPathSafe) {
+                    console.warn(`检测到删除不安全路径的尝试: ${pathToDelete}`);
+                    res.statusCode = 403; // Forbidden
+                    res.end(JSON.stringify({ success: false, message: '不允许在此目录中进行删除操作。' }));
+                    return;
+                }
+
+                // 执行删除
+                await fs.promises.unlink(pathToDelete);
+                console.log(`成功删除字幕文件: ${pathToDelete}`);
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true, message: '字幕文件已成功删除。' }));
+
+            } catch (error) {
+                console.error('删除字幕文件时出错:', error);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: '删除文件时发生服务器错误。', error: error.message }));
+            }
+        });
+        return;
+    }
+
+    // 新增：处理上传字幕文件的请求
+    if (pathname === '/api/upload-subtitle' && req.method.toLowerCase() === 'post') {
+        const subtitlesCacheDir = path.join(CACHE_DIR, 'subtitles');
+
+        const form = formidable({
+            uploadDir: subtitlesCacheDir,
+            keepExtensions: true,
+            filename: (name, ext, part) => {
+                // Sanitize filename to prevent path traversal attacks
+                const sanitizedFilename = part.originalFilename.replace(/[\/\\]/g, '_');
+                return sanitizedFilename;
+            }
+        });
+
+        form.parse(req, (err, fields, files) => {
+            if (err) {
+                console.error('Error parsing subtitle upload:', err);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: '处理上传时出错。' }));
+                return;
+            }
+
+            const uploadedFile = files.subtitle && files.subtitle[0];
+
+            if (!uploadedFile) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: '未上传任何字幕文件。' }));
+                return;
+            }
+
+            // With formidable's `filename` option, the file is already saved with the correct name.
+            console.log(`字幕文件已上传并保存: ${uploadedFile.newFilename}`);
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, filename: uploadedFile.newFilename }));
+        });
+        return;
+    }
+
     if (pathname === '/api/convert-video' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => {
@@ -966,32 +1076,101 @@ const server = http.createServer(async (req, res) => {
        return;
    }
 
+     if (pathname === '/api/download-subtitle' && req.method === 'POST') {
+         let body = '';
+         req.on('data', chunk => {
+             body += chunk.toString();
+         });
+         req.on('end', () => {
+             try {
+                 const { method, title, imdb_id } = JSON.parse(body);
+                 if (!method || !title) {
+                     res.statusCode = 400;
+                     res.end(JSON.stringify({ success: false, message: 'Missing method or title' }));
+                     return;
+                 }
+                 if (method === 'subliminal' && !imdb_id) {
+                     res.statusCode = 400;
+                     res.end(JSON.stringify({ success: false, message: 'IMDb ID is required for subliminal' }));
+                     return;
+                 }
+ 
+                 const args = ['download_subtitle.py', '--site', method, '--title', title];
+                 if (method === 'subliminal') {
+                     args.push('--imdb_id', imdb_id);
+                 }
+ 
+                 console.log(`Executing subtitle download: python ${args.join(' ')}`);
+ 
+                 const pythonProcess = spawn('python', args, {
+                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                 });
+ 
+                 let stdoutData = '';
+                 let stderrData = '';
+ 
+                 pythonProcess.stdout.on('data', (data) => {
+                     stdoutData += data.toString();
+                     console.log(`[download_subtitle.py stdout]: ${data.toString()}`);
+                 });
+ 
+                 pythonProcess.stderr.on('data', (data) => {
+                     stderrData += data.toString();
+                     console.error(`[download_subtitle.py stderr]: ${data.toString()}`);
+                 });
+ 
+                 pythonProcess.on('close', (code) => {
+                     if (code !== 0) {
+                         res.statusCode = 500;
+                         res.end(JSON.stringify({ success: false, message: `Subtitle download script exited with code ${code}`, details: stderrData }));
+                         return;
+                     }
+                     
+                     // 检查标准输出中是否包含成功信息
+                     if (stdoutData.includes("successfully downloaded") || stdoutData.includes("成功下载")) {
+                          res.setHeader('Content-Type', 'application/json');
+                          res.end(JSON.stringify({ success: true, message: 'Subtitle downloaded successfully.', output: stdoutData }));
+                     } else {
+                          res.setHeader('Content-Type', 'application/json');
+                          res.end(JSON.stringify({ success: false, message: 'Subtitle download failed or no subtitles found.', output: stdoutData, details: stderrData }));
+                     }
+                 });
+ 
+             } catch (e) {
+                 console.error('Error processing /api/download-subtitle:', e);
+                 res.statusCode = 400;
+                 res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+             }
+         });
+         return;
+     }
+ 
 
-    if (pathname === '/api/download-subtitle' && req.method === 'POST') {
+    // Subtitle download API
+    if (pathname.startsWith('/api/subtitle/') && req.method === 'POST') {
+        const action = pathname.split('/')[3];
         let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
+        req.on('data', chunk => { body += chunk.toString(); });
         req.on('end', () => {
             try {
-                const { method, title, imdb_id } = JSON.parse(body);
-                if (!method || !title) {
+                const params = JSON.parse(body);
+                // Extract site from method, e.g., "download-subtitlecat" -> "subtitlecat"
+                const site = params.method ? params.method.replace('download-', '') : 'subtitlecat';
+                const args = ['download_subtitle.py', '--site', site, '--action', action];
+
+                if (action === 'search' && params.title) {
+                    args.push('--title', params.title);
+                } else if (action === 'languages' && params.url) {
+                    args.push('--url', params.url);
+                } else if (action === 'download' && params.url && params.title && params.lang) {
+                    args.push('--url', params.url, '--title', params.title, '--lang', params.lang);
+                } else {
                     res.statusCode = 400;
-                    res.end(JSON.stringify({ success: false, message: 'Missing method or title' }));
-                    return;
-                }
-                if (method === 'subliminal' && !imdb_id) {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ success: false, message: 'IMDb ID is required for subliminal' }));
+                    res.end(JSON.stringify({ success: false, message: 'Missing required parameters for action: ' + action }));
                     return;
                 }
 
-                const args = ['download_subtitle.py', '--site', method, '--title', title];
-                if (method === 'subliminal') {
-                    args.push('--imdb_id', imdb_id);
-                }
-
-                console.log(`Executing subtitle download: python ${args.join(' ')}`);
+                console.log(`Executing subtitle action: python ${args.join(' ')}`);
 
                 const pythonProcess = spawn('python', args, {
                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
@@ -1000,38 +1179,81 @@ const server = http.createServer(async (req, res) => {
                 let stdoutData = '';
                 let stderrData = '';
 
-                pythonProcess.stdout.on('data', (data) => {
-                    stdoutData += data.toString();
-                    console.log(`[download_subtitle.py stdout]: ${data.toString()}`);
-                });
-
-                pythonProcess.stderr.on('data', (data) => {
-                    stderrData += data.toString();
-                    console.error(`[download_subtitle.py stderr]: ${data.toString()}`);
-                });
+                pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
 
                 pythonProcess.on('close', (code) => {
+                    if (stderrData) {
+                        console.error(`[download_subtitle.py stderr]: ${stderrData}`);
+                    }
                     if (code !== 0) {
                         res.statusCode = 500;
-                        res.end(JSON.stringify({ success: false, message: `Subtitle download script exited with code ${code}`, details: stderrData }));
+                        res.end(JSON.stringify({ success: false, message: `Script exited with code ${code}`, details: stderrData }));
                         return;
                     }
-                    
-                    // 检查标准输出中是否包含成功信息
-                    if (stdoutData.includes("successfully downloaded") || stdoutData.includes("成功下载")) {
-                         res.setHeader('Content-Type', 'application/json');
-                         res.end(JSON.stringify({ success: true, message: 'Subtitle downloaded successfully.', output: stdoutData }));
-                    } else {
-                         res.setHeader('Content-Type', 'application/json');
-                         res.end(JSON.stringify({ success: false, message: 'Subtitle download failed or no subtitles found.', output: stdoutData, details: stderrData }));
+                    try {
+                        const result = JSON.parse(stdoutData);
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(JSON.stringify(result));
+                    } catch (e) {
+                        console.error('Error parsing python script output:', e);
+                        console.error('Raw stdout:', stdoutData);
+                        res.statusCode = 500;
+                        res.end(JSON.stringify({ success: false, message: 'Error parsing script output' }));
                     }
                 });
 
             } catch (e) {
-                console.error('Error processing /api/download-subtitle:', e);
+                console.error(`Error processing /api/subtitle/${action}:`, e);
                 res.statusCode = 400;
                 res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
             }
+        });
+        return;
+    }
+
+    if (pathname === '/api/semantic-search' && req.method === 'GET') {
+        const { vtt_file, query, mediaDir, ...otherParams } = parsedUrl.query;
+
+        if (!vtt_file || !query || !mediaDir) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Missing 'vtt_file', 'query', or 'mediaDir' parameter" }));
+            return;
+        }
+
+        // 安全地构建 VTT 文件的完整路径
+        let fullVttPath;
+        if (vtt_file.startsWith('cache' + path.sep) || vtt_file.startsWith('cache/')) {
+            fullVttPath = path.join(__dirname, vtt_file);
+        } else {
+            fullVttPath = path.join(mediaDir, vtt_file);
+        }
+
+        // 构建转发参数
+        const forwardParams = new URLSearchParams({
+            vtt_file: fullVttPath,
+            query: query,
+            ...otherParams
+        });
+        
+        const pythonServiceUrl = `http://127.0.0.1:5000/search?${forwardParams.toString()}`;
+        
+        console.log(`Forwarding semantic search request to: ${pythonServiceUrl}`);
+
+        http.get(pythonServiceUrl, (proxyRes) => {
+            let data = '';
+            proxyRes.on('data', (chunk) => {
+                data += chunk;
+            });
+            proxyRes.on('end', () => {
+                res.setHeader('Content-Type', 'application/json');
+                res.statusCode = proxyRes.statusCode;
+                res.end(data);
+            });
+        }).on('error', (err) => {
+            console.error('Error forwarding request to Python service:', err);
+            res.statusCode = 502; // Bad Gateway
+            res.end(JSON.stringify({ error: 'Failed to connect to the semantic search service.' }));
         });
         return;
     }
