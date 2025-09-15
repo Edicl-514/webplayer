@@ -81,6 +81,7 @@ from tmdbv3api import TMDb, Movie, TV
 import sqlite3
 import urllib3
 import urllib.parse
+import copy
 
 # 新增 cloudscraper 导入
 try:
@@ -293,6 +294,7 @@ class CacheManager:
             cursor.execute("SELECT scraped_data, poster_path FROM video_info WHERE filename = ?", (filename,))
             row = cursor.fetchone()
             if row:
+                # 返回已存储的 scraped_data（JSON），以及单独的本地 poster_path 作为备用，但不要将 poster_path 写回 JSON 中
                 return json.loads(row[0]), row[1]
         return None, None
 
@@ -303,8 +305,15 @@ class CacheManager:
         if poster_url:
             poster_path = self.download_image(poster_url, filename)
 
-        # 根据用户要求，不修改原始刮削数据，仅额外下载封面并记录本地路径
-        data_json = json.dumps(data, ensure_ascii=False, cls=CustomEncoder)
+        # 根据用户要求，不修改原始刮削数据。但为了避免将本地路径写入 JSON（仅作为备用单独存储），
+        # 我们复制一份要写入数据库的数据并移除可能的本地路径字段。
+        data_to_store = copy.deepcopy(data)
+        # 移除可能包含本地路径的键，避免将本地路径写入 scraped_data JSON 中
+        for local_key in ('local_poster_path', 'local_path', 'poster_local_path'):
+            if isinstance(data_to_store, dict) and local_key in data_to_store:
+                del data_to_store[local_key]
+
+        data_json = json.dumps(data_to_store, ensure_ascii=False, cls=CustomEncoder)
         
         with self.conn:
             cursor = self.conn.cursor()

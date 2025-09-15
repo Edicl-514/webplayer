@@ -1257,7 +1257,51 @@ const server = http.createServer(async (req, res) => {
         });
         return;
     }
+
+    // --- 新增：代理到 Python 后端的 API ---
+
+    // 代理 /api/models
+    if (pathname === '/api/models' && req.method === 'GET') {
+        proxyRequestToPython(req, res, 5000, '/api/models');
+        return;
+    }
+
+    // 代理 /api/translate-subtitle
+    if (pathname === '/api/translate-subtitle' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/translate');
+        return;
+    }
+
+    // 代理 /api/correct-subtitle
+    if (pathname === '/api/correct-subtitle' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/correct_only');
+        return;
+    }
+
+    // 代理 /api/switch-model/corrector
+    if (pathname === '/api/switch-model/corrector' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/switch_model/corrector');
+        return;
+    }
+
+    // 代理 /api/switch-model/semantic
+    if (pathname === '/api/switch-model/semantic' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/switch_model/semantic');
+        return;
+    }
+
+    // 代理 /api/unload-models
+    if (pathname === '/api/unload-models' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/unload_models');
+        return;
+    }
  
+    // 代理 /api/chat
+    if (pathname === '/api/chat' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/chat');
+        return;
+    }
+
      // 新增：处理 /node_modules 的请求
      if (pathname.startsWith('/node_modules/')) {
         const filePath = path.join(__dirname, pathname);
@@ -1765,3 +1809,32 @@ server.listen(PORT, () => {
     console.log(`Serving files from: ${displayName} (${currentMediaDir})`);
     console.log(`Thumbnails will be cached in: ${THUMBNAIL_DIR}`);
 });
+
+// --- 新增：通用 Python 服务代理函数 ---
+function proxyRequestToPython(req, res, port, targetPath) {
+    const options = {
+        hostname: '127.0.0.1',
+        port: port,
+        path: targetPath,
+        method: req.method,
+        headers: {
+            ...req.headers,
+            'host': `127.0.0.1:${port}` // 修正 host 头
+        }
+    };
+
+    const proxy = http.request(options, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res, { end: true });
+    });
+
+    proxy.on('error', (err) => {
+        console.error(`代理到 Python 服务失败 (${targetPath}):`, err);
+        if (!res.headersSent) {
+            res.statusCode = 502; // Bad Gateway
+            res.end(JSON.stringify({ error: `无法连接到后端服务 (${targetPath})` }));
+        }
+    });
+
+    req.pipe(proxy, { end: true });
+}

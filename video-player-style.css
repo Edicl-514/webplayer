@@ -1106,3 +1106,53 @@ input:checked + .slider:before {
     color: #fff;
     border-color: #777;
 }
+/* Model Status Styles */
+.model-status-category {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.model-status-category:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.model-status-category h5 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: var(--accent-color);
+    font-size: 0.9em;
+}
+
+.model-selection-list {
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.model-selection-list button {
+    background-color: var(--secondary-bg);
+    color: var(--primary-text);
+    border: 1px solid var(--border-color);
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+    font-size: 0.85em;
+}
+
+.model-selection-list button:hover:not(:disabled) {
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
+}
+
+.model-selection-list button.active,
+.model-selection-list button:disabled {
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
+    cursor: not-allowed;
+    opacity: 0.8;
+}

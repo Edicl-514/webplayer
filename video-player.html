@@ -1289,6 +1289,7 @@
                                 addChatMessage(`字幕 '${result.filename}' 上传成功！列表已刷新。此面板将在2秒后关闭。`, 'bot');
                                 await loadAllSubtitles();
                                 setTimeout(() => {
+                                    resetSubtitleChat(false); // 重置UI状态
                                     playerContainer.classList.remove('chat-mode');
                                 }, 2000);
                             } else {
@@ -1417,6 +1418,7 @@
                        addChatMessage('字幕下载成功！列表已刷新。此面板将在2秒后关闭。', 'bot');
                        await loadAllSubtitles(); // Refresh the main subtitle list
                        setTimeout(() => {
+                            resetSubtitleChat(false); // 重置UI状态
                             playerContainer.classList.remove('chat-mode');
                        }, 2000);
                    } else {
@@ -1486,7 +1488,8 @@
             const sendChatBtn = document.getElementById('sendChatBtn');
             const closeChatBtn = document.getElementById('closeChatBtn');
 
-            let currentChatMode = 'none'; // 'semantic' or 'subtitle'
+            let currentChatMode = 'none'; // 'semantic' or 'subtitle' or 'ai'
+            let aiChatHistory = []; // History for general AI chat
             
             // State for subtitle download
             let subtitleChatState = 'idle'; // idle, waiting_movie_selection, waiting_lang_selection, waiting_subliminal_confirmation
@@ -1539,16 +1542,23 @@
                     
                     subtitleChatState = 'idle';
                     subtitleDownloadMethod = initialData.method; // Store the selected method
+                } else if (mode === 'ai') {
+                    chatTitle.textContent = '与AI对话';
+                    chatInput.placeholder = '输入 /a [你的问题]';
+                    chatInput.style.display = 'block';
+                    sendChatBtn.style.display = 'block';
+                    addChatMessage('你好！我是你的AI助手。', 'bot');
+                    aiChatHistory = []; // Reset history when starting a new AI chat session
                 }
             }
 
             semanticSearchBtn.addEventListener('click', () => {
-                // If the panel is closed and no mode is active, set it to semantic search.
-                if (!playerContainer.classList.contains('chat-mode') && currentChatMode === 'none') {
+                // If the panel is closed, open it in semantic search mode by default.
+                // If it's already open, this button does nothing to avoid mode conflicts.
+                if (!playerContainer.classList.contains('chat-mode')) {
                     setupChatPanel('semantic');
+                    playerContainer.classList.add('chat-mode');
                 }
-                // Always toggle the panel's visibility.
-                playerContainer.classList.toggle('chat-mode');
             });
             
             closeChatBtn.addEventListener('click', () => {
@@ -1582,6 +1592,46 @@
                const inputText = chatInput.value.trim();
                if (!inputText) return;
 
+               // 优先处理通用命令
+               if (inputText.toLowerCase() === '/clc') {
+                   clearChat();
+                   return;
+               }
+               if (inputText.startsWith('/a ')) {
+                   const query = inputText.substring(3).trim();
+                   if (query) {
+                       // If not in AI mode, switch to it
+                       if (currentChatMode !== 'ai') {
+                           setupChatPanel('ai');
+                           // The setup message is added, so we clear it for a clean chat start
+                           chatMessages.innerHTML = '';
+                       }
+                       await handleAIChat(query);
+                   }
+                   chatInput.value = '';
+                   return;
+               }
+               if (inputText.toLowerCase() === '/m') {
+                   await handleModelStatus();
+                   chatInput.value = '';
+                   return;
+               }
+               if (inputText.toLowerCase() === '/t') {
+                   await handleProcessSubtitle('translate');
+                   chatInput.value = '';
+                   return;
+               }
+               if (inputText.toLowerCase() === '/c') {
+                   await handleProcessSubtitle('correct');
+                   chatInput.value = '';
+                   return;
+               }
+               if (inputText.toLowerCase() === '/u') {
+                   await handleUnloadModels();
+                   chatInput.value = '';
+                   return;
+               }
+
                if (currentChatMode === 'semantic') {
                    await handleSemanticSearch(inputText);
                } else if (currentChatMode === 'subtitle') {
@@ -1589,16 +1639,127 @@
                }
            }
    
-           async function handleSemanticSearch(inputText) {
-               if (inputText === '/clc') {
-                   // Keep the first child (welcome message) and remove the rest
-                   while (chatMessages.children.length > 1) {
-                       chatMessages.removeChild(chatMessages.lastChild);
-                   }
-                   chatInput.value = ''; // Clear input
-                   return;
+           // 新增：获取当前字幕的纯文本内容
+           async function getSubtitleText() {
+               if (!currentSubtitleUrl) {
+                   return null;
                }
+               try {
+                   // 构建包含 mediaDir 的完整 URL
+                   const url = new URL(currentSubtitleUrl, window.location.origin);
+                   if (mediaDir) {
+                       url.searchParams.set('mediaDir', mediaDir);
+                   }
+                   
+                   const response = await fetch(url.toString());
+                   if (!response.ok) {
+                       throw new Error(`无法获取字幕文件: ${response.statusText}`);
+                   }
+                   const vttContent = await response.text();
+                   
+                   // 从VTT内容中提取纯文本
+                   // 移除VTT头部、时间戳和标签
+                   const lines = vttContent.split('\n');
+                   const textLines = lines.filter(line =>
+                       !line.startsWith('WEBVTT') &&
+                       !line.includes('-->') &&
+                       !/^\d+$/.test(line.trim()) &&
+                       line.trim() !== ''
+                   );
+                   // 移除行内的HTML标签
+                   const cleanText = textLines.map(line => line.replace(/<[^>]+>/g, '').trim()).join(' ');
+                   return cleanText;
+               } catch (error) {
+                   console.error('获取字幕文本时出错:', error);
+                   return null;
+               }
+           }
 
+           // 新增：获取视频元数据
+           function getVideoMetadata() {
+               const metadata = {
+                   title: videoTitle.textContent || '未知标题'
+               };
+               // 如果有更详细的刮削信息，也一并加入
+               if (scrapedInfo) {
+                   // 只挑选一些关键信息，避免过载
+                   const keys_to_include = ['标题', '演员', '简介', '发行日期', '系列'];
+                   for (const key of keys_to_include) {
+                       if (scrapedInfo[key]) {
+                           metadata[key] = scrapedInfo[key];
+                       }
+                   }
+               }
+               return metadata;
+           }
+
+           async function handleAIChat(query) {
+               addChatMessage(query, 'user', false);
+               chatInput.value = '';
+               const thinkingMessage = addChatMessage('正在思考中...', 'bot');
+
+               try {
+                   // 在发送请求前，收集视频上下文
+                   const subtitleText = await getSubtitleText();
+                   const metadata = getVideoMetadata();
+                   
+                   const videoContext = {
+                       metadata: metadata,
+                       subtitle_text: subtitleText
+                   };
+                   console.log("发送给AI的视频上下文:", videoContext);
+
+                   const response = await fetch('/api/chat', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           query: query,
+                           history: aiChatHistory,
+                           context: videoContext // 新增：将视频上下文发送到后端
+                       })
+                   });
+
+                   thinkingMessage.remove();
+
+                   if (!response.ok) {
+                       const errorResult = await response.json();
+                       throw new Error(errorResult.error || `HTTP error! status: ${response.status}`);
+                   }
+
+                   const result = await response.json();
+                   
+                   // Add to history BEFORE displaying
+                   aiChatHistory.push({ role: 'user', content: query });
+                   aiChatHistory.push({ role: 'assistant', content: result.response });
+
+                   // Display formatted response
+                   const formattedResponse = result.response.replace(/\n/g, '<br>');
+                   addChatMessage(formattedResponse, 'bot', true);
+
+               } catch (error) {
+                   console.error('AI chat error:', error);
+                   if (thinkingMessage && chatMessages.contains(thinkingMessage)) {
+                       thinkingMessage.remove();
+                   }
+                   addChatMessage(`与模型对话失败: ${error.message}`, 'error');
+               }
+           }
+
+           function clearChat() {
+               // 保留第一个子元素（通常是欢迎消息），并删除其余的
+               while (chatMessages.children.length > 1) {
+                   chatMessages.removeChild(chatMessages.lastChild);
+               }
+               chatInput.value = ''; // 清空输入框
+               
+               // Also clear AI chat history if in that mode
+               if (currentChatMode === 'ai') {
+                   aiChatHistory = [];
+                   console.log("AI chat history cleared.");
+               }
+           }
+
+           async function handleSemanticSearch(inputText) {
                if (!currentSubtitleUrl) {
                    addChatMessage('错误：未加载字幕文件，无法进行搜索。', 'error');
                    return;
@@ -1780,6 +1941,7 @@
                        addChatMessage('字幕下载成功！列表已刷新。此面板将在2秒后关闭。', 'bot');
                        await loadAllSubtitles(); // Refresh the main subtitle list
                        setTimeout(() => {
+                            resetSubtitleChat(false); // 重置UI状态
                             playerContainer.classList.remove('chat-mode');
                        }, 2000);
                    } else {
@@ -1832,6 +1994,143 @@
                    handleChatInput();
                }
            });
+
+           // --- 新增：模型管理和字幕处理功能 ---
+
+           async function handleModelStatus() {
+               addChatMessage('正在查询模型状态...', 'bot');
+               try {
+                   const response = await fetch('/api/models');
+                   const data = await response.json();
+                   chatMessages.lastChild.remove(); // 移除 "正在查询..."
+
+                   let statusHtml = '<h4><i class="fas fa-brain"></i> 模型状态</h4>';
+                   
+                   // 语义搜索模型
+                   statusHtml += '<div class="model-status-category">';
+                   statusHtml += `<h5>语义搜索模型 (当前: ${data.semantic_search_models.active})</h5>`;
+                   statusHtml += '<ul class="chat-selection-list model-selection-list">';
+                   data.semantic_search_models.available.forEach(model => {
+                       const isActive = model === data.semantic_search_models.active;
+                       statusHtml += `<li><button class="${isActive ? 'active' : ''}" onclick="switchModel('semantic', '${model}')" ${isActive ? 'disabled' : ''}>${model}</button></li>`;
+                   });
+                   statusHtml += '</ul></div>';
+
+                   // 纠错/翻译模型
+                   statusHtml += '<div class="model-status-category">';
+                   statusHtml += `<h5>纠错/翻译模型 (当前: ${data.corrector_models.active || 'N/A'})</h5>`;
+                   if (data.corrector_models.available && data.corrector_models.available.length > 0) {
+                       statusHtml += '<ul class="chat-selection-list model-selection-list">';
+                       data.corrector_models.available.forEach((model, index) => {
+                           const isActive = model === data.corrector_models.active;
+                           statusHtml += `<li><button class="${isActive ? 'active' : ''}" onclick="switchModel('corrector', ${index})" ${isActive ? 'disabled' : ''}>${model}</button></li>`;
+                       });
+                       statusHtml += '</ul></div>';
+                   } else {
+                       statusHtml += '<p>无可用模型或配置错误。</p>';
+                   }
+                   
+                   addChatMessage(statusHtml, 'bot');
+
+               } catch (error) {
+                   console.error('获取模型状态失败:', error);
+                   if (chatMessages.lastChild.textContent.includes('正在查询')) {
+                      chatMessages.lastChild.remove();
+                   }
+                   addChatMessage(`获取模型状态失败: ${error.message}`, 'error');
+               }
+           }
+
+           async function switchModel(type, identifier) {
+               const loadingMsg = addChatMessage(`正在切换 ${type === 'semantic' ? '语义' : '纠错'} 模型...`, 'bot');
+               const url = `/api/switch-model/${type}`;
+               const body = type === 'semantic'
+                   ? JSON.stringify({ model_name: identifier })
+                   : JSON.stringify({ model_index: identifier });
+
+               try {
+                   const response = await fetch(url, {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: body
+                   });
+                   const result = await response.json();
+                   loadingMsg.remove();
+
+                   if (response.ok) {
+                       addChatMessage(`✅ ${result.message}`, 'bot');
+                       if (result.warning) {
+                           addChatMessage(`⚠️ 警告: ${result.warning}`, 'bot');
+                       }
+                       // 刷新模型状态显示
+                       await handleModelStatus();
+                   } else {
+                       throw new Error(result.error || '未知错误');
+                   }
+               } catch (error) {
+                   loadingMsg.remove();
+                   addChatMessage(`❌ 切换模型失败: ${error.message}`, 'error');
+               }
+           }
+
+           async function handleProcessSubtitle(mode) {
+               if (!currentSubtitleUrl) {
+                   addChatMessage('错误：未加载字幕文件，无法进行处理。', 'error');
+                   return;
+               }
+
+               const actionText = mode === 'translate' ? '翻译' : '纠错';
+               const loadingMsg = addChatMessage(`正在发送字幕${actionText}请求...`, 'bot');
+               
+               const apiUrl = mode === 'translate' ? '/api/translate-subtitle' : '/api/correct-subtitle';
+
+               try {
+                   const response = await fetch(apiUrl, {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           vtt_file: currentSubtitleUrl,
+                           mediaDir: mediaDir
+                       })
+                   });
+
+                   const result = await response.json();
+                   loadingMsg.remove();
+
+                   if (response.ok) {
+                       addChatMessage(`✅ 字幕${actionText}成功！<br>新文件已保存: ${result.processed_file}<br>字幕列表已刷新。`, 'bot');
+                       await loadAllSubtitles(); // 刷新字幕列表
+                   } else {
+                       throw new Error(result.error || `${actionText}失败`);
+                   }
+               } catch (error) {
+                   loadingMsg.remove();
+                   addChatMessage(`❌ 字幕${actionText}失败: ${error.message}`, 'error');
+               }
+           }
+
+           async function handleUnloadModels() {
+               const loadingMsg = addChatMessage('正在卸载所有模型...', 'bot');
+               try {
+                   const response = await fetch('/api/unload-models', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                   });
+                   const result = await response.json();
+                   loadingMsg.remove();
+
+                   if (response.ok) {
+                       addChatMessage(`✅ ${result.message}`, 'bot');
+                       // Optionally, refresh model status to show they are unloaded
+                       await handleModelStatus();
+                   } else {
+                       throw new Error(result.error || '未知错误');
+                   }
+               } catch (error) {
+                   loadingMsg.remove();
+                   addChatMessage(`❌ 卸载模型失败: ${error.message}`, 'error');
+               }
+           }
 
         </script>
         <script src="vendor/jquery-3.5.1.min.js"></script>
