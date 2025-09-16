@@ -772,6 +772,66 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 新增：处理视频转录请求
+    if (pathname === '/api/transcribe-video' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const { src, mediaDir } = JSON.parse(body);
+                if (!src || !mediaDir) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
+                    return;
+                }
+
+                const fullVideoPath = path.join(mediaDir, src);
+                const pythonProcess = spawn('python', ['generate_subtitle.py', fullVideoPath], {
+                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                });
+
+                let stdoutData = '';
+                let stderrData = '';
+
+                pythonProcess.stdout.on('data', (data) => {
+                    stdoutData += data.toString();
+                });
+
+                pythonProcess.stderr.on('data', (data) => {
+                    stderrData += data.toString();
+                });
+
+                pythonProcess.on('close', (code) => {
+                    if (code !== 0) {
+                        console.error(`generate_subtitle.py stderr: ${stderrData}`);
+                        res.statusCode = 500;
+                        res.end(JSON.stringify({ success: false, message: `转录脚本执行失败，退出码: ${code}`, details: stderrData }));
+                        return;
+                    }
+                    
+                    // 从Python脚本的输出中提取VTT文件路径
+                    const vttPathMatch = stdoutData.match(/字幕已保存为 VTT 格式: (.*)/);
+                    if (vttPathMatch && vttPathMatch[1]) {
+                        const vttFilePath = vttPathMatch[1].trim().replace(/\\/g, '/');
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(JSON.stringify({ success: true, vtt_file: vttFilePath }));
+                    } else {
+                        res.statusCode = 500;
+                        res.end(JSON.stringify({ success: false, message: '无法从脚本输出中解析VTT文件路径。', details: stdoutData }));
+                    }
+                });
+
+            } catch (e) {
+                console.error('Error processing /api/transcribe-video:', e);
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: '无效的JSON请求。' }));
+            }
+        });
+        return;
+    }
+
     if (pathname === '/api/convert-video' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => {
@@ -860,13 +920,13 @@ const server = http.createServer(async (req, res) => {
        });
        req.on('end', () => {
            try {
-               const { src, mediaDir, type, force } = JSON.parse(body);
+               const { src, mediaDir, type, force, forceSearchTitle, enabled_scrapers } = JSON.parse(body);
                if (!src || !mediaDir) {
                    res.statusCode = 400;
                    res.end(JSON.stringify({ error: 'Missing src or mediaDir' }));
                    return;
                }
-
+ 
                const fullVideoPath = path.join(mediaDir, src);
                const args = ['video_scraper.py', fullVideoPath];
                if (type) {
@@ -874,6 +934,12 @@ const server = http.createServer(async (req, res) => {
                }
                if (force) {
                    args.push('--force');
+               }
+               if (forceSearchTitle) {
+                   args.push('--force-search', forceSearchTitle);
+               }
+               if (enabled_scrapers) {
+                    args.push('--enabled-scrapers', JSON.stringify(enabled_scrapers));
                }
  
                const pythonProcess = spawn('python', args, {
@@ -988,6 +1054,128 @@ const server = http.createServer(async (req, res) => {
        return;
    }
 
+   if (pathname === '/api/delete-scraped-record' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => {
+           body += chunk.toString();
+       });
+       req.on('end', () => {
+           try {
+               const { src, mediaDir } = JSON.parse(body);
+               if (!src || !mediaDir) {
+                   res.statusCode = 400;
+                   res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
+                   return;
+               }
+
+               const fullVideoPath = path.join(mediaDir, src);
+               const args = ['video_scraper.py', fullVideoPath, '--delete'];
+
+               const pythonProcess = spawn('python', args, {
+                   env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+               });
+
+               let stdoutData = '';
+               let stderrData = '';
+
+               pythonProcess.stdout.on('data', (data) => {
+                   stdoutData += data.toString();
+               });
+
+               pythonProcess.stderr.on('data', (data) => {
+                   stderrData += data.toString();
+               });
+
+               pythonProcess.on('close', (code) => {
+                   if (stderrData) {
+                       console.error(`video_scraper.py --delete stderr: ${stderrData}`);
+                   }
+                   if (code !== 0) {
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ success: false, message: `Scraper delete script exited with code ${code}`, details: stderrData }));
+                       return;
+                   }
+                   try {
+                       const deleteData = JSON.parse(stdoutData);
+                       res.setHeader('Content-Type', 'application/json');
+                       res.end(JSON.stringify(deleteData));
+                   } catch (e) {
+                       console.error('Error parsing python script output for delete:', e);
+                       console.error('Raw stdout for delete:', stdoutData);
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ success: false, message: 'Error parsing scraper delete output' }));
+                   }
+               });
+
+           } catch (e) {
+               res.statusCode = 400;
+               res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+           }
+       });
+       return;
+   }
+
+   if (pathname === '/api/delete-jav-source' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => {
+           body += chunk.toString();
+       });
+       req.on('end', () => {
+           try {
+               const { src, mediaDir, source } = JSON.parse(body);
+               if (!src || !mediaDir || !source) {
+                   res.statusCode = 400;
+                   res.end(JSON.stringify({ success: false, message: 'Missing src, mediaDir, or source' }));
+                   return;
+               }
+
+               const fullVideoPath = path.join(mediaDir, src);
+               const args = ['video_scraper.py', fullVideoPath, '--delete-source', source];
+
+               const pythonProcess = spawn('python', args, {
+                   env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+               });
+
+               let stdoutData = '';
+               let stderrData = '';
+
+               pythonProcess.stdout.on('data', (data) => {
+                   stdoutData += data.toString();
+               });
+
+               pythonProcess.stderr.on('data', (data) => {
+                   stderrData += data.toString();
+               });
+
+               pythonProcess.on('close', (code) => {
+                   if (stderrData) {
+                       console.error(`video_scraper.py --delete-source stderr: ${stderrData}`);
+                   }
+                   if (code !== 0) {
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ success: false, message: `Scraper delete script exited with code ${code}`, details: stderrData }));
+                       return;
+                   }
+                   try {
+                       const deleteData = JSON.parse(stdoutData);
+                       res.setHeader('Content-Type', 'application/json');
+                       res.end(JSON.stringify(deleteData));
+                   } catch (e) {
+                       console.error('Error parsing python script output for delete-source:', e);
+                       console.error('Raw stdout for delete-source:', stdoutData);
+                       res.statusCode = 500;
+                       res.end(JSON.stringify({ success: false, message: 'Error parsing scraper delete-source output' }));
+                   }
+               });
+
+           } catch (e) {
+               res.statusCode = 400;
+               res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+           }
+       });
+       return;
+   }
+ 
    // API to get cache info
    if (pathname === '/api/cache-info' && req.method === 'GET') {
        const dirSizePromises = CACHE_SUB_DIRS.map(async (dir) => {
@@ -1302,6 +1490,12 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 代理 /api/generate-glossary
+    if (pathname === '/api/generate-glossary' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/generate_glossary');
+        return;
+    }
+ 
      // 新增：处理 /node_modules 的请求
      if (pathname.startsWith('/node_modules/')) {
         const filePath = path.join(__dirname, pathname);

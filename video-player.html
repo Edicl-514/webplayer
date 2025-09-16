@@ -27,6 +27,10 @@
                               <a href="#" data-type="anime">动漫</a>
                               <a href="#" data-type="jav">JAV</a>
                               <a href="#" data-type="FC2">FC2</a>
+                              <div style="border-top: 1px solid #444; margin: 5px 0;"></div>
+                              <div class="dropdown-divider"></div>
+                              <a href="#" id="deleteScrapeRecordBtn">删除记录</a>
+                              <a href="#" id="manualScrapeBtn">手动输入</a>
                           </div>
                       </div>
                       <div class="subtitle-dropdown">
@@ -95,24 +99,85 @@
    
        <div id="settingsModal" class="modal" style="display: none;">
            <div class="modal-content">
-               <h2>设置</h2>
+               <div class="modal-header">
+                   <h2>设置</h2>
+                   <button id="closeSettingsBtnCross" class="control-btn" title="关闭"><i class="fas fa-times"></i></button>
+               </div>
                <div class="settings-list">
-                   <div class="setting-item">
-                       <label for="autoScrapeToggle">自动刮削</label>
-                       <label class="switch">
-                           <input type="checkbox" id="autoScrapeToggle">
-                           <span class="slider round"></span>
-                       </label>
+                   <div class="setting-category">
+                       <h4>通用设置</h4>
+                       <div class="setting-item">
+                           <label for="autoScrapeToggle">自动刮削</label>
+                           <label class="switch">
+                               <input type="checkbox" id="autoScrapeToggle">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="forceScrapeToggle">强制联网刮削</label>
+                           <label class="switch">
+                               <input type="checkbox" id="forceScrapeToggle">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
                    </div>
-                   <div class="setting-item">
-                       <label for="forceScrapeToggle">强制联网刮削</label>
-                       <label class="switch">
-                           <input type="checkbox" id="forceScrapeToggle">
-                           <span class="slider round"></span>
-                       </label>
+                   <div class="setting-category">
+                       <h4>JAV 刮削网站</h4>
+                       <div class="setting-item">
+                           <label for="javbusToggle">Javbus</label>
+                           <label class="switch">
+                               <input type="checkbox" id="javbusToggle" data-scraper-group="jav" data-scraper-name="Javbus">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="javdbToggle">JavDB</label>
+                           <label class="switch">
+                               <input type="checkbox" id="javdbToggle" data-scraper-group="jav" data-scraper-name="JavDB">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="jav321Toggle">Jav321</label>
+                           <label class="switch">
+                               <input type="checkbox" id="jav321Toggle" data-scraper-group="jav" data-scraper-name="Jav321">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="fanzaToggle">Fanza</label>
+                           <label class="switch">
+                               <input type="checkbox" id="fanzaToggle" data-scraper-group="jav" data-scraper-name="Fanza">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                   </div>
+                   <div class="setting-category">
+                       <h4>动漫 刮削网站</h4>
+                       <div class="setting-item">
+                           <label for="bangumiToggle">Bangumi</label>
+                           <label class="switch">
+                               <input type="checkbox" id="bangumiToggle" data-scraper-group="anime" data-scraper-name="Bangumi" disabled checked>
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="getchuToggle">Getchu</label>
+                           <label class="switch">
+                               <input type="checkbox" id="getchuToggle" data-scraper-group="anime-optional" data-scraper-name="Getchu">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
+                       <div class="setting-item">
+                           <label for="hanimeToggle">Hanime</label>
+                           <label class="switch">
+                               <input type="checkbox" id="hanimeToggle" data-scraper-group="anime-optional" data-scraper-name="Hanime">
+                               <span class="slider round"></span>
+                           </label>
+                       </div>
                    </div>
                </div>
-               <div style="margin-top: 20px;">
+               <div class="modal-footer">
                     <button id="closeSettingsBtn">关闭</button>
                </div>
            </div>
@@ -162,6 +227,38 @@
    
            }
            
+           async function checkAndLoadScrapedInfo() {
+               try {
+                   const response = await fetch(`/api/check-scraped-info`, {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           src: decodeURIComponent(videoSrc),
+                           mediaDir: mediaDir
+                       })
+                   });
+                   const data = await response.json();
+
+                   if (data && data.status !== 'not_found') {
+                       console.log('Found cached info, displaying it.');
+                       displayScrapedData(data);
+                   } else {
+                       console.log('No cached info found.');
+                       // If no cache, then check auto-scrape setting
+                       if (document.getElementById('autoScrapeToggle').checked) {
+                           console.log('Auto-scraping enabled, starting network scrape.');
+                           scrapeVideo('auto', false); // false indicates this is not a manual scrape
+                       }
+                   }
+               } catch (error) {
+                   console.error('Error checking for scraped info:', error);
+                   // Fallback to default behavior if check fails
+                   if (document.getElementById('autoScrapeToggle').checked) {
+                       scrapeVideo('auto', false);
+                   }
+               }
+           }
+
            async function setTempMediaDirAndPlay() {
                if (mediaDir) {
                    try {
@@ -188,6 +285,18 @@
                }
    
                if (videoSrc) {
+                   // --- Start: Set initial background to thumbnail ---
+                   const playerBg = document.querySelector('.player-bg');
+                   // Construct thumbnail URL from video source, ensuring the path part is correctly encoded
+                   const decodedPath = decodeURIComponent(videoSrc);
+                   // Manually construct the thumbnail URL to handle special characters correctly.
+                   const encodedPathForThumbnail = decodedPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                   const thumbnailSrc = `/thumbnail${encodedPathForThumbnail.startsWith('/') ? '' : '/'}${encodedPathForThumbnail}`;
+                   const fullThumbnailUrl = `${thumbnailSrc}?mediaDir=${encodeURIComponent(mediaDir)}`;
+                   console.log('Setting initial background with thumbnail:', fullThumbnailUrl);
+                   playerBg.style.backgroundImage = `url('${fullThumbnailUrl}')`;
+                   // --- End: Set initial background to thumbnail ---
+                   
                    const fullVideoUrl = buildVideoUrl(videoSrc, mediaDir);
    
                    decodedVideoSrc = decodeURIComponent(videoSrc); // 赋值给全局变量
@@ -247,38 +356,6 @@
                            bottom: '5%',
                            color: '#FFFFFF'
                        };
-                   }
-   
-                   async function checkAndLoadScrapedInfo() {
-                       try {
-                           const response = await fetch(`/api/check-scraped-info`, {
-                               method: 'POST',
-                               headers: { 'Content-Type': 'application/json' },
-                               body: JSON.stringify({
-                                   src: decodeURIComponent(videoSrc),
-                                   mediaDir: mediaDir
-                               })
-                           });
-                           const data = await response.json();
-   
-                           if (data && data.status !== 'not_found') {
-                               console.log('Found cached info, displaying it.');
-                               displayScrapedData(data);
-                           } else {
-                               console.log('No cached info found.');
-                               // If no cache, then check auto-scrape setting
-                               if (document.getElementById('autoScrapeToggle').checked) {
-                                   console.log('Auto-scraping enabled, starting network scrape.');
-                                   scrapeVideo('auto', false); // false indicates this is not a manual scrape
-                               }
-                           }
-                       } catch (error) {
-                           console.error('Error checking for scraped info:', error);
-                           // Fallback to default behavior if check fails
-                           if (document.getElementById('autoScrapeToggle').checked) {
-                               scrapeVideo('auto', false);
-                           }
-                       }
                    }
    
                    function initDPlayer() {
@@ -950,12 +1027,27 @@
           scraperDropdownContent.addEventListener('click', (event) => {
               if (event.target.tagName === 'A') {
                   event.preventDefault();
-                  const type = event.target.dataset.type;
-                  scrapeVideo(type, true); // true indicates this is a manual scrape
-                  scraperDropdownContent.classList.remove('show');
+                  scraperDropdownContent.classList.remove('show'); // Hide dropdown first
+                  
+                  if (event.target.id === 'deleteScrapeRecordBtn') {
+                      if (confirm('确定要删除此视频的本地刮削记录吗？此操作不可撤销。')) {
+                          deleteScrapedRecord();
+                      }
+                   } else if (event.target.id === 'manualScrapeBtn') {
+                        startManualScrapeFlow();
+                   } else {
+                      const type = event.target.dataset.type;
+                      scrapeVideo(type, true); // true indicates this is a manual scrape
+                  }
               }
           });
-   
+
+          function startManualScrapeFlow() {
+               setupChatPanel('manual-scrape');
+               playerContainer.classList.add('chat-mode');
+          }
+
+
           window.addEventListener('click', function(event) {
               if (!event.target.closest('.scraper-dropdown')) {
                   if (scraperDropdownContent.classList.contains('show')) {
@@ -964,7 +1056,7 @@
               }
           });
    
-          async function scrapeVideo(type, isManual) {
+          async function scrapeVideo(type, isManual, forceSearchTitle = null) {
               const videoInfoContent = document.getElementById('videoInfoContent');
               videoInfoContent.innerHTML = '<p>正在刮削中...</p>';
               
@@ -974,17 +1066,36 @@
               const forceScrape = isManual || document.getElementById('forceScrapeToggle').checked;
    
               try {
+                   const enabledScrapers = {};
+                   document.querySelectorAll('.settings-list input[data-scraper-group], .settings-list input[data-scraper-group="anime-optional"]').forEach(toggle => {
+                       if (toggle.checked) {
+                           const group = toggle.dataset.scraperGroup.replace('-optional', '');
+                           const name = toggle.dataset.scraperName;
+                           if (!enabledScrapers[group]) {
+                               enabledScrapers[group] = [];
+                           }
+                           enabledScrapers[group].push(name);
+                       }
+                   });
+
+                  const payload = {
+                      src: decodeURIComponent(videoSrc),
+                      mediaDir: mediaDir,
+                      type: type === 'auto' ? null : type,
+                      force: forceScrape,
+                      enabled_scrapers: enabledScrapers
+                  };
+                  
+                  if (forceSearchTitle) {
+                      payload.forceSearchTitle = forceSearchTitle;
+                  }
+
                   const response = await fetch(`/api/scrape-video`, {
                       method: 'POST',
                       headers: {
                           'Content-Type': 'application/json'
                       },
-                      body: JSON.stringify({
-                          src: decodeURIComponent(videoSrc),
-                          mediaDir: mediaDir,
-                          type: type === 'auto' ? null : type,
-                          force: forceScrape
-                      })
+                      body: JSON.stringify(payload)
                   });
    
                   if (!response.ok) {
@@ -999,10 +1110,104 @@
                   videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${error.message}</p>`;
               }
           }
-   
-          function displayScrapedData(data) {
-              console.log("Received scraped data:", JSON.stringify(data, null, 2));
+          
+          async function deleteScrapedRecord(silent = false) {
               const videoInfoContent = document.getElementById('videoInfoContent');
+              if (!silent) {
+                  videoInfoContent.innerHTML = '<p>正在删除记录...</p>';
+              }
+  
+              try {
+                  const response = await fetch(`/api/delete-scraped-record`, {
+                      method: 'POST',
+                      headers: {
+                          'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                          src: decodeURIComponent(videoSrc),
+                          mediaDir: mediaDir
+                      })
+                  });
+  
+                  if (!response.ok) {
+                      const errorData = await response.json();
+                      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                  }
+  
+                  const result = await response.json();
+  
+                  if (result.success) {
+                      if (!silent) {
+                          videoInfoContent.innerHTML = `<p>${result.message}</p>`;
+                      }
+                      scrapedInfo = null; // Clear stored info
+                      // Reset background and theme to default
+                      const playerBg = document.querySelector('.player-bg');
+                      playerBg.style.backgroundImage = '';
+                      document.documentElement.style.setProperty('--primary-text', '#e0e0e0');
+                      document.documentElement.style.setProperty('--accent-color', '#00bcd4');
+                      document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
+                      document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
+                      return true;
+                  } else {
+                      throw new Error(result.message || '删除失败。');
+                  }
+  
+              } catch (error) {
+                  if (!silent) {
+                      console.error('Error deleting scraped record:', error);
+                      videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">删除失败: ${error.message}</p>`;
+                  }
+                  return false;
+              }
+          }
+
+        async function deleteJavSourceRecord(sourceName) {
+            if (!confirm(`确定要删除来源 "${sourceName}" 的刮削记录吗？`)) {
+                return;
+            }
+
+            const videoInfoContent = document.getElementById('videoInfoContent');
+            videoInfoContent.innerHTML = `<p>正在删除来源 "${sourceName}" 的记录...</p>`;
+
+            try {
+                const response = await fetch(`/api/delete-jav-source`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        src: decodeURIComponent(videoSrc),
+                        mediaDir: mediaDir,
+                        source: sourceName
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // 删除成功后，重新加载刮削信息以更新界面
+                    await checkAndLoadScrapedInfo();
+                } else {
+                    throw new Error(result.message || '删除失败。');
+                }
+
+            } catch (error) {
+                console.error('Error deleting JAV source record:', error);
+                videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">删除失败: ${error.message}</p>`;
+            }
+        }
+
+       function displayScrapedData(data) {
+           console.log("--- RAW SCRAPED DATA RECEIVED ---");
+           console.log(JSON.stringify(data, null, 2));
+           console.log("---------------------------------");
+               const videoInfoContent = document.getElementById('videoInfoContent');
               if (data.错误) {
                   videoInfoContent.innerHTML = `<p style="color: #ff4b2b;">刮削失败: ${data.错误}</p>`;
                   scrapedInfo = null; // Clear scraped info on error
@@ -1025,18 +1230,22 @@
                     data.JAV刮削结果.forEach(sourceData => {
                         html += '<div class="source-container">';
                         // Use optional chaining for safety
-                        html += `<h3>${sourceData?.来源 || '未知来源'} (匹配度: ${(sourceData?.匹配度 ?? 0).toFixed(2)})</h3>`;
+                        const sourceName = sourceData?.来源 || '未知来源';
+                        html += `<h3>
+                           <span>${sourceName} (匹配度: ${(sourceData?.匹配度 ?? 0).toFixed(2)})</span>
+                           <button class="delete-source-btn" onclick="deleteJavSourceRecord('${sourceName}')" title="删除此来源记录">&times;</button>
+                        </h3>`;
                         html += buildHtml(sourceData);
                         html += '</div>';
                     });
                     videoInfoContent.innerHTML = html;
                     // Try to set background from the first JAV result that has a poster
                     const firstResultWithPoster = data.JAV刮削结果.find(r => r.海报链接 && isImageUrl(r.海报链接));
-                    if (firstResultWithPoster) {
+                    if (firstResultWithPoster && firstResultWithPoster.海报链接) {
                         console.log("Found poster in JAV results:", firstResultWithPoster.海报链接);
                         updateBackgroundAndTheme(firstResultWithPoster.海报链接);
                     } else {
-                        console.log("No valid poster found in JAV results.");
+                        console.log("No valid poster found in JAV results, keeping thumbnail as background.");
                     }
     
                 } else {
@@ -1055,7 +1264,7 @@
                        console.log("Found poster in single result:", posterUrl);
                        updateBackgroundAndTheme(posterUrl);
                    } else {
-                       console.log("No valid poster found in single result data.");
+                       console.log("No valid poster found in single result data, keeping thumbnail as background.");
                    }
                 }
           }
@@ -1180,7 +1389,7 @@
                    }
                };
                img.onerror = function(e) {
-                   console.error("Failed to load image for ColorThief via proxy. Error event:", e);
+                   console.error(`Failed to load image for ColorThief via proxy. The URL was: ${this.src}. This might be a proxy or CORS issue.`, e);
                     // Restore default colors on error
                    document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
                    document.documentElement.style.setProperty('--accent-color', '#00bcd4');
@@ -1250,6 +1459,55 @@
            }
    
            function handleSubtitleAction(action) {
+                if (action === 'local-transcribe') {
+                    setupChatPanel('subtitle', { method: 'local-transcribe' });
+                    playerContainer.classList.add('chat-mode');
+                    chatTitle.textContent = '本地转录';
+                    chatInput.style.display = 'none';
+                    sendChatBtn.style.display = 'none';
+                    const transcribeMessage = addChatMessage('正在转录视频，这可能需要一些时间... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+
+                    currentFetchController = new AbortController();
+                    fetch('/api/transcribe-video', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            src: decodedVideoSrc,
+                            mediaDir: mediaDir
+                        }),
+                        signal: currentFetchController.signal
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        transcribeMessage.remove();
+                        if (result.success) {
+                            addChatMessage(`转录成功！字幕已保存: ${result.vtt_file}<br>列表已刷新。此面板将在2秒后关闭。`, 'bot');
+                            loadAllSubtitles(); // Refresh the subtitle list
+                            setTimeout(() => {
+                                resetSubtitleChat(false);
+                                playerContainer.classList.remove('chat-mode');
+                            }, 2000);
+                        } else {
+                            throw new Error(result.message || '转录失败。');
+                        }
+                    })
+                    .catch(error => {
+                        if (error.name === 'AbortError') {
+                             console.log('Transcription aborted by user.');
+                             transcribeMessage.remove();
+                             addChatMessage('转录已取消。', 'bot');
+                             resetSubtitleChat(false);
+                        } else {
+                            transcribeMessage.remove();
+                            addChatMessage(`转录失败: ${error.message}<br><button class="chat-cancel-btn" onclick="cancelAndExitChat()">关闭</button>`, 'error');
+                            console.error('Error transcribing video:', error);
+                        }
+                    })
+                    .finally(() => {
+                        currentFetchController = null;
+                    });
+                    return;
+                }
                 if (action === 'upload-subtitle') {
                     const fileInput = document.createElement('input');
                     fileInput.type = 'file';
@@ -1449,26 +1707,105 @@
            function saveSettings() {
                localStorage.setItem('settings_autoScrape', autoScrapeToggle.checked);
                localStorage.setItem('settings_forceScrape', forceScrapeToggle.checked);
+
+               const scraperSettings = {};
+               document.querySelectorAll('.settings-list input[data-scraper-group]').forEach(toggle => {
+                   const group = toggle.dataset.scraperGroup;
+                   const name = toggle.dataset.scraperName;
+                   if (!scraperSettings[group]) {
+                       scraperSettings[group] = {};
+                   }
+                   scraperSettings[group][name] = toggle.checked;
+               });
+               localStorage.setItem('settings_scraperSites', JSON.stringify(scraperSettings));
            }
-   
+
            function loadSettings() {
                const autoScrape = localStorage.getItem('settings_autoScrape');
                const forceScrape = localStorage.getItem('settings_forceScrape');
-   
                autoScrapeToggle.checked = autoScrape === null ? true : autoScrape === 'true';
                forceScrapeToggle.checked = forceScrape === 'true';
+
+               const scraperSettings = JSON.parse(localStorage.getItem('settings_scraperSites'));
+               if (scraperSettings) {
+                   document.querySelectorAll('.settings-list input[data-scraper-group]').forEach(toggle => {
+                       const group = toggle.dataset.scraperGroup;
+                       const name = toggle.dataset.scraperName;
+                       if (scraperSettings[group] && typeof scraperSettings[group][name] !== 'undefined') {
+                           toggle.checked = scraperSettings[group][name];
+                       } else {
+                           // Default to true if not set
+                           toggle.checked = true;
+                       }
+                   });
+               } else {
+                   // Default all to true if no settings are saved
+                   document.querySelectorAll('.settings-list input[data-scraper-group]').forEach(toggle => {
+                       if (!toggle.disabled) {
+                           toggle.checked = true;
+                       }
+                   });
+               }
+               validateScraperSettings(); // Ensure at least one is checked per group
+           }
+
+           function validateScraperSettings(event) {
+               const validateGroup = (groupName) => {
+                   const toggles = document.querySelectorAll(`input[data-scraper-group="${groupName}"]`);
+                   const checkedToggles = document.querySelectorAll(`input[data-scraper-group="${groupName}"]:checked`);
+
+                   if (checkedToggles.length === 0 && toggles.length > 0) {
+                       if (event && event.target.dataset.scraperGroup === groupName) {
+                           // Prevent the user from unchecking the last one
+                           event.target.checked = true;
+                           alert(`至少需要启用一个 ${groupName.toUpperCase()} 刮削网站。`);
+                       } else {
+                           // If loaded state is invalid, check the first one
+                           toggles[0].checked = true;
+                       }
+                   }
+               };
+               
+               const validateOptionalGroup = (groupName) => {
+                   const toggles = document.querySelectorAll(`input[data-scraper-group="${groupName}"]`);
+                   const checkedToggles = document.querySelectorAll(`input[data-scraper-group="${groupName}"]:checked`);
+
+                   if (checkedToggles.length === 0 && toggles.length > 0) {
+                        if (event && event.target.dataset.scraperGroup === groupName) {
+                           event.target.checked = true;
+                           alert(`动漫刮削网站中，Getchu 和 Hanime 至少需要启用一个。`);
+                       } else {
+                           toggles[0].checked = true;
+                       }
+                   }
+               };
+
+               validateGroup('jav');
+               validateOptionalGroup('anime-optional');
+               saveSettings();
            }
    
            settingsBtn.onclick = () => {
                settingsModal.style.display = 'block';
            };
    
-           closeSettingsBtn.onclick = () => {
+           const closeSettingsBtnCross = document.getElementById('closeSettingsBtnCross');
+
+           function closeSettingsModal() {
                settingsModal.style.display = 'none';
-           };
+           }
+
+           closeSettingsBtn.onclick = closeSettingsModal;
+           closeSettingsBtnCross.onclick = closeSettingsModal;
    
            autoScrapeToggle.onchange = saveSettings;
            forceScrapeToggle.onchange = saveSettings;
+
+           document.querySelectorAll('.settings-list input[data-scraper-group]').forEach(toggle => {
+               toggle.addEventListener('change', (event) => {
+                   validateScraperSettings(event);
+               });
+           });
    
            window.addEventListener('click', (event) => {
                if (event.target == settingsModal) {
@@ -1488,8 +1825,9 @@
             const sendChatBtn = document.getElementById('sendChatBtn');
             const closeChatBtn = document.getElementById('closeChatBtn');
 
-            let currentChatMode = 'none'; // 'semantic' or 'subtitle' or 'ai'
+            let currentChatMode = 'none'; // 'semantic' or 'subtitle' or 'ai' or 'manual-scrape'
             let aiChatHistory = []; // History for general AI chat
+            let manualScrapeState = { active: false, type: null, title: null };
             
             // State for subtitle download
             let subtitleChatState = 'idle'; // idle, waiting_movie_selection, waiting_lang_selection, waiting_subliminal_confirmation
@@ -1504,7 +1842,7 @@
                    currentFetchController.abort();
                    currentFetchController = null;
                }
-            }
+           }
 
             function cancelAndExitChat() {
                cancelCurrentDownload();
@@ -1549,6 +1887,13 @@
                     sendChatBtn.style.display = 'block';
                     addChatMessage('你好！我是你的AI助手。', 'bot');
                     aiChatHistory = []; // Reset history when starting a new AI chat session
+                } else if (mode === 'manual-scrape') {
+                    chatTitle.textContent = '手动刮削';
+                    chatInput.placeholder = '输入视频类型 (movie, tv, anime, jav, fc2)...';
+                    chatInput.style.display = 'block';
+                    sendChatBtn.style.display = 'block';
+                    addChatMessage('请输入视频类型 (例如: movie, tv, anime, jav, fc2)。<br>这会先删除本地记录再强制搜索。', 'bot');
+                    manualScrapeState = { active: true, type: null, title: null };
                 }
             }
 
@@ -1631,12 +1976,67 @@
                    chatInput.value = '';
                    return;
                }
+               if (inputText.toLowerCase() === '/d') {
+                   await handleGenerateGlossary();
+                   chatInput.value = '';
+                   return;
+               }
 
                if (currentChatMode === 'semantic') {
                    await handleSemanticSearch(inputText);
                } else if (currentChatMode === 'subtitle') {
                    await handleSubtitleSearch(inputText);
+               } else if (currentChatMode === 'manual-scrape') {
+                   await handleManualScrape(inputText);
                }
+           }
+   
+           async function handleManualScrape(inputText) {
+               const validTypes = ['movie', 'tv', 'anime', 'jav', 'fc2'];
+               addChatMessage(inputText, 'user', false);
+               chatInput.value = '';
+
+               if (!manualScrapeState.type) { // Step 1: Get type
+                   const type = inputText.toLowerCase().trim();
+                   if (validTypes.includes(type)) {
+                       manualScrapeState.type = type;
+                       addChatMessage(`类型设置为: ${type}。<br>现在请输入要搜索的标题。`, 'bot');
+                       chatInput.placeholder = '输入要搜索的标题...';
+                   } else {
+                       addChatMessage(`无效的类型: '${inputText}'。<br>请输入以下类型之一: ${validTypes.join(', ')}`, 'error');
+                   }
+               } else { // Step 2: Get title and execute
+                   manualScrapeState.title = inputText.trim();
+                   chatInput.disabled = true;
+                   sendChatBtn.disabled = true;
+                   
+                   const processingMsg = addChatMessage(`正在处理...<br>1. 删除旧记录<br>2. 使用标题 "${manualScrapeState.title}" 进行刮削`, 'bot');
+
+                   const deleted = await deleteScrapedRecord(true); // silent delete
+                   if (deleted) {
+                       addChatMessage('旧记录已成功删除。', 'bot');
+                   } else {
+                       // Even if deletion fails (e.g., no record existed), we proceed.
+                       addChatMessage('未找到或删除旧记录失败，继续刮削...', 'bot');
+                   }
+
+                   await scrapeVideo(manualScrapeState.type, true, manualScrapeState.title);
+                   
+                   processingMsg.remove();
+                   addChatMessage('手动刮削完成。面板将在3秒后关闭。', 'bot');
+                   
+                   setTimeout(() => {
+                       playerContainer.classList.remove('chat-mode');
+                       resetManualScrape();
+                   }, 3000);
+               }
+           }
+
+           function resetManualScrape() {
+               manualScrapeState = { active: false, type: null, title: null };
+               chatInput.disabled = false;
+               sendChatBtn.disabled = false;
+               chatInput.placeholder = '输入...';
            }
    
            // 新增：获取当前字幕的纯文本内容
@@ -2129,6 +2529,37 @@
                } catch (error) {
                    loadingMsg.remove();
                    addChatMessage(`❌ 卸载模型失败: ${error.message}`, 'error');
+               }
+           }
+
+           async function handleGenerateGlossary() {
+               if (!currentSubtitleUrl) {
+                   addChatMessage('错误：未加载字幕文件，无法生成术语表。', 'error');
+                   return;
+               }
+
+               const loadingMsg = addChatMessage('正在生成术语表...', 'bot');
+               try {
+                   const response = await fetch('/api/generate-glossary', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({
+                           vtt_file: currentSubtitleUrl,
+                           mediaDir: mediaDir
+                       })
+                   });
+
+                   const result = await response.json();
+                   loadingMsg.remove();
+
+                   if (response.ok) {
+                       addChatMessage(`✅ 术语表生成成功！<br>已保存至: ${result.glossary_file}`, 'bot');
+                   } else {
+                       throw new Error(result.error || '生成失败');
+                   }
+               } catch (error) {
+                   loadingMsg.remove();
+                   addChatMessage(`❌ 生成术语表失败: ${error.message}`, 'error');
                }
            }
 

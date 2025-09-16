@@ -69,6 +69,13 @@
     python video_scraper.py
     # 然后根据提示输入: 请输入视频文件的完整路径、文件名或番号:
     ```
+
+5.  **强制搜索**:
+    使用 `--force-search` 参数可以绕过文件名解析，直接使用提供的字符串作为标题进行搜索。
+    这在自动识别出错时非常有用。使用此参数时，必须同时指定视频类型。
+    ```bash
+    python video_scraper.py "459ten-034" jav --force-search
+    ```
 """
 import os
 import json
@@ -82,6 +89,7 @@ import sqlite3
 import urllib3
 import urllib.parse
 import copy
+import concurrent.futures
 
 # 新增 cloudscraper 导入
 try:
@@ -176,6 +184,7 @@ KEY_TRANSLATION_MAP = {
     "duration": "时长",
     "director": "导演",
     "studio": "制作商",
+    "label": "发行商",
     "series": "系列",
     "actors": "演员",
     "poster_url": "海报链接",
@@ -325,14 +334,14 @@ class CacheManager:
                     "UPDATE video_info SET scraped_data = ?, poster_path = ? WHERE filename = ?",
                     (data_json, poster_path, filename)
                 )
-                print(f"  [缓存] 已更新 '{filename}' 的数据库记录。")
+                print(f"  [缓存] 已更新 '{filename}' 的数据库记录。", file=sys.stderr)
             else:
                 # 插入新记录
                 cursor.execute(
                     "INSERT INTO video_info (filename, scraped_data, poster_path) VALUES (?, ?, ?)",
                     (filename, data_json, poster_path)
                 )
-                print(f"  [缓存] 已为 '{filename}' 创建新的数据库记录。")
+                print(f"  [缓存] 已为 '{filename}' 创建新的数据库记录。", file=sys.stderr)
 
     def _find_poster_url(self, data):
         """在刮削结果中找到海报URL"""
@@ -365,7 +374,7 @@ class CacheManager:
             
             # 如果文件已存在，直接返回路径
             if os.path.exists(save_path):
-                print(f"  [缓存] 图片 '{safe_filename}' 已存在，跳过下载。")
+                print(f"  [缓存] 图片 '{safe_filename}' 已存在，跳过下载。", file=sys.stderr)
                 return save_path
 
             # 根据URL设置Referer
@@ -379,7 +388,7 @@ class CacheManager:
             except Exception:
                 pass # URL无效则不设置Referer
 
-            print(f"  [缓存] 正在下载封面: {url}")
+            print(f"  [缓存] 正在下载封面: {url}", file=sys.stderr)
             response = requests.get(url, headers=download_headers, timeout=20, stream=True, verify=False)
             response.raise_for_status()
             
@@ -387,7 +396,7 @@ class CacheManager:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
-            print(f"  [缓存] 封面已保存到: {save_path}")
+            print(f"  [缓存] 封面已保存到: {save_path}", file=sys.stderr)
             return save_path
         except requests.exceptions.RequestException as e:
             print(f"  [缓存] 下载图片失败: {e}", file=sys.stderr)
@@ -396,9 +405,59 @@ class CacheManager:
             print(f"  [缓存] 保存图片时发生错误: {e}", file=sys.stderr)
             return None
 
+    def delete_info(self, filename):
+        """从数据库删除缓存信息"""
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT poster_path FROM video_info WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                try:
+                    # 尝试删除关联的图片文件
+                    if os.path.exists(row[0]):
+                        os.remove(row[0])
+                        print(f"  [缓存] 已删除关联的封面图片: {row[0]}", file=sys.stderr)
+                except OSError as e:
+                    print(f"  [缓存] 删除封面图片失败: {e}", file=sys.stderr)
+            
+            cursor.execute("DELETE FROM video_info WHERE filename = ?", (filename,))
+            if cursor.rowcount > 0:
+                print(f"  [缓存] 已从数据库中删除 '{filename}' 的记录。", file=sys.stderr)
+                return True
+        return False
+
     def close(self):
         """关闭数据库连接"""
         self.conn.close()
+
+    def delete_jav_source(self, filename, source_to_delete):
+       """从缓存中删除特定来源的 JAV 刮削结果"""
+       cached_data, _ = self.get_info(filename)
+       if not cached_data or 'jav_results' not in cached_data:
+           print(f"  [缓存] 未找到 '{filename}' 的 JAV 缓存记录。", file=sys.stderr)
+           return False, "未找到缓存记录"
+
+       original_count = len(cached_data['jav_results'])
+       # 过滤掉要删除的来源
+       cached_data['jav_results'] = [
+           result for result in cached_data['jav_results']
+           if result.get('source') != source_to_delete
+       ]
+       new_count = len(cached_data['jav_results'])
+
+       if new_count == original_count:
+           return False, f"未在缓存中找到来源为 '{source_to_delete}' 的记录"
+
+       if new_count == 0:
+           # 如果所有来源都被删除了，则删除整个记录
+           self.delete_info(filename)
+           print(f"  [缓存] 已删除 '{filename}' 的所有 JAV 来源，记录已移除。", file=sys.stderr)
+       else:
+           # 否则，保存修改后的数据
+           self.save_info(filename, cached_data)
+           print(f"  [缓存] 已从 '{filename}' 的记录中删除来源 '{source_to_delete}'。", file=sys.stderr)
+       
+       return True, f"成功删除来源 '{source_to_delete}'"
 
 
 # ==============================================================================
@@ -409,7 +468,7 @@ class Scraper:
     def __init__(self, cache_manager):
         self.cache = cache_manager
 
-    def scrape(self, file_path, video_type=None, force_online=False):
+    def scrape(self, file_path, video_type=None, force_online=False, force_search_title=None, enabled_scrapers=None):
         """主刮削方法"""
         filename = os.path.basename(file_path)
 
@@ -417,33 +476,44 @@ class Scraper:
         if not force_online:
             cached_data, poster_path = self.cache.get_info(filename)
             if cached_data:
-                print(f"  [缓存] 找到 '{filename}' 的缓存记录。")
+                print(f"  [缓存] 找到 '{filename}' 的缓存记录。", file=sys.stderr)
                 # 如果存在本地海报，将其路径添加到返回的数据中以便使用
                 # if poster_path:
                 #     cached_data['local_poster_path'] = poster_path
                 return cached_data
 
-        print(f"  [网络] 未找到缓存或强制在线刮削，开始联网搜索 '{filename}'...")
-        info = guessit(filename)
+        print(f"  [网络] 未找到缓存或强制在线刮削，开始联网搜索 '{filename}'...", file=sys.stderr)
         
-        # 自动判断类型，这也会顺便提取番号到 info 中
-        determined_type = self.determine_video_type(filename, info)
-
-        # 如果通过参数指定了类型，则使用该类型，否则使用自动判断的类型
-        if video_type:
-            print(f"使用指定的视频类型: {video_type}")
+        if force_search_title:
+            info = {'title': force_search_title, 'id': force_search_title}
+            print(f"  [强制搜索] 使用 '{force_search_title}' 作为搜索标题。", file=sys.stderr)
         else:
-            video_type = determined_type
+            info = guessit(filename)
+            # 自动判断类型，这也会顺便提取番号到 info 中
+            determined_type = self.determine_video_type(filename, info)
+
+            # 如果通过参数指定了类型，则使用该类型，否则使用自动判断的类型
+            if video_type:
+                print(f"使用指定的视频类型: {video_type}", file=sys.stderr)
+            else:
+                video_type = determined_type
         
-        scraped_data = {"file_info": {"path": file_path, "parsed_by_guessit": info}}
+        scraped_data = {"file_info": {"path": file_path, "parsed_by_guessit": info if not force_search_title else "skipped"}}
         
         if video_type == 'jav':
-            sources = {
+            all_sources = {
                 'Javbus': self.scrape_jav,
                 'Fanza': self.scrape_fanza,
                 'Jav321': self.scrape_jav321,
                 'JavDB': self.scrape_javdb
             }
+            sources = {}
+            if enabled_scrapers and 'jav' in enabled_scrapers:
+                for scraper_name in enabled_scrapers['jav']:
+                    if scraper_name in all_sources:
+                        sources[scraper_name] = all_sources[scraper_name]
+            else:
+                sources = all_sources # Fallback to all if not provided
             
             all_results = []
             # 使用番号作为查询基准
@@ -459,21 +529,40 @@ class Scraper:
                 scraped_data.update({"error": "无法从文件名中确定 JAV 番号"})
                 return scraped_data
 
-            print(f"识别到 JAV 番号: {query_title}，开始从所有源刮削...")
+            print(f"识别到 JAV 番号: {query_title}，开始并行从所有源刮削...", file=sys.stderr)
 
-            for source_name, scrape_func in sources.items():
-                print(f"-> 正在刮削 {source_name}...")
-                result = scrape_func(info)
-                if result and not result.get("error"):
-                    title = result.get('title') or ''
-                    # Jaccard 相似度计算基于标题
-                    score = jaccard_similarity(query_title.lower(), title.lower())
-                    result['source'] = source_name
-                    result['score'] = score
-                    all_results.append(result)
-                else:
-                    error_msg = result.get("error", "未知错误") if result else "无返回"
-                    print(f"  - {source_name} 刮削失败: {error_msg}")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(sources)) as executor:
+                future_to_source = {executor.submit(scrape_func, info): source_name for source_name, scrape_func in sources.items()}
+                
+                for future in concurrent.futures.as_completed(future_to_source):
+                    source_name = future_to_source[future]
+                    try:
+                        result = future.result()
+                        print(f"-> {source_name} 刮削完成。", file=sys.stderr)
+                        if result and not result.get("error"):
+                            title = result.get('title') or ''
+                            # 改进的匹配度计算逻辑：
+                            # 1. 最高优先级：比较刮削结果中的番号 (ID) 与查询番号是否一致。
+                            scraped_id = result.get('id', '').lower()
+                            query_id_lower = query_title.lower()
+                            title_lower = title.lower()
+
+                            if scraped_id and (scraped_id.replace('-', '') == query_id_lower.replace('-', '')):
+                                score = 1.0  # 番号精确匹配，最高分
+                            # 2. 次高优先级：检查刮削到的标题是否包含查询番号。
+                            elif query_id_lower in title_lower:
+                                score = 1.0  # 标题包含番号，也视为强匹配
+                            # 3. 回退机制：如果以上都不匹配，则使用 Jaccard 相似度计算。
+                            else:
+                                score = jaccard_similarity(query_id_lower, title_lower)
+                            result['source'] = source_name
+                            result['score'] = score
+                            all_results.append(result)
+                        else:
+                            error_msg = result.get("error", "未知错误") if result else "无返回"
+                            print(f"  - {source_name} 刮削失败: {error_msg}", file=sys.stderr)
+                    except Exception as exc:
+                        print(f"  - {source_name} 刮削时产生异常: {exc}", file=sys.stderr)
 
             if not all_results:
                 scraped_data.update({"error": "所有 JAV 源均刮削失败"})
@@ -486,7 +575,7 @@ class Scraper:
                         final_results.append(res)
                     else:
                         title = res.get('title') or ''
-                        print(f"  - {res['source']} 的结果 '{title}' (匹配度: {res['score']:.2f}) 低于阈值 {SIMILARITY_THRESHOLD}，已过滤。")
+                        print(f"  - {res['source']} 的结果 '{title}' (匹配度: {res['score']:.2f}) 低于阈值 {SIMILARITY_THRESHOLD}，已过滤。", file=sys.stderr)
 
                 if not final_results:
                     scraped_data.update({"error": "所有 JAV 源的刮削结果匹配度过低"})
@@ -497,27 +586,41 @@ class Scraper:
         elif video_type == 'fc2':
             scraped_data.update(self.scrape_fc2(info))
         elif video_type == 'anime':
-            query_title = self._extract_anime_name(filename)
-            print(f"正在为 '{query_title}' 搜索...")
+            query_title = force_search_title if force_search_title else self._extract_anime_name(filename)
+            print(f"正在为 '{query_title}' 并行搜索...", file=sys.stderr)
 
-            print("-> 正在刮削 Bangumi...")
-            bgm_data = self.scrape_anime_bgm(filename)
-            print("-> 正在刮削 Getchu...")
-            getchu_data = self.scrape_anime_getchu(filename)
-            hanime_data = None
+            all_anime_sources = {
+                'Bangumi': self.scrape_anime_bgm,
+                'Getchu': self.scrape_anime_getchu,
+                'Hanime': self.scrape_anime_hanime
+            }
+            anime_sources = {}
+            if enabled_scrapers and 'anime' in enabled_scrapers:
+                 for scraper_name in enabled_scrapers['anime']:
+                    if scraper_name in all_anime_sources:
+                        anime_sources[scraper_name] = all_anime_sources[scraper_name]
+            else:
+                anime_sources = all_anime_sources
+            results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(anime_sources)) as executor:
+                future_to_source = {executor.submit(scrape_func, query_title): source_name for source_name, scrape_func in anime_sources.items()}
+                for future in concurrent.futures.as_completed(future_to_source):
+                    source_name = future_to_source[future]
+                    try:
+                        result = future.result()
+                        print(f"-> {source_name} 刮削完成。", file=sys.stderr)
+                        results[source_name] = result
+                    except Exception as exc:
+                        print(f"  - {source_name} 刮削时产生异常: {exc}", file=sys.stderr)
+                        results[source_name] = {"error": str(exc)}
+
+            bgm_data = results.get('Bangumi')
+            getchu_data = results.get('Getchu')
+            hanime_data = results.get('Hanime')
 
             bgm_valid = bgm_data and not bgm_data.get("error")
             getchu_valid = getchu_data and not getchu_data.get("error")
-            hanime_valid = False
-
-            if not getchu_valid:
-                print("-> Getchu 刮削失败，尝试 Hanime...")
-                hanime_data = self.scrape_anime_hanime(filename)
-                hanime_valid = hanime_data and not hanime_data.get("error")
-                if hanime_valid:
-                    print("-> Hanime 刮削成功。")
-                else:
-                    print("-> Hanime 刮削也失败了。")
+            hanime_valid = hanime_data and not hanime_data.get("error")
 
             # --- 结果比较 ---
             valid_results = []
@@ -540,18 +643,18 @@ class Scraper:
             
             elif len(valid_results) == 1:
                 winner = valid_results[0]
-                print(f"只有 {winner['source']} 成功，返回其结果。")
+                print(f"只有 {winner['source']} 成功，返回其结果。", file=sys.stderr)
                 scraped_data.update(winner['data'])
 
             else: # 多个结果，需要比较
-                print(f"\n对比查询: '{query_title}'")
+                print(f"\n对比查询: '{query_title}'", file=sys.stderr)
                 for res in valid_results:
                     title = res['data'].get('title_cn') or res['data'].get('title', '')
                     res['score'] = jaccard_similarity(query_title.lower(), title.lower())
-                    print(f"  - {res['source']:<8} (匹配度: {res['score']:.2f}): '{title}'")
+                    print(f"  - {res['source']:<8} (匹配度: {res['score']:.2f}): '{title}'", file=sys.stderr)
                 
                 winner = max(valid_results, key=lambda item: item['score'])
-                print(f"=> {winner['source']} 匹配度最高，选择 {winner['source']}。")
+                print(f"=> {winner['source']} 匹配度最高，选择 {winner['source']}。", file=sys.stderr)
                 scraped_data.update(winner['data'])
         elif video_type in ['tv', 'movie']:
             scraped_data.update(self.scrape_tmdb(info, video_type))
@@ -803,6 +906,9 @@ class Scraper:
                     elif '製作商:' in p.text:
                         studio_a = p.find('a')
                         if studio_a: data['studio'] = studio_a.text.strip()
+                    elif '發行商:' in p.text:
+                       label_a = p.find('a')
+                       if label_a: data['label'] = label_a.text.strip()
                     elif '系列:' in p.text:
                         series_a = p.find('a')
                         if series_a: data['series'] = series_a.text.strip()
@@ -925,6 +1031,9 @@ class Scraper:
                         elif 'メーカー' in key:
                             studio_a = value_element.find('a')
                             data['studio'] = studio_a.text.strip() if studio_a else value_element.text.strip()
+                        elif 'レーベル' in key:
+                           label_a = value_element.find('a')
+                           data['label'] = label_a.text.strip() if label_a else value_element.text.strip()
                         elif 'ジャンル' in key:
                             data['genres'] = [a.text.strip() for a in value_element.find_all('a')]
                         elif '品番' in key:
@@ -1176,17 +1285,36 @@ class Scraper:
 
         numeric_id = video_id.split('-')[-1]
         
-        # 根据新的 HTML 结构，目标 URL 格式.
-        url = f"https://adult.contents.fc2.com/article/{numeric_id}/"
+        # 目标 URL
+        url = f"https://ads.contents.fc2.com/article/{numeric_id}/"
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        # 使用 session 管理 cookies 和 headers
+        session = requests.Session()
+        
+        # 构造一个更真实的 Referer，模拟从 Bing 搜索结果页点击过来
+        bing_search_url = f"https://www.bing.com/search?q=fc2-{numeric_id}"
+        
+        # 更新 headers
+        fc2_headers = HEADERS.copy()
+        fc2_headers.update({
+            'Referer': bing_search_url,
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Cookie': 'age_check_done=1' # 添加 Cookie 以绕过年龄验证页面
-        }
+        })
+        session.headers.update(fc2_headers)
+
+        # 设置必要的 cookies
+        session.cookies.set('age_check_done', '1', domain='.fc2.com')
+        session.cookies.set('contents_func_mode', 'buy', domain='.fc2.com')
+        session.cookies.set('contents_mode', 'digital', domain='.fc2.com')
 
         try:
-            response = requests.get(url, headers=headers, timeout=15, verify=False)
+            # 模拟用户行为：先访问一下主页，让网站设置一些初始 cookies
+            # 这有助于模拟一个更真实的用户会话
+            #print("  -> 正在访问 FC2 主页以初始化会话...", file=sys.stderr)
+            #session.get("https://adult.contents.fc2.com/", timeout=15, verify=False)
+            
+            print(f"  -> 正在请求影片页面: {url}", file=sys.stderr)
+            response = session.get(url, timeout=15, verify=False)
             response.raise_for_status()
             response.encoding = response.apparent_encoding
 
@@ -1325,9 +1453,8 @@ class Scraper:
         
         return self._clean_anime_name(filename)
 
-    def scrape_anime_bgm(self, filename):
+    def scrape_anime_bgm(self, query):
         """从 Bangumi 刮削动漫信息"""
-        query = self._extract_anime_name(filename)
         search_url = f"https://chii.in/subject_search/{urllib.parse.quote_plus(query)}?cat=all"
         headers = {"User-Agent": "BangumiScraper/1.0 (compatible;)"}
 
@@ -1448,9 +1575,8 @@ class Scraper:
             return {"error": f"处理时发生未知错误: {str(e)}"}
 
 
-    def scrape_anime_getchu(self, filename):
+    def scrape_anime_getchu(self, query):
         """从 Getchu 刮削动漫信息"""
-        query = self._extract_anime_name(filename)
         
         search_url = f"https://www.getchu.com/php/search.phtml?genre=all&search_keyword={urllib.parse.quote_plus(query)}&check_key_dtl=1&submit="
         headers = {
@@ -1621,12 +1747,10 @@ class Scraper:
         except Exception as e:
             return {"error": f"Getchu 处理时发生未知错误: {str(e)}"}
 
-    def scrape_anime_hanime(self, filename):
+    def scrape_anime_hanime(self, query):
         """从 Hanime1 刮削动漫信息"""
         if not cloudscraper:
             return {"error": "cloudscraper 库未安装，无法使用 Hanime 刮削功能。"}
-
-        query = self._extract_anime_name(filename)
         
         scraper = cloudscraper.create_scraper()
         search_url = f"https://hanime1.me/search?query={urllib.parse.quote_plus(query)}&type=&genre=%E8%A3%8F%E7%95%AA"
@@ -1704,34 +1828,78 @@ class Scraper:
 def main():
     """主函数"""
     if not TMDB_API_KEY or TMDB_API_KEY == 'YOUR_TMDB_API_KEY':
-        print("错误: 请先在代码中设置您的 TMDb API 密钥。")
+        print("错误: 请先在代码中设置您的 TMDb API 密钥。", file=sys.stderr)
         sys.exit(1)
 
     # --- 参数解析 ---
     scrape_target = None
     video_type = None
     force_online = False
+    force_search_title = None
     check_only = False
+    delete_record = False
+    delete_source = None
+    enabled_scrapers = None
     valid_types = ['fc2', 'jav', 'anime', 'tv', 'movie']
-
+ 
     # 解析参数
     args = sys.argv[1:]
+    if '--enabled-scrapers' in args:
+        try:
+            es_index = args.index('--enabled-scrapers')
+            enabled_scrapers = json.loads(args[es_index + 1])
+            args.pop(es_index)
+            args.pop(es_index)
+        except (IndexError, ValueError, json.JSONDecodeError):
+            print("错误: --enabled-scrapers 参数后面需要一个有效的JSON字符串。", file=sys.stderr)
+            sys.exit(1)
+
     if '--check-only' in args:
         check_only = True
         args.remove('--check-only')
+    
+    if '--delete' in args:
+        delete_record = True
+        args.remove('--delete')
+
+    if '--delete-source' in args:
+       try:
+           ds_index = args.index('--delete-source')
+           delete_source = args[ds_index + 1]
+           # 删除 --delete-source 和它的值
+           args.pop(ds_index)
+           args.pop(ds_index)
+       except (IndexError, ValueError):
+           print("错误: --delete-source 参数后面需要一个来源名称。", file=sys.stderr)
+           sys.exit(1)
         
     if '-f' in args or '--force' in args:
         force_online = True
         if '-f' in args: args.remove('-f')
         if '--force' in args: args.remove('--force')
 
+    if '--force-search' in args:
+        try:
+            fs_index = args.index('--force-search')
+            force_search_title = args[fs_index + 1]
+            # 删除 --force-search 和它的值
+            args.pop(fs_index)
+            args.pop(fs_index)
+        except (IndexError, ValueError):
+            print("错误: --force-search 参数后面需要一个搜索标题。", file=sys.stderr)
+            sys.exit(1)
+
     if len(args) > 0:
         scrape_target = args[0]
         if len(args) > 1:
             video_type = args[1].lower()
             if video_type not in valid_types:
-                print(f"错误: 无效的视频类型 '{video_type}'。有效类型为: {', '.join(valid_types)}")
+                print(f"错误: 无效的视频类型 '{video_type}'。有效类型为: {', '.join(valid_types)}", file=sys.stderr)
                 sys.exit(1)
+    
+    if force_search_title and not video_type:
+        print("错误: 使用 --force-search [title] 时必须同时指定 video_type。", file=sys.stderr)
+        sys.exit(1)
 
     # --- 如果没有通过参数提供输入，则提示用户输入 ---
     if not scrape_target:
@@ -1753,15 +1921,31 @@ def main():
             print(json.dumps({"status": "not_found"}))
         cache.close()
         sys.exit(0)
+    
+    if delete_record:
+        filename = os.path.basename(scrape_target)
+        if cache.delete_info(filename):
+            print(json.dumps({"success": True, "message": f"记录 '{filename}' 已成功删除。"}))
+        else:
+            print(json.dumps({"success": False, "message": f"未找到记录 '{filename}' 或删除失败。"}))
+        cache.close()
+        sys.exit(0)
 
+    if delete_source:
+       filename = os.path.basename(scrape_target)
+       success, message = cache.delete_jav_source(filename, delete_source)
+       print(json.dumps({"success": success, "message": message}))
+       cache.close()
+       sys.exit(0)
+ 
     # --- 开始刮削 ---
-    print(f"\n正在处理: {scrape_target}")
+    print(f"\n正在处理: {scrape_target}", file=sys.stderr)
     if force_online:
-        print("选项: 强制在线刮削")
+        print("选项: 强制在线刮削", file=sys.stderr)
 
     scraper = Scraper(cache)
     # 传递 video_type 和 force_online
-    final_data = scraper.scrape(scrape_target, video_type=video_type, force_online=force_online)
+    final_data = scraper.scrape(scrape_target, video_type=video_type, force_online=force_online, force_search_title=force_search_title, enabled_scrapers=enabled_scrapers)
     
     # 关闭数据库连接
     cache.close()
@@ -1770,10 +1954,10 @@ def main():
     translated_data = translate_keys(final_data, KEY_TRANSLATION_MAP)
 
     # --- 输出结果 ---
-    json_output = json.dumps(translated_data, indent=4, ensure_ascii=False, cls=CustomEncoder)
-    print("\n刮削结果 (JSON格式):")
+    # 最终的 JSON 数据直接输出到 stdout
+    json_output = json.dumps(translated_data, ensure_ascii=False, cls=CustomEncoder)
     print(json_output)
-    
+
 if __name__ == '__main__':
     main()
 

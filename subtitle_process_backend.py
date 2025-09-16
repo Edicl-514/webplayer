@@ -284,6 +284,7 @@ def get_available_models():
     # 获取翻译/润色模型
     corrector_models = []
     active_corrector_model = None
+    is_online = False
     if CORRECTOR:
         # 新逻辑：处理本地和在线模型名称
         if isinstance(CORRECTOR.raw_config, list):
@@ -301,6 +302,7 @@ def get_available_models():
         # 获取当前激活的模型名称
         if CORRECTOR.model_config and (CORRECTOR.model or CORRECTOR.online_mode):
             model_path = CORRECTOR.model_config.get("model_path", "未知")
+            is_online = CORRECTOR.online_mode
             # 如果当前不是在线模式，则为本地模型，提取文件名
             if not CORRECTOR.online_mode:
                 active_corrector_model = os.path.basename(model_path)
@@ -320,7 +322,8 @@ def get_available_models():
         },
         "corrector_models": {
             "available": corrector_models,
-            "active": active_corrector_model
+            "active": active_corrector_model,
+            "is_online": is_online
         }
     })
 
@@ -506,6 +509,9 @@ def generate_glossary():
 
     if CORRECTOR is None or not CORRECTOR.model:
         return jsonify({"error": "模型未成功加载，无法处理请求"}), 503
+
+    if not CORRECTOR.online_mode:
+        return jsonify({"error": "此功能仅限在线模型使用。"}), 403
 
     try:
         print(f"开始为文件生成术语表: {vtt_file_decoded}")

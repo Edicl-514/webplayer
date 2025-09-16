@@ -1,9 +1,13 @@
 import whisper
 import os
 import datetime
+import sys
 
 # 用户输入视频/音频文件路径
-audio_file_path = input("请输入视频/音频文件的路径: ").strip()
+if len(sys.argv) < 2:
+    print("Usage: python generate_subtitle.py <path_to_video_or_audio>")
+    sys.exit(1)
+audio_file_path = sys.argv[1]
 
 # 加载模型，选择 'large' 模型以获得最高准确率
 # 第一次运行会自动下载模型
@@ -37,8 +41,10 @@ def seconds_to_vtt_time(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millisecs:03d}"
 
 # 生成与视频文件同名的 VTT 文件路径
-base_name = os.path.splitext(audio_file_path)[0]
-vtt_file_path = f"{base_name}.vtt"
+output_dir = "./cache/subtitles/"
+os.makedirs(output_dir, exist_ok=True)
+base_name = os.path.splitext(os.path.basename(audio_file_path))[0]
+vtt_file_path = os.path.join(output_dir, f"{base_name}_transcribe.vtt")
 
 # 字幕后处理函数
 def post_process_subtitles(segments, merge_threshold=1.0):
