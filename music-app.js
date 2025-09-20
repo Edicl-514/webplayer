@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const albumCover = document.getElementById('album-cover');
     const songTitle = document.getElementById('song-title');
     const songArtist = document.getElementById('song-artist');
+    const songAlbum = document.getElementById('song-album');
     const progressBar = document.getElementById('progress-bar');
     const currentTimeEl = document.getElementById('current-time');
     const durationEl = document.getElementById('duration');
@@ -291,8 +292,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Continue with original loadSong logic ---
         songTitle.textContent = song.title;
         songArtist.textContent = song.artist;
+        songAlbum.textContent = song.album || ''; // Set album text
         checkMarquee(songTitle);
         checkMarquee(songArtist);
+        checkMarquee(songAlbum); // Check marquee for album
         albumCover.src = getCacheBustedUrl(song.cover);
         playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
     
@@ -352,11 +355,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchMusicInfo(song) {
         try {
-            // 从 song.src 中提取文件名，并移除URL参数
-            let musicPath = song.src;
-            if (musicPath.includes('?')) {
-                musicPath = musicPath.split('?')[0];
-            }
+            // 从 song.src 中提取路径和 mediaDir
+            const url = new URL(song.src, window.location.origin);
+            const mediaDir = url.searchParams.get('mediaDir');
+            let musicPath = decodeURIComponent(url.pathname); // 解码路径
             if (musicPath.startsWith('/music/')) {
                 musicPath = musicPath.substring('/music/'.length);
             }
@@ -371,6 +373,10 @@ document.addEventListener('DOMContentLoaded', () => {
                'force-match': settings.forceMatch,
                'query': settings.queryKeywords
            });
+           
+           if (mediaDir) {
+               params.append('mediaDir', mediaDir);
+           }
 
             const response = await fetch(`/api/music-info?${params.toString()}`);
             if (!response.ok) {
@@ -383,14 +389,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 用获取到的信息更新UI
                 songTitle.textContent = info.title || song.title;
                 songArtist.textContent = info.artist || song.artist;
+                songAlbum.textContent = info.album || ''; // Update album info
                 checkMarquee(songTitle);
                 checkMarquee(songArtist);
+                checkMarquee(songAlbum); // Check marquee for album
                 
                 // BUGFIX: 更新播放列表和localStorage中的元数据
-                const hasChanged = (song.title !== songTitle.textContent) || (song.artist !== songArtist.textContent);
+                const hasChanged = (song.title !== songTitle.textContent) || (song.artist !== songArtist.textContent) || (song.album !== songAlbum.textContent);
                 if (hasChanged) {
                     song.title = songTitle.textContent;
                     song.artist = songArtist.textContent;
+                    song.album = songAlbum.textContent; // Save album to playlist object
                     initPlaylist();
                     updatePlaylistUI();
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
@@ -589,6 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="song-info">
                     <span class="title">${song.title}</span>
                     <span class="artist">${song.artist}</span>
+                    <span class="album">${song.album || ''}</span>
                 </div>
                 <div class="playlist-item-controls">
                      <i class="fas fa-bars handle" style="cursor: grab; margin-right: 10px;"></i>
@@ -1421,10 +1431,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     
         const song = playlist[currentSongIndex];
-        let musicPath = song.src;
-        if (musicPath.includes('?')) {
-            musicPath = musicPath.split('?')[0];
-        }
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        let musicPath = decodeURIComponent(url.pathname); // 解码路径
         if (musicPath.startsWith('/music/')) {
             musicPath = musicPath.substring('/music/'.length);
         }
@@ -1444,6 +1453,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 'query': settings.queryKeywords,
                 'force-fetch': true
             });
+
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
 
             if (type === 'lyrics' && !bilingual) {
                 params.set('original-lyrics', 'true');
@@ -1527,7 +1540,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 初始化 ---
     createLyricsPlayButton();
     createToastContainer(); // 初始化Toast容器
-   loadSettings();
+    loadSettings();
+    
+    songArtist.addEventListener('click', () => {
+        const artistName = songArtist.textContent;
+        if (artistName && artistName !== '歌手') {
+            const searchUrl = `search-results.html?query=${encodeURIComponent(artistName)}&searchType=music`;
+            window.open(searchUrl, '_blank');
+        }
+    });
+
+    songAlbum.addEventListener('click', () => {
+        const albumName = songAlbum.textContent;
+        if (albumName) {
+            const searchUrl = `search-results.html?query=${encodeURIComponent(albumName)}&searchType=music`;
+            window.open(searchUrl, '_blank');
+        }
+    });
+
     initializePlayer(); // 初始化播放器
     // 设置默认激活的倍速选项
     document.querySelector('.speed-options div[data-speed="1.0"]').classList.add('active');

@@ -88,13 +88,17 @@ const server = http.createServer(async (req, res) => {
     // 新增：处理获取音乐元数据请求
     if (pathname === '/api/music-info' && req.method === 'GET') {
         const musicPath = parsedUrl.query.path;
+        const mediaDir = parsedUrl.query.mediaDir;
         if (!musicPath) {
             res.statusCode = 400;
             res.end(JSON.stringify({ success: false, message: 'Missing music path parameter' }));
             return;
         }
 
-        const fullMusicPath = path.join(MUSIC_DIR, musicPath);
+        // 验证 mediaDir 是否在允许的目录列表中，增加安全性
+        const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
+        const baseDir = allowedMediaDir ? allowedMediaDir.path : MUSIC_DIR; // 如果无效或未提供，则回退到默认
+        const fullMusicPath = path.join(baseDir, musicPath);
 
        const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
        
@@ -176,7 +180,10 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        const fullMusicPath = path.join(MUSIC_DIR, musicPath);
+        const mediaDir = parsedUrl.query.mediaDir;
+        const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
+        const baseDir = allowedMediaDir ? allowedMediaDir.path : MUSIC_DIR;
+        const fullMusicPath = path.join(baseDir, musicPath);
 
         // 为了安全性和一致性，从 exec 改为 spawn，并添加所有参数
         const { 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query, 'force-fetch': forceFetch } = parsedUrl.query;
@@ -834,6 +841,79 @@ const server = http.createServer(async (req, res) => {
                 console.error('Error parsing video search results:', e);
                 res.statusCode = 500;
                 res.end(JSON.stringify({ success: false, message: 'Error parsing video search results', error: stdoutData }));
+            }
+        });
+        return;
+    }
+ 
+    // 新增：处理音乐搜索请求
+    if (pathname === '/api/search-music' && req.method === 'GET') {
+        const query = parsedUrl.query.query;
+        if (!query) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing search query' }));
+            return;
+        }
+
+        const pythonProcess = spawn('python', ['search_music.py', query], {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (stderrData) {
+                console.error(`search_music.py stderr: ${stderrData}`);
+            }
+            if (code !== 0) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error executing music search script', error: stderrData }));
+                return;
+            }
+            try {
+                const searchResults = JSON.parse(stdoutData);
+                const webRootPath = __dirname.replace(/\\/g, '/');
+
+                const augmentedResults = searchResults.map(result => {
+                    const mediaDir = MEDIA_DIRS.find(dir => {
+                        const resolvedFilepath = path.resolve(result.filepath).toLowerCase();
+                        const resolvedDirPath = path.resolve(dir.path).toLowerCase();
+                        return resolvedFilepath.startsWith(resolvedDirPath);
+                    });
+                    
+                    let relativeCoverPath = "无封面";
+                    if (result.cover_path && result.cover_path !== "无封面") {
+                        const coverPath = result.cover_path.replace(/\\/g, '/');
+                        if (coverPath.toLowerCase().startsWith(webRootPath.toLowerCase())) {
+                            relativeCoverPath = coverPath.substring(webRootPath.length);
+                        } else {
+                            relativeCoverPath = result.cover_path;
+                        }
+                    }
+
+                    return {
+                        ...result,
+                        media_dir_root: mediaDir ? mediaDir.path : null,
+                        cover_path: relativeCoverPath
+                    };
+                });
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, results: augmentedResults }));
+            } catch (e) {
+                console.error('Error parsing music search results:', e);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error parsing music search results', error: stdoutData }));
             }
         });
         return;
@@ -2447,11 +2527,110 @@ server.on('request', async (req, res) => {
                     res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
                 }
                 console.error('Error starting scrape-directory process:', e);
-            }
-        });
-    }
+           }
+       });
+   }
+
+   if (pathname === '/api/scrape-music-directory' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => { body += chunk.toString(); });
+       req.on('end', async () => {
+           try {
+               const { path: relativePath, mediaDir, source } = JSON.parse(body);
+               const fullPath = path.join(mediaDir, relativePath);
+
+               res.statusCode = 200;
+               res.setHeader('Content-Type', 'application/json');
+               res.end(JSON.stringify({ success: true, message: 'Music scraping process started.' }));
+
+               // Run scraping in the background
+               (async () => {
+                   const musicFiles = await findMusicFilesRecursively(fullPath);
+                   const fileTasks = musicFiles.map((filePath, index) => ({
+                       id: `music_${index}_${Date.now()}`,
+                       path: filePath,
+                       name: path.relative(fullPath, filePath) || path.basename(filePath)
+                   }));
+                   
+                   broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+
+                   for (const fileTask of fileTasks) {
+                       broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                       
+                       const result = await new Promise((resolve) => {
+                           const args = ['get_music_info.py', fileTask.path, '--source', source, '--json-output'];
+                           const pythonProcess = spawn('python', args, {
+                               env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                           });
+                           let stdoutData = '';
+                           let stderrData = '';
+                           pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                           pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                           pythonProcess.on('close', (code) => {
+                               if (stderrData) { console.error(`[MusicScraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                               if (code !== 0) {
+                                   resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                               } else {
+                                   try {
+                                       const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                       if (jsonMatch && jsonMatch[1]) {
+                                           const parsedData = JSON.parse(jsonMatch[1]);
+                                           if(parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
+                                               resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
+                                           } else {
+                                               resolve({ success: true, data: parsedData });
+                                           }
+                                       } else {
+                                           resolve({ success: false, error: '未找到匹配', details: stdoutData });
+                                       }
+                                   } catch (e) {
+                                       resolve({ success: false, error: '解析JSON失败', details: stdoutData });
+                                   }
+                               }
+                           });
+                       });
+                       
+                       broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                   }
+                   broadcast({ type: 'music_scrape_finished_all' });
+               })();
+           } catch (e) {
+               if (!res.headersSent) {
+                   res.statusCode = 400;
+                   res.setHeader('Content-Type', 'application/json');
+                   res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
+               }
+               console.error('Error starting scrape-music-directory process:', e);
+           }
+       });
+   }
 });
 
+// --- 新增：音乐刮削功能 ---
+async function findMusicFilesRecursively(dir) {
+    let musicFiles = [];
+    const musicExtensions = ['.mp3', '.flac', '.m4a', '.ogg'];
+    try {
+        const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+        for (const dirent of dirents) {
+            const resolvedPath = path.resolve(dir, dirent.name);
+            if (dirent.isDirectory()) {
+                musicFiles = musicFiles.concat(await findMusicFilesRecursively(resolvedPath));
+            } else {
+                if (musicExtensions.includes(path.extname(dirent.name).toLowerCase())) {
+                    musicFiles.push(resolvedPath);
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`Error reading directory ${dir}:`, error);
+        broadcast({
+            type: 'music_scrape_error',
+            message: `读取目录失败: ${dir}`
+        });
+    }
+    return musicFiles;
+}
 
 // --- 新增：运行字幕处理脚本并广播进度的函数 ---
 const runningSubtitleTasks = new Map(); // 用于跟踪正在运行的进程

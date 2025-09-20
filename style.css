@@ -145,6 +145,27 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+#song-artist:hover {
+    color: var(--accent-color);
+}
+
+#song-album {
+    font-size: 14px;
+    color: var(--secondary-text);
+    margin-top: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+#song-album:hover {
+    color: var(--accent-color);
 }
 
 .marquee {

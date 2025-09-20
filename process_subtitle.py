@@ -4,6 +4,7 @@
 VTT字幕错别字纠正程序
 支持用户自定义本地大语言模型
 模型放置位置: ./models/ 目录下
+模型配置位置: 根目录 config.json 文件中的 models 字段
 """
 
 import re
@@ -70,13 +71,13 @@ class StopOnWordsCriteria(StoppingCriteria):
         return False
 
 class VTTCorrector:
-    def __init__(self, model_dir: str = "./models", config_file: str = "model_config.json", auto_load_model_index: Optional[int] = 0):
+    def __init__(self, model_dir: str = "./models", config_file: str = "../config.json", auto_load_model_index: Optional[int] = 0):
         """
         初始化VTT纠错器
         
         Args:
             model_dir: 模型目录路径
-            config_file: 模型配置文件路径
+            config_file: 模型配置文件路径（相对于model_dir）
             auto_load_model_index: 如果配置文件是列表，自动加载的模型索引。设为None则不自动加载。
         """
         self.model_dir = Path(model_dir)
@@ -126,28 +127,40 @@ class VTTCorrector:
         Returns:
             模型配置字典
         """
-        config_path = self.model_dir / self.config_file
+        # 处理相对路径 ../config.json 的情况
+        if self.config_file.startswith("../"):
+            config_path = Path(self.config_file[3:])  # 去掉 "../" 前缀
+        else:
+            config_path = self.model_dir / self.config_file
         
-        # 如果配置文件不存在，创建默认配置
+        # 检查配置文件是否存在
         if not config_path.exists():
-            logger.info("配置文件不存在，创建默认配置")
-            self._create_default_config(config_path)
+            logger.error(f"配置文件不存在: {config_path}")
+            return []
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+                full_config = json.load(f)
             logger.info(f"加载配置文件: {config_path}")
+            
+            # 从根配置中提取模型配置
+            if "models" in full_config:
+                config = full_config["models"]
+            else:
+                logger.warning("配置文件中未找到 'models' 字段，使用空配置")
+                config = []
+                
             if isinstance(config, list):
                 if config:
                     logger.info("检测到配置文件为列表格式，请在主程序中选择要加载的模型。")
                     return config
                 else:
-                    logger.error("配置文件列表为空，将使用默认配置。")
-                    return self._get_default_config()
+                    logger.warning("配置文件列表为空")
+                    return []
             return config
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
-            return self._get_default_config()
+            return []
     
     def get_models_from_config(self) -> Optional[List[str]]:
         """如果配置是列表，则返回模型路径列表"""
@@ -1747,52 +1760,11 @@ class VTTCorrector:
 
 def setup_model_directory():
     """
-    设置模型目录和说明文件
+    设置模型目录
     """
     model_dir = Path("./models")
     model_dir.mkdir(exist_ok=True)
-    
-    readme_path = model_dir / "README.md"
-    if not readme_path.exists():
-        readme_content = """# 模型目录说明
-
-## 如何使用自己的模型
-
-1. **下载模型**：
-   - **Transformers模型**: 从HuggingFace下载完整的模型仓库 (e.g., Qwen/Qwen3-4B-Instruct-2507)。
-   - **GGUF模型**: 从HuggingFace下载`.gguf`格式的模型文件 (e.g., SakuraLLM/Sakura-GalTransl-7B-v3.7)。
-
-2. **放置模型**：
-   - **Transformers模型**: 将模型文件夹放在此 `models/` 目录下。
-   - **GGUF模型**: 将`.gguf`文件直接放在此 `models/` 目录下。
-
-3. **目录结构示例**：
-```
-models/
-├── Qwen3-4B-Instruct-2507/          # Transformers 模型
-│   ├── config.json
-│   ├── model.safetensors.index.json
-│   ├── model.safetensors
-│   ├── tokenizer_config.json
-│   └── vocab.json
-├── Sakura-Galtransl-7B-v3.7-IQ4_XS.gguf  # GGUF 模型
-└── model_config.json             # 配置文件
-```
-
-4. **支持的格式**：
-   - **Transformers**: 兼容HuggingFace `transformers`库的模型。
-   - **GGUF**: 可通过 `llama-cpp-python` 运行的模型。 (需要额外安装: `pip install llama-cpp-python`)
-
-5. **配置模型**：
-   - 程序会自动检测模型类型
-   - 可通过 `model_config.json` 自定义配置
-   - 首次运行会自动创建默认配置
-"""
-        
-        with open(readme_path, 'w', encoding='utf-8') as f:
-            f.write(readme_content)
-        
-        print(f"已创建模型目录说明文件: {readme_path}")
+    print(f"已创建模型目录: {model_dir}")
 
 
 def main():

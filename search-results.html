@@ -726,6 +726,115 @@
            lazyLoadImages();
        }
 
+       function displayMusicResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+
+           if (!data.success) {
+               showError(data.error || '音乐搜索失败');
+               return;
+           }
+
+           const results = data.results;
+           document.getElementById('resultsSummary').innerHTML = `共找到 ${results.length} 个音乐结果`;
+           document.getElementById('resultsSummary').style.display = 'block';
+
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的音乐</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+
+                   if (result.cover_path && result.cover_path !== '无封面') {
+                       const img = document.createElement('img');
+                       img.className = 'thumbnail lazy';
+                       img.loading = 'lazy';
+                       img.dataset.src = result.cover_path.replace(/\\/g, '/');
+                       img.alt = result.title;
+                       img.onerror = function() {
+                           thumbnailContainer.innerHTML = '<div class="icon">&#127925;</div>';
+                       };
+                       thumbnailContainer.appendChild(img);
+                   } else {
+                       thumbnailContainer.innerHTML = '<div class="icon">&#127925;</div>';
+                   }
+
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   const title = document.createElement('div');
+                   title.className = 'result-name';
+                   title.textContent = result.title || '未知标题';
+
+                   const artist = document.createElement('div');
+                   artist.className = 'result-meta';
+                   artist.textContent = `艺术家: ${result.artist || '未知'}`;
+                   
+                   const album = document.createElement('div');
+                   album.className = 'result-meta';
+                   album.textContent = `专辑: ${result.album || '未知'}`;
+
+                   const filePath = document.createElement('div');
+                   filePath.className = 'result-path';
+                   filePath.textContent = result.filepath;
+
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+
+                   const playButton = document.createElement('button');
+                   playButton.textContent = '播放';
+                   playButton.className = 'play-btn';
+                   playButton.onclick = (e) => {
+                       e.stopPropagation();
+                       playMusic(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(playButton);
+                   
+                   const addToPlaylistButton = document.createElement('button');
+                   addToPlaylistButton.textContent = '添加';
+                   addToPlaylistButton.className = 'add-to-playlist-btn';
+                   addToPlaylistButton.onclick = (e) => {
+                       e.stopPropagation();
+                       // addToPlaylist function needs to be adapted slightly for this context
+                       const playlistEntry = {
+                           full_path: result.filepath,
+                           media_dir_root: result.media_dir_root,
+                           filename: result.title
+                       };
+                       addToPlaylist(playlistEntry);
+                   };
+                   actionsDiv.appendChild(addToPlaylistButton);
+
+                   const downloadButton = document.createElement('button');
+                   downloadButton.textContent = '下载';
+                   downloadButton.className = 'download-btn';
+                   downloadButton.onclick = (e) => {
+                       e.stopPropagation();
+                       downloadFile(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(downloadButton);
+                   
+                   fileInfo.appendChild(title);
+                   fileInfo.appendChild(artist);
+                   fileInfo.appendChild(album);
+                   fileInfo.appendChild(filePath);
+                   fileInfo.appendChild(actionsDiv);
+
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           resultsContainer.style.display = 'grid';
+           lazyLoadImages();
+       }
+
        // 根据完整路径查找其所属的媒体根目录
        function findMediaDirRoot(fullPath) {
            // 这个函数需要一个已知媒体目录列表。由于 search-results.html 无法直接访问 server.js 的 MEDIA_DIRS，
@@ -804,6 +913,19 @@
                } catch (error) {
                    console.error('Video search error:', error);
                    showError(`视频搜索过程中发生错误: ${error.message}`);
+               }
+           } else if (searchType === 'music') {
+               try {
+                   const apiUrl = `/api/search-music?query=${encodeURIComponent(query)}`;
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   const data = await response.json();
+                   displayMusicResults(data);
+               } catch (error) {
+                   console.error('Music search error:', error);
+                   showError(`音乐搜索过程中发生错误: ${error.message}`);
                }
            }
        }

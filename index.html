@@ -659,6 +659,26 @@
             box-shadow: 0 3px 6px rgba(0,0,0,0.5);
         }
 
+        #musicScraperManagerButton {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #6f42c1, #563d7c);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        #musicScraperManagerButton:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(111, 66, 193, 0.6);
+        }
+        #musicScraperManagerButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
         #scraper-panel {
             position: fixed;
             bottom: 20px;
@@ -767,6 +787,7 @@
         <h1>WebPlayer - Browser </h1>
         <button id="cacheManagerButton">缓存管理</button>
         <button id="scraperManagerButton">视频刮削</button>
+        <button id="musicScraperManagerButton">音乐刮削</button>
         <!-- 缓存信息面板 -->
         <div id="cache-info-panel">
             <h2>缓存管理</h2>
@@ -795,6 +816,7 @@
             <div class="search-type-container" style="margin-top: 10px;">
                 <label><input type="radio" name="searchType" value="file" checked> 文件</label>
                 <label><input type="radio" name="searchType" value="video"> 视频</label>
+                <label><input type="radio" name="searchType" value="music"> 音乐</label>
             </div>
             <div id="searchOptions">
                 <label class="search-option-label"><input type="checkbox" id="matchCase"> 区分大小写</label>
@@ -1708,7 +1730,8 @@
                 matchWholeWord: matchWholeWord.checked,
                 useRegex: useRegex.checked,
                 maxResults: parseInt(maxResults.value) || 100,
-                searchType: document.querySelector('input[name="searchType"]:checked').value
+                searchType: document.querySelector('input[name="searchType"]:checked').value,
+                mediaDir: currentMediaDir
             };
             
             // 在新标签页中打开搜索结果页面
@@ -1915,8 +1938,6 @@
                 const result = await response.json();
                 if (!result.success) {
                     scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
-                } else {
-                     scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-waiting">刮削任务已启动...</span></li>`;
                 }
             } catch (error) {
                  scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动刮削任务时出错: ${error.message}</span></li>`;
@@ -1959,14 +1980,85 @@
                 const li = document.createElement('li');
                 li.innerHTML = `<strong>所有任务已完成!</strong>`;
                 scraperTaskList.appendChild(li);
-            }
-             else if (data.type === 'scrape_error') {
+            } else if (data.type === 'scrape_error') {
                  scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '"')}">错误: ${data.message}</span></li>`;
-             }
+             } else if (data.type === 'music_scrape_start') {
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                musicScraperTaskList.innerHTML = ''; // Clear previous messages
+                data.files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.id = `music-task-${file.id}`;
+                    li.innerHTML = `<span class="task-name">${file.name}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                    musicScraperTaskList.appendChild(li);
+                });
+            } else if (data.type === 'music_scrape_progress') {
+                const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                if (taskItem) {
+                    taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
+                }
+            } else if (data.type === 'music_scrape_complete') {
+                const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                if (taskItem) {
+                    if (data.result.success) {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
+                    } else {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '"')}">失败: ${data.result.error || data.result.message}</span>`;
+                    }
+                }
+            } else if (data.type === 'music_scrape_finished_all') {
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                const li = document.createElement('li');
+                li.innerHTML = `<strong>所有音乐刮削任务已完成!</strong>`;
+                musicScraperTaskList.appendChild(li);
+            }
         };
- 
-        });
-    </script>
+
+        // 音乐刮削
+        const musicScraperManagerButton = document.getElementById('musicScraperManagerButton');
+        const musicScraperPanel = document.getElementById('music-scraper-panel');
+        const closeMusicScraperPanelButton = document.getElementById('closeMusicScraperPanelButton');
+        const startMusicScrapingButton = document.getElementById('startMusicScrapingButton');
+        const musicScraperTaskList = document.getElementById('music-scraper-task-list'); // 修正：提前获取
+
+        musicScraperManagerButton.onclick = () => {
+            musicScraperPanel.classList.toggle('hidden');
+        };
+
+        closeMusicScraperPanelButton.onclick = () => {
+            musicScraperPanel.classList.add('hidden');
+        };
+
+        startMusicScrapingButton.onclick = async () => {
+            const selectedSource = document.querySelector('input[name="musicScrapeSource"]:checked').value;
+            if (!currentPath || !currentMediaDir) {
+                alert('无法确定当前目录，请先进入一个媒体目录。');
+                return;
+            }
+
+            musicScraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动音乐刮削任务...</span></li>';
+
+            try {
+                const response = await fetch('/api/scrape-music-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        path: currentPath,
+                        mediaDir: currentMediaDir,
+                        source: selectedSource
+                    })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
+                }
+            } catch (error) {
+                 musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动音乐刮削任务时出错: ${error.message}</span></li>`;
+            }
+        };
+    });
+</script>
     <script src="vendor/jquery-3.5.1.min.js"></script>
     <script src="vendor/jquery.fancybox.min.js"></script>
     <!-- 视频刮削面板 -->
@@ -1988,6 +2080,27 @@
             <h3>任务队列</h3>
             <ul id="scraper-task-list">
                 <!-- 任务项将动态插入此处 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 音乐刮削面板 -->
+    <div id="music-scraper-panel" class="hidden" style="width: 450px; position: fixed; bottom: 20px; right: 20px; max-height: 60vh; background-color: rgba(60, 60, 63, 0.85); border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); z-index: 1001; padding: 20px; display: flex; flex-direction: column; color: #e0e0e0; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+        <button id="closeMusicScraperPanelButton" style="position: absolute; top: 15px; right: 15px; background: none; border: none; color: #e0e0e0; font-size: 1.5em; cursor: pointer; line-height: 1; padding: 0;">&times;</button>
+        <h2 style="margin-top: 0; color: #4d9deb; text-align: center;">音乐刮削</h2>
+        <div class="scraper-controls" style="margin-bottom: 15px;">
+            <p>请选择刮削源：</p>
+            <div class="scraper-type-options" style="display: flex; flex-wrap: wrap; gap: 15px; margin: 10px 0; justify-content: center;">
+                <label><input type="radio" name="musicScrapeSource" value="netease" checked> 网易云</label>
+                <label><input type="radio" name="musicScrapeSource" value="musicbrainz"> MusicBrainz</label>
+                <label><input type="radio" name="musicScrapeSource" value="local"> 仅本地</label>
+            </div>
+            <button id="startMusicScrapingButton" style="width: 100%; padding: 10px; background: linear-gradient(to right, #28a745, #218838); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: all 0.3s ease;">开始刮削当前目录</button>
+        </div>
+        <div class="scraper-queue" style="flex-grow: 1; overflow-y: auto; background-color: rgba(45, 45, 48, 0.8); padding: 10px; border-radius: 4px; min-height: 100px;">
+            <h3>任务队列</h3>
+            <ul id="music-scraper-task-list" style="list-style: none; padding: 0; margin: 0; font-size: 0.9em;">
+                <!-- 音乐刮削任务项将动态插入此处 -->
             </ul>
         </div>
     </div>

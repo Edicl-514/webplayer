@@ -50,6 +50,7 @@ import argparse
 import requests
 import urllib.parse
 import musicbrainzngs
+import sqlite3
 from mutagen import File
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
@@ -75,6 +76,56 @@ MB_APP_VERSION = mb_config.get('app_version')
 # Cache directories
 CACHE_LYRICS_DIR = os.path.join(os.getcwd(), 'cache', 'lyrics')
 CACHE_COVERS_DIR = os.path.join(os.getcwd(), 'cache', 'covers')
+CACHE_DB_DIR = os.path.join(os.getcwd(), 'cache', 'musicdata')
+DB_PATH = os.path.join(CACHE_DB_DIR, 'music_metadata.db')
+
+def init_db():
+    """Initializes the database and creates the table if it doesn't exist."""
+    os.makedirs(CACHE_DB_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS music_info (
+            filepath TEXT PRIMARY KEY,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            cover_path TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_info_to_db(filepath, info):
+    """Saves or updates music info in the database."""
+    if not info:
+        return
+    
+    abs_filepath = os.path.abspath(filepath)
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO music_info (filepath, title, artist, album, cover_path, last_updated)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(filepath) DO UPDATE SET
+            title=excluded.title,
+            artist=excluded.artist,
+            album=excluded.album,
+            cover_path=excluded.cover_path,
+            last_updated=CURRENT_TIMESTAMP
+    ''', (
+        abs_filepath,
+        info.get('title'),
+        info.get('artist'),
+        info.get('album'),
+        info.get('cover_path')
+    ))
+    conn.commit()
+    conn.close()
+    print(f"Saved info for '{abs_filepath}' to database.", file=sys.stderr)
+
 
 def main():
     """Main function to process the audio file."""
@@ -94,10 +145,12 @@ def main():
     args = parser.parse_args()
 
     # Decode the filepath if it's URL-encoded
-    args.filepath = urllib.parse.unquote(args.filepath)
+    # The path from the Node.js server is already decoded, no need to unquote again.
+    # args.filepath = urllib.parse.unquote(args.filepath)
     # Ensure cache directories exist
     os.makedirs(CACHE_LYRICS_DIR, exist_ok=True)
     os.makedirs(CACHE_COVERS_DIR, exist_ok=True)
+    init_db()
     
     # Setup MusicBrainz client if needed
     if args.source == 'musicbrainz':
@@ -198,6 +251,13 @@ def main():
             
             # Use cached cover filename if it exists and no new one was generated
             final_cover_filename = cover_filename or cached_cover_filename
+
+            # Save info to database
+            if not args.no_write:
+                db_info = music_info.copy()
+                if final_cover_filename:
+                    db_info['cover_path'] = os.path.join(CACHE_COVERS_DIR, final_cover_filename)
+                save_info_to_db(args.filepath, db_info)
 
             # Save lyrics to cache if they were fetched and not already cached
             lyrics_filename = None
