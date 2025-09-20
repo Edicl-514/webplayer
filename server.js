@@ -11,14 +11,9 @@ const formidable = require('formidable');
 
 const PORT = 8080;
 // 定义媒体目录及其别名
-const MEDIA_DIRS = [
-    { path: 'J:\\e', alias: 'J' }, // 示例：请将此路径更改为您的视频和文件目录
-    { path: 'K:\\e', alias: 'K' },
-    { path: 'L:\\e', alias: 'L' },
-    { path: 'M:\\e', alias: 'M' },
-    { path: 'N:\\e', alias: 'N' },
-    { path: 'J:\\OneDrive - MSFT', alias: 'MUSIC' }
-];
+// 从 config.json 加载配置
+const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf-8'));
+const MEDIA_DIRS = config.media_directories;
 const MUSIC_DIR = MEDIA_DIRS.find(d => d.alias === 'MUSIC')?.path || path.join(__dirname, 'music');
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
@@ -253,6 +248,72 @@ const server = http.createServer(async (req, res) => {
         });
         return;
     }
+
+    // 新增：处理文件夹播放列表请求
+    if (pathname === '/api/get-folder-playlist' && req.method === 'GET') {
+        const relativeMusicPath = parsedUrl.query.path;
+        const mediaDir = parsedUrl.query.mediaDir;
+
+        if (!relativeMusicPath || !mediaDir) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing path or mediaDir parameter' }));
+            return;
+        }
+
+        const fullMusicPath = path.join(mediaDir, relativeMusicPath);
+
+        const pythonProcess = spawn('python', ['get_folder_playlist.py', fullMusicPath, mediaDir], {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (stderrData) {
+                console.error(`get_folder_playlist.py stderr: ${stderrData}`);
+            }
+            if (code !== 0) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error getting folder playlist' }));
+                return;
+            }
+            try {
+                const result = JSON.parse(stdoutData);
+                if (result.success) {
+                    // Augment the playlist with the correct src URL for the client
+                    const augmentedPlaylist = result.playlist.map(song => {
+                        // The filepath from python is already relative to mediaDir
+                        const encodedFilepath = song.filepath.split('/').map(encodeURIComponent).join('/');
+                        return {
+                            ...song,
+                            src: `/${encodedFilepath}?mediaDir=${encodeURIComponent(mediaDir)}`
+                        };
+                    });
+                    result.playlist = augmentedPlaylist;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify(result));
+                } else {
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify(result)); // Forward the error message from the script
+                }
+            } catch (e) {
+                console.error('Error parsing python script output for folder playlist:', e);
+                console.error('Raw stdout:', stdoutData);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error parsing folder playlist data' }));
+            }
+        });
+        return;
+    }
     
     // 新增：图片代理
     if (pathname === '/api/proxy-image' && req.method === 'GET') {
@@ -482,59 +543,175 @@ const server = http.createServer(async (req, res) => {
 
     // 处理缩略图请求
     if (pathname.startsWith('/thumbnail')) {
-        // 从 /thumbnail 后面获取实际的路径，例如 /thumbnail/folder1/video.mp4 -> /folder1/video.mp4
-        const targetPath = pathname.substring('/thumbnail'.length);
-        // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
-        const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
-        const fullPath = path.join(requestedMediaDir, targetPath);
-        const thumbnailName = crypto.createHash('md5').update(targetPath + requestedMediaDir).digest('hex') + '.jpg'; // 缩略图名称包含 mediaDir，避免不同盘符下同名文件冲突
-        const thumbnailPath = path.join(THUMBNAIL_DIR, thumbnailName);
-
-        // 检查缩略图是否已存在
-        if (fs.existsSync(thumbnailPath)) {
-            // 如果存在，直接返回缓存的缩略图
-            const readStream = fs.createReadStream(thumbnailPath);
-            res.setHeader('Content-Type', 'image/jpeg');
-            readStream.pipe(res);
-            return;
+        let targetPath = pathname.substring('/thumbnail'.length);
+        if (targetPath.startsWith('/')) {
+            targetPath = targetPath.substring(1); // 移除开头的斜杠
         }
+        const requestedMediaDir = parsedUrl.query.mediaDir;
 
-        // 如果缩略图不存在，检查文件类型
-        fs.stat(fullPath, (err, stats) => {
-            if (err || !stats.isFile()) {
-                res.statusCode = 404;
-                res.end('File not found');
+        const findAndProcessThumbnail = (relativePath) => {
+            const findCallback = (err, fullPath, mediaDir, stats) => {
+                if (err) {
+                    res.statusCode = 404;
+                    res.end('File not found in any media directory for thumbnail generation.');
+                    return;
+                }
+
+                const thumbnailName = crypto.createHash('md5').update(relativePath + mediaDir).digest('hex') + '.jpg';
+                const thumbnailPath = path.join(THUMBNAIL_DIR, thumbnailName);
+
+                if (fs.existsSync(thumbnailPath)) {
+                    const readStream = fs.createReadStream(thumbnailPath);
+                    readStream.on('error', (err) => {
+                        console.error(`Error streaming existing thumbnail ${thumbnailPath}:`, err);
+                        if (!res.headersSent) {
+                            res.statusCode = 404; // Or 500, 404 seems reasonable if it disappeared
+                            res.end('Thumbnail file not found or unreadable.');
+                        }
+                    });
+                    res.setHeader('Content-Type', 'image/jpeg');
+                    readStream.pipe(res);
+                    return;
+                }
+
+                const extension = path.extname(fullPath).toLowerCase();
+                const isVideo = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'].includes(extension);
+                const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(extension);
+
+                if (isVideo) {
+                    generateVideoThumbnail(fullPath, thumbnailPath)
+                        .then(() => {
+                            const readStream = fs.createReadStream(thumbnailPath);
+                            readStream.on('error', (err) => {
+                                console.error(`Error streaming thumbnail after generation for ${thumbnailPath}:`, err);
+                                if (!res.headersSent) {
+                                    res.statusCode = 500;
+                                    res.end('Error reading generated thumbnail.');
+                                }
+                            });
+                            res.setHeader('Content-Type', 'image/jpeg');
+                            readStream.pipe(res);
+                        })
+                        .catch((error) => {
+                            console.error('Error generating video thumbnail:', error);
+                            res.statusCode = 500;
+                            res.end('Error generating thumbnail');
+                        });
+                } else if (isImage) {
+                    const readStream = fs.createReadStream(fullPath);
+                    res.setHeader('Content-Type', getContentType(fullPath));
+                    readStream.pipe(res);
+                } else {
+                    res.statusCode = 404;
+                    res.end('Thumbnails not available for this file type');
+                }
+            };
+
+            if (requestedMediaDir) {
+                const fullPath = path.join(requestedMediaDir, relativePath);
+                fs.stat(fullPath, (statErr, stats) => {
+                    if (statErr || !stats.isFile()) {
+                        findCallback(new Error('File not found in specified mediaDir'), null, null, null);
+                    } else {
+                        findCallback(null, fullPath, requestedMediaDir, stats);
+                    }
+                });
+            } else {
+                // Reuse the findFile logic by adapting it slightly
+                let found = false;
+                const dirsToSearch = [currentMediaDir, ...MEDIA_DIRS.map(d => d.path).filter(p => p !== currentMediaDir)];
+                const tryDir = (index) => {
+                    if (index >= dirsToSearch.length) {
+                        if (!found) findCallback(new Error('File not found'), null, null, null);
+                        return;
+                    }
+                    const potentialDir = dirsToSearch[index];
+                    const potentialPath = path.join(potentialDir, relativePath);
+                    fs.stat(potentialPath, (statErr, stats) => {
+                        if (!statErr && stats.isFile()) {
+                            found = true;
+                            findCallback(null, potentialPath, potentialDir, stats);
+                        } else {
+                            tryDir(index + 1);
+                        }
+                    });
+                };
+                tryDir(0);
+            }
+        };
+
+        findAndProcessThumbnail(targetPath);
+        return;
+    }
+
+    // 新增：处理文件夹缩略图请求
+    if (pathname.startsWith('/api/folder-thumbnail')) {
+        let relativePath;
+        try {
+            relativePath = decodeURIComponent(pathname.substring('/api/folder-thumbnail'.length));
+            if (relativePath.startsWith('/')) {
+                relativePath = relativePath.substring(1); // 移除开头的斜杠
+            }
+        } catch (e) {
+            console.warn('Folder thumbnail URI malformed, using raw path:', pathname);
+            relativePath = pathname.substring('/api/folder-thumbnail'.length);
+            if (relativePath.startsWith('/')) {
+                relativePath = relativePath.substring(1); // 移除开头的斜杠
+            }
+        }
+        const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
+        const fullPath = path.join(requestedMediaDir, relativePath);
+
+        try {
+            const files = await fs.promises.readdir(fullPath);
+            const coverNames = ['cover', 'folder', 'front', 'back'];
+            const imageExtensions = ['.jpg', '.jpeg', '.png'];
+            const videoExtensions = ['.mp4', '.mkv', 'avi', '.mov', '.wmv', 'flv', 'webm'];
+
+            // 1. 查找专辑封面
+            for (const name of coverNames) {
+                for (const ext of imageExtensions) {
+                    const coverFile = name + ext;
+                    if (files.some(f => f.toLowerCase() === coverFile)) {
+                        const streamPath = path.join(fullPath, coverFile);
+                        res.setHeader('Content-Type', getContentType(streamPath));
+                        fs.createReadStream(streamPath).pipe(res);
+                        return;
+                    }
+                }
+            }
+
+            // 2. 查找视频并生成缩略图
+            const firstVideo = files.find(f => videoExtensions.includes(path.extname(f).toLowerCase()));
+            if (firstVideo) {
+                // Correctly join the path without adding extra slashes if relativePath is the root.
+                const videoPathForThumbnail = relativePath === '/' ? firstVideo : path.join(relativePath, firstVideo);
+                // 确保路径使用 /
+                const encodedVideoPath = videoPathForThumbnail.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                res.writeHead(302, { 'Location': `/thumbnail/${encodedVideoPath}?mediaDir=${encodeURIComponent(requestedMediaDir)}` });
+                res.end();
                 return;
             }
 
-            const extension = path.extname(fullPath).toLowerCase();
-            const isVideo = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'].includes(extension);
-            const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(extension);
-
-            if (isVideo) {
-                // 为视频文件生成缩略图
-                generateVideoThumbnail(fullPath, thumbnailPath)
-                    .then(() => {
-                        const readStream = fs.createReadStream(thumbnailPath);
-                        res.setHeader('Content-Type', 'image/jpeg');
-                        readStream.pipe(res);
-                    })
-                    .catch((error) => {
-                        console.error('Error generating video thumbnail:', error);
-                        res.statusCode = 500;
-                        res.end('Error generating thumbnail');
-                    });
-            } else if (isImage) {
-                // 对于图片文件，直接返回原图而不是生成缩略图
-                const readStream = fs.createReadStream(fullPath);
-                res.setHeader('Content-Type', getContentType(fullPath));
-                readStream.pipe(res);
-            } else {
-                // 对于不支持的文件类型，返回404
-                res.statusCode = 404;
-                res.end('Thumbnails not available for this file type');
+            // 3. 查找图片
+            const firstImage = files.find(f => imageExtensions.includes(path.extname(f).toLowerCase()));
+            if (firstImage) {
+                 const streamPath = path.join(fullPath, firstImage);
+                res.setHeader('Content-Type', getContentType(streamPath));
+                fs.createReadStream(streamPath).pipe(res);
+                return;
             }
-        });
+            
+            // 4. 返回默认文件夹图标 (这里我们用一个不存在的路径来触发前端的onerror)
+            res.statusCode = 404;
+            res.end('No suitable thumbnail found');
+
+        } catch (err) {
+            // console.error(`Error processing folder thumbnail for ${fullPath}:`, err);
+            // If any error (e.g., directory not found), trigger onerror on client
+            res.statusCode = 404;
+            res.end('Error finding thumbnail');
+        }
         return;
     }
 
@@ -548,7 +725,7 @@ const server = http.createServer(async (req, res) => {
 
     // 处理搜索请求
     if (pathname === '/api/search' && req.method === 'GET') {
-        console.log('Received search request:', parsedUrl.query);
+        //console.log('Received search request:', parsedUrl.query);
         const query = parsedUrl.query.query;
         const matchCase = parsedUrl.query.matchCase === 'true';
         const matchWholeWord = parsedUrl.query.matchWholeWord === 'true';
@@ -564,7 +741,7 @@ const server = http.createServer(async (req, res) => {
         // 调用搜索功能
         performSearch(query, maxResults, matchCase, matchWholeWord, useRegex, parsedUrl.query.dirs) // 传递 dirs 参数
             .then(searchResults => {
-                console.log('Search completed successfully, results count:', searchResults.results ? searchResults.results.length : 0);
+                //console.log('Search completed successfully, results count:', searchResults.results ? searchResults.results.length : 0);
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
                 // searchResults是从search.py返回的整个对象，直接发送给客户端
@@ -578,9 +755,93 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-   if (pathname === '/api/sort-by-time' && req.method === 'GET') {
-       const targetPath = parsedUrl.query.path || '';
-       const sortOrder = parsedUrl.query.order || 'asc';
+    // 新增：处理视频搜索请求
+    if (pathname === '/api/search-videos' && req.method === 'GET') {
+        const query = parsedUrl.query.query;
+        if (!query) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing search query' }));
+            return;
+        }
+
+        const pythonProcess = spawn('python', ['search_videos.py', query], {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (stderrData) {
+                console.error(`search_videos.py stderr: ${stderrData}`);
+            }
+            if (code !== 0) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error executing video search script', error: stderrData }));
+                return;
+            }
+            try {
+                const searchResults = JSON.parse(stdoutData);
+                const webRootPath = __dirname.replace(/\\/g, '/');
+
+                const augmentedResults = searchResults.map(result => {
+                    const mediaDir = MEDIA_DIRS.find(dir => {
+                        const resolvedFilepath = path.resolve(result.filepath).toLowerCase();
+                        const resolvedDirPath = path.resolve(dir.path).toLowerCase();
+                        let isMatch = false;
+                        if (resolvedFilepath.startsWith(resolvedDirPath)) {
+                            if (resolvedFilepath.length === resolvedDirPath.length || resolvedFilepath[resolvedDirPath.length] === path.sep) {
+                                isMatch = true;
+                            }
+                        }
+                        // Debug log for each check
+                        //console.log(`[Debug Search] File: "${resolvedFilepath}" | Dir: "${resolvedDirPath}" | Match: ${isMatch}`);
+                        return isMatch;
+                    });
+                    // Debug log for the final result of the find operation
+                    //console.log(`[Debug Search] Final mediaDir for "${result.filepath}": ${mediaDir ? mediaDir.path : 'null'}`);
+                    
+                    let relativePosterPath = "无本地海报";
+                    if (result.local_poster_path && result.local_poster_path !== "无本地海报") {
+                        // Make poster path relative to web root
+                        const posterPath = result.local_poster_path.replace(/\\/g, '/');
+                        if (posterPath.toLowerCase().startsWith(webRootPath.toLowerCase())) {
+                            relativePosterPath = posterPath.substring(webRootPath.length);
+                        } else {
+                            relativePosterPath = result.local_poster_path;
+                        }
+                    }
+
+                    return {
+                        ...result,
+                        media_dir_root: mediaDir ? mediaDir.path : null,
+                        local_poster_path: relativePosterPath
+                    };
+                });
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, results: augmentedResults }));
+            } catch (e) {
+                console.error('Error parsing video search results:', e);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Error parsing video search results', error: stdoutData }));
+            }
+        });
+        return;
+    }
+ 
+    if (pathname === '/api/sort-by-time' && req.method === 'GET') {
+        const targetPath = parsedUrl.query.path || '';
+        const sortOrder = parsedUrl.query.order || 'asc';
        const fullPath = path.join(currentMediaDir, targetPath);
 
        const pythonProcess = spawn('python', [
@@ -633,7 +894,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/find-subtitles' && req.method === 'GET') {
         const videoSrc = parsedUrl.query.src;
         const findAll = parsedUrl.query.all === 'true';
-        console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}, findAll: ${findAll}`);
+        //console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}, findAll: ${findAll}`);
 
         if (!videoSrc) {
             res.statusCode = 400;
@@ -691,13 +952,13 @@ const server = http.createServer(async (req, res) => {
                     // 优先检查缓存路径是否存在
                     await fs.promises.access(cachePath, fs.constants.F_OK);
                     pathToDelete = cachePath;
-                    console.log(`找到要删除的字幕于缓存目录: ${pathToDelete}`);
+                    //console.log(`找到要删除的字幕于缓存目录: ${pathToDelete}`);
                 } catch (e) {
                     // 如果缓存中不存在，则检查媒体目录
                     try {
                         await fs.promises.access(mediaPath, fs.constants.F_OK);
                         pathToDelete = mediaPath;
-                        console.log(`找到要删除的字幕于媒体目录: ${pathToDelete}`);
+                        //console.log(`找到要删除的字幕于媒体目录: ${pathToDelete}`);
                     } catch (e2) {
                         // 两个地方都找不到
                         console.log(`请求删除的字幕文件在缓存和媒体目录中均未找到: ${subtitlePath}`);
@@ -720,7 +981,7 @@ const server = http.createServer(async (req, res) => {
 
                 // 执行删除
                 await fs.promises.unlink(pathToDelete);
-                console.log(`成功删除字幕文件: ${pathToDelete}`);
+                //console.log(`成功删除字幕文件: ${pathToDelete}`);
                 res.statusCode = 200;
                 res.end(JSON.stringify({ success: true, message: '字幕文件已成功删除。' }));
 
@@ -764,7 +1025,7 @@ const server = http.createServer(async (req, res) => {
             }
 
             // With formidable's `filename` option, the file is already saved with the correct name.
-            console.log(`字幕文件已上传并保存: ${uploadedFile.newFilename}`);
+            //console.log(`字幕文件已上传并保存: ${uploadedFile.newFilename}`);
             res.statusCode = 200;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ success: true, filename: uploadedFile.newFilename }));
@@ -875,7 +1136,7 @@ const server = http.createServer(async (req, res) => {
                         // 保留最后不完整的一行
                         stdoutBuffer = lines[lines.length - 1];
                     }
-                    console.log(`stdout: ${data}`);
+                    //console.log(`stdout: ${data}`);
                 });
 
                 pythonProcess.stderr.on('data', (data) => {
@@ -1288,7 +1549,7 @@ const server = http.createServer(async (req, res) => {
                      args.push('--imdb_id', imdb_id);
                  }
  
-                 console.log(`Executing subtitle download: python ${args.join(' ')}`);
+                 //console.log(`Executing subtitle download: python ${args.join(' ')}`);
  
                  const pythonProcess = spawn('python', args, {
                      env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
@@ -1299,7 +1560,7 @@ const server = http.createServer(async (req, res) => {
  
                  pythonProcess.stdout.on('data', (data) => {
                      stdoutData += data.toString();
-                     console.log(`[download_subtitle.py stdout]: ${data.toString()}`);
+                     //console.log(`[download_subtitle.py stdout]: ${data.toString()}`);
                  });
  
                  pythonProcess.stderr.on('data', (data) => {
@@ -1358,7 +1619,7 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
 
-                console.log(`Executing subtitle action: python ${args.join(' ')}`);
+                //console.log(`Executing subtitle action: python ${args.join(' ')}`);
 
                 const pythonProcess = spawn('python', args, {
                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
@@ -1425,8 +1686,8 @@ const server = http.createServer(async (req, res) => {
         });
         
         const pythonServiceUrl = `http://127.0.0.1:5000/search?${forwardParams.toString()}`;
-        
-        console.log(`Forwarding semantic search request to: ${pythonServiceUrl}`);
+
+        //console.log(`Forwarding semantic search request to: ${pythonServiceUrl}`);
 
         http.get(pythonServiceUrl, (proxyRes) => {
             let data = '';
@@ -1456,13 +1717,13 @@ const server = http.createServer(async (req, res) => {
 
     // 代理 /api/translate-subtitle
     if (pathname === '/api/translate-subtitle' && req.method === 'POST') {
-        proxyRequestToPython(req, res, 5000, '/translate');
+        runSubtitleProcess(req, res, 'translate');
         return;
     }
 
     // 代理 /api/correct-subtitle
     if (pathname === '/api/correct-subtitle' && req.method === 'POST') {
-        proxyRequestToPython(req, res, 5000, '/correct_only');
+        runSubtitleProcess(req, res, 'correct');
         return;
     }
 
@@ -1492,7 +1753,42 @@ const server = http.createServer(async (req, res) => {
 
     // 代理 /api/generate-glossary
     if (pathname === '/api/generate-glossary' && req.method === 'POST') {
-        proxyRequestToPython(req, res, 5000, '/api/generate_glossary');
+        runSubtitleProcess(req, res, 'glossary');
+        return;
+    }
+    // 新增：代理 /api/cancel-subtitle-task
+    if (pathname === '/api/cancel-subtitle-task' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', () => {
+            try {
+                const { task, vtt_file, mediaDir } = JSON.parse(body);
+                if (!task || !vtt_file || !mediaDir) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: "Missing required parameters." }));
+                    return;
+                }
+
+                const taskId = `${task}::${vtt_file}::${mediaDir}`;
+                const processToKill = runningSubtitleTasks.get(taskId);
+
+                if (processToKill) {
+                    console.log(`[Subtitle Process] Attempting to cancel task ${taskId} with PID ${processToKill.pid}`);
+                    // 使用 SIGTERM 优雅地终止进程
+                    processToKill.kill('SIGTERM');
+                    // runningSubtitleTasks.delete(taskId); // Let the 'close' event handle removal.
+                    res.statusCode = 200;
+                    res.end(JSON.stringify({ success: true, message: "Task cancellation requested." }));
+                } else {
+                    console.warn(`[Subtitle Process] Could not find running task to cancel with ID: ${taskId}`);
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ success: false, message: "Task not found or already completed." }));
+                }
+            } catch (e) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: 'Invalid JSON request body.' }));
+            }
+        });
         return;
     }
  
@@ -1531,15 +1827,49 @@ const server = http.createServer(async (req, res) => {
         }
         return;
     }
-    // 尝试从查询参数中获取 mediaDir，如果没有则使用 currentMediaDir
-    const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
-    // 如果 pathname 以 / 开头，path.join 会把它当作绝对路径，我们需要移除开头的 /
+    // --- 文件定位逻辑增强 ---
+    const requestedMediaDir = parsedUrl.query.mediaDir;
     const relativePath = pathname.startsWith('/') ? pathname.substring(1) : pathname;
-    const fullPath = path.join(requestedMediaDir, relativePath);
- 
-    fs.stat(fullPath, (err, stats) => {
+    let fullPath;
+
+    const findFile = (callback) => {
+        if (requestedMediaDir) {
+            // 如果提供了 mediaDir，直接构建路径
+            fullPath = path.join(requestedMediaDir, relativePath);
+            fs.stat(fullPath, (statErr, stats) => {
+                callback(statErr, stats, fullPath);
+            });
+        } else {
+            // 如果没有提供 mediaDir，遍历所有 MEDIA_DIRS 查找文件
+            let found = false;
+            let attempts = 0;
+            const dirsToSearch = [currentMediaDir, ...MEDIA_DIRS.map(d => d.path).filter(p => p !== currentMediaDir)];
+
+            const tryDir = (index) => {
+                if (index >= dirsToSearch.length) {
+                    // 所有目录都尝试完毕，未找到
+                    callback(new Error('File not found in any media directory'), null, null);
+                    return;
+                }
+                const potentialPath = path.join(dirsToSearch[index], relativePath);
+                fs.stat(potentialPath, (statErr, stats) => {
+                    if (!statErr && stats.isFile()) {
+                        found = true;
+                        fullPath = potentialPath;
+                        callback(null, stats, fullPath);
+                    } else {
+                        // 继续尝试下一个目录
+                        tryDir(index + 1);
+                    }
+                });
+            };
+            tryDir(0);
+        }
+    };
+
+    findFile((err, stats, resolvedPath) => {
         if (err) {
-            // 如果在 MEDIA_DIR 中找不到，尝试从 WEB_ROOT 提供静态文件 (如 index.html 本身)
+            // 如果在所有媒体目录中都找不到，再尝试从 WEB_ROOT 提供静态文件
             const staticFilePath = path.join(WEB_ROOT, pathname);
             fs.stat(staticFilePath, (staticErr, staticStats) => {
                 if (staticErr) {
@@ -1567,11 +1897,12 @@ const server = http.createServer(async (req, res) => {
         } else {
             // 提供文件（包括视频流和下载）
             const range = req.headers.range;
-            const contentType = getContentType(fullPath);
-
-            if (range) {
-                // 视频流 (处理 Range 头)
-                const positions = range.replace(/bytes=/, "").split("-");
+            const contentType = getContentType(resolvedPath);
+            res.setHeader('Access-Control-Allow-Origin', '*'); // 允许跨域访问
+ 
+             if (range) {
+                 // 视频流 (处理 Range 头)
+                 const positions = range.replace(/bytes=/, "").split("-");
                 const start = parseInt(positions[0], 10);
                 const total = stats.size;
                 const end = positions[1] ? parseInt(positions[1], 10) : total - 1;
@@ -1583,7 +1914,7 @@ const server = http.createServer(async (req, res) => {
                 res.setHeader('Content-Length', chunksize);
                 res.setHeader('Content-Type', contentType);
 
-                const stream = fs.createReadStream(fullPath, { start, end });
+                const stream = fs.createReadStream(resolvedPath, { start, end });
                 stream.on('open', () => stream.pipe(res));
                 stream.on('error', (streamErr) => {
                     res.statusCode = 500;
@@ -1595,9 +1926,9 @@ const server = http.createServer(async (req, res) => {
                 res.setHeader('Content-Length', stats.size);
                 res.setHeader('Content-Type', contentType); // 根据文件类型设置
                 // 对于下载，可以添加 Content-Disposition
-                // res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fullPath)}"`);
+                // res.setHeader('Content-Disposition', `attachment; filename="${path.basename(resolvedPath)}"`);
 
-                const readStream = fs.createReadStream(fullPath);
+                const readStream = fs.createReadStream(resolvedPath);
                 readStream.on('open', () => readStream.pipe(res));
                 readStream.on('error', (readErr) => {
                     res.statusCode = 500;
@@ -1611,9 +1942,9 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', ws => {
-    console.log('Client connected');
+    //console.log('Client connected');
     ws.on('close', () => {
-        console.log('Client disconnected');
+        //console.log('Client disconnected');
     });
 });
 
@@ -1891,10 +2222,12 @@ function generateVideoThumbnail(videoPath, thumbnailPath) {
             // 使用 ffmpeg 生成视频缩略图
             // 尝试不同的方法来避免黑屏问题
             const ffmpeg = spawn('ffmpeg', [
-                '-ss', '00:00:10',
+                '-ss', '00:00:01', // 使用快速seek
                 '-i', videoPath,
                 '-vframes', '1', // 只截取一帧
                 '-vf', "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2", // 缩放尺寸保持宽高比并填充
+                '-pix_fmt', 'yuvj420p', // 解决YUV范围问题
+                '-strict', '-2', // 允许非标准像素格式
                 '-y', // 覆盖输出文件
                 thumbnailPath
             ]);
@@ -2001,8 +2334,217 @@ server.listen(PORT, () => {
     const currentDirObj = MEDIA_DIRS.find(md => md.path === currentMediaDir);
     const displayName = currentDirObj ? (currentDirObj.alias || currentDirObj.path) : currentMediaDir;
     console.log(`Serving files from: ${displayName} (${currentMediaDir})`);
-    console.log(`Thumbnails will be cached in: ${THUMBNAIL_DIR}`);
+    //console.log(`Thumbnails will be cached in: ${THUMBNAIL_DIR}`);
 });
+
+// --- 新增：批量刮削功能 ---
+async function findVideoFilesRecursively(dir) {
+    let videoFiles = [];
+    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm'];
+    try {
+        const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+        for (const dirent of dirents) {
+            const resolvedPath = path.resolve(dir, dirent.name);
+            if (dirent.isDirectory()) {
+                videoFiles = videoFiles.concat(await findVideoFilesRecursively(resolvedPath));
+            } else {
+                if (videoExtensions.includes(path.extname(dirent.name).toLowerCase())) {
+                    videoFiles.push(resolvedPath);
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`Error reading directory ${dir}:`, error);
+        // Optionally broadcast an error to the client
+        broadcast({
+            type: 'scrape_error',
+            message: `读取目录失败: ${dir}`
+        });
+    }
+    return videoFiles;
+}
+
+
+server.on('request', async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    let pathname;
+    try {
+        pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (e) {
+        pathname = parsedUrl.pathname;
+    }
+
+    if (pathname === '/api/scrape-directory' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', async () => {
+            try {
+                const { path: relativePath, mediaDir, type: videoType } = JSON.parse(body);
+                const fullPath = path.join(mediaDir, relativePath);
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, message: 'Scraping process started.' }));
+
+                // Run scraping in the background
+                (async () => {
+                    const videoFiles = await findVideoFilesRecursively(fullPath);
+                    const fileTasks = videoFiles.map((filePath, index) => ({
+                        id: `file_${index}_${Date.now()}`,
+                        path: filePath,
+                        name: path.relative(fullPath, filePath) || path.basename(filePath)
+                    }));
+                    
+                    broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+
+                    for (const fileTask of fileTasks) {
+                        broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                        
+                        const result = await new Promise((resolve) => {
+                            const args = ['video_scraper.py', fileTask.path, videoType];
+                            const pythonProcess = spawn('python', args, {
+                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                            });
+                            let stdoutData = '';
+                            let stderrData = '';
+                            pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                            pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                            pythonProcess.on('close', (code) => {
+                                if (stderrData) { console.error(`[Scraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                                if (code !== 0) {
+                                    resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                                } else {
+                                    try {
+                                        const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                        if (jsonMatch && jsonMatch[1]) {
+                                            const scrapedData = JSON.parse(jsonMatch[1]);
+                                            if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
+                                                resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
+                                            } else {
+                                                resolve({ success: true, data: scrapedData });
+                                            }
+                                        } else {
+                                            resolve({ success: false, error: '无法解析输出', details: stdoutData });
+                                        }
+                                    } catch (e) {
+                                        resolve({ success: false, error: '解析JSON失败', details: stdoutData });
+                                    }
+                                }
+                            });
+                        });
+                        
+                        broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                    }
+                    broadcast({ type: 'scrape_finished_all' });
+                })();
+            } catch (e) {
+                 // This catch is for the initial request parsing.
+                 // It's unlikely to be hit if the scraping is running in the background,
+                 // but good to have for robustness.
+                if (!res.headersSent) {
+                    res.statusCode = 400;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
+                }
+                console.error('Error starting scrape-directory process:', e);
+            }
+        });
+    }
+});
+
+
+// --- 新增：运行字幕处理脚本并广播进度的函数 ---
+const runningSubtitleTasks = new Map(); // 用于跟踪正在运行的进程
+
+function runSubtitleProcess(req, res, task) {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+        try {
+            const { vtt_file, mediaDir } = JSON.parse(body);
+            if (!vtt_file || !mediaDir) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "Missing 'vtt_file' or 'mediaDir' parameter" }));
+                return;
+            }
+
+            const taskId = `${task}::${vtt_file}::${mediaDir}`;
+            if (runningSubtitleTasks.has(taskId)) {
+                res.statusCode = 409; // Conflict
+                res.end(JSON.stringify({ error: `Task '${task}' for this file is already running.` }));
+                return;
+            }
+            
+            res.statusCode = 202;
+            res.end(JSON.stringify({ success: true, message: `Task '${task}' started.` }));
+
+            const args = ['process_subtitle.py', task, '--vtt-file', vtt_file, '--media-dir', mediaDir];
+            //console.log(`[Subtitle Process] Spawning: python ${args.join(' ')}`);
+
+            const pythonProcess = spawn('python', args, {
+                cwd: __dirname,
+                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+            });
+
+            runningSubtitleTasks.set(taskId, pythonProcess);
+            //(`[Subtitle Process] Task started with PID: ${pythonProcess.pid} and ID: ${taskId}`);
+
+            let stdoutBuffer = '';
+            pythonProcess.stdout.on('data', (data) => {
+                stdoutBuffer += data.toString();
+                const lines = stdoutBuffer.split('\n');
+                for (let i = 0; i < lines.length - 1; i++) {
+                    const line = lines[i].trim();
+                    if (line) {
+                        try {
+                            const jsonData = JSON.parse(line);
+                            broadcast(jsonData);
+                        } catch (e) {
+                            console.warn(`[Subtitle Process] Failed to parse JSON from stdout line: "${line}"`, e);
+                        }
+                    }
+                }
+                stdoutBuffer = lines[lines.length - 1];
+            });
+
+            pythonProcess.stderr.on('data', (data) => {
+                console.error(`[Subtitle Process] Stderr for task '${task}' (PID: ${pythonProcess.pid}): ${data.toString()}`);
+                broadcast({ type: 'error', message: `任务 '${task}' 发生错误: ${data.toString()}` });
+            });
+
+            pythonProcess.on('close', (code, signal) => {
+                runningSubtitleTasks.delete(taskId);
+                //console.log(`[Subtitle Process] Task '${taskId}' (PID: ${pythonProcess.pid}) finished with code ${code} and signal ${signal}.`);
+                if (stdoutBuffer.trim()) {
+                     try {
+                        const jsonData = JSON.parse(stdoutBuffer.trim());
+                        broadcast(jsonData);
+                    } catch (e) {
+                         console.warn(`[Subtitle Process] Failed to parse final JSON from stdout: "${stdoutBuffer.trim()}"`, e);
+                    }
+                }
+                if (signal === 'SIGTERM') {
+                    broadcast({ type: 'cancelled', task: task, message: '任务已取消。' });
+                } else if (code !== 0) {
+                    broadcast({ type: 'error', message: `任务 '${task}' 意外终止，退出码: ${code}` });
+                }
+            });
+
+            pythonProcess.on('error', (err) => {
+                 runningSubtitleTasks.delete(taskId);
+                 console.error(`[Subtitle Process] Failed to start process for task '${task}':`, err);
+                 broadcast({ type: 'error', message: `无法启动 '${task}' 任务。` });
+            });
+
+        } catch (e) {
+            if (!res.headersSent) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Invalid JSON request body.' }));
+            }
+        }
+    });
+}
+
 
 // --- 新增：通用 Python 服务代理函数 ---
 function proxyRequestToPython(req, res, port, targetPath) {

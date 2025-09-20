@@ -8,6 +8,43 @@
        <link rel="stylesheet" href="vendor/DPlayer.min.css">
        <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
        <link rel="stylesheet" href="video-player-style.css?v=1">
+       <style>
+           .searchable-link {
+               color: var(--accent-color, #00bcd4);
+               text-decoration: none;
+               border-bottom: 1px dotted var(--accent-color, #00bcd4);
+               transition: color 0.2s, background-color 0.2s;
+               cursor: pointer;
+           }
+           .searchable-link:hover {
+               color: var(--accent-text-color, #1a1a1a);
+               background-color: var(--accent-color, #00bcd4);
+               border-bottom-style: solid;
+           }
+       </style>
+       <style>
+           .chat-progress-container {
+               padding: 5px 0;
+           }
+           .chat-progress-text {
+               font-size: 0.9em;
+               margin-bottom: 4px;
+               color: var(--primary-text);
+           }
+           .chat-progress-bar-container {
+               width: 100%;
+               background-color: rgba(0, 0, 0, 0.3);
+               border-radius: 4px;
+               overflow: hidden;
+           }
+           .chat-progress-bar-inner {
+               width: 0%;
+               height: 8px;
+               background-color: var(--accent-color, #00bcd4);
+               border-radius: 4px;
+               transition: width 0.3s ease-in-out;
+           }
+   </style>
    </head>
    <body>
        <script src="vendor/color-thief.min.js"></script>
@@ -228,6 +265,11 @@
            }
            
            async function checkAndLoadScrapedInfo() {
+                if (!mediaDir) {
+                    console.warn("mediaDir is missing, skipping check for scraped info.");
+                    document.getElementById('videoInfoContent').innerHTML = '<p>无法加载视频信息 (媒体目录未知)。</p>';
+                    return;
+                }
                try {
                    const response = await fetch(`/api/check-scraped-info`, {
                        method: 'POST',
@@ -899,24 +941,76 @@
    
            ws.onmessage = function(event) {
                const data = JSON.parse(event.data);
-               if (data.type === 'progress') {
+               
+               // --- 旧的转码进度处理 ---
+               if (data.type === 'progress' && 'speed' in data) {
                    progressBar.style.width = data.progress + '%';
                    progressBar.textContent = data.progress.toFixed(2) + '%';
                    progressInfo.textContent = `时间: ${data.time}, 速度: ${data.speed}`;
-               } else if (data.type === 'complete') {
-                   modalTitle.textContent = '转码完成!';
+                   return;
+               }
+               if (data.type === 'complete' && 'newPath' in data) {
+                    modalTitle.textContent = '转码完成!';
                    modalText.textContent = '页面即将刷新...';
                    setTimeout(() => {
                        const newUrl = new URL(window.location.href);
                        newUrl.searchParams.set('src', data.newPath);
-                       // 移除旧的 poster 和 thumbnails 参数，因为新文件可能没有这些
                        newUrl.searchParams.delete('poster');
                        newUrl.searchParams.delete('thumbnails');
                        window.location.href = newUrl.href;
                    }, 2000);
-               } else if (data.type === 'error') {
-                   modalTitle.textContent = '转码失败';
+                   return;
+               }
+               if (data.type === 'error' && data.message && data.message.includes('转码')) {
+                    modalTitle.textContent = '转码失败';
                    modalText.textContent = data.message;
+                   return;
+               }
+
+               // --- 新的字幕任务进度处理 ---
+               const taskId = `task-${data.task ? data.task.replace(/\s/g, '-') : 'general'}-${currentSubtitleUrl}`;
+               
+               // 更新或创建任务状态
+               if (activeTasks[taskId]) {
+                   if (data.type === 'progress') {
+                       activeTasks[taskId].current = data.current;
+                       activeTasks[taskId].total = data.total;
+                   } else if (data.type === 'cancelled') {
+                       delete activeTasks[taskId];
+                   } else if (data.type === 'complete' || data.type === 'error') {
+                       delete activeTasks[taskId]; // 任务结束，移除跟踪
+                   }
+               }
+
+               let taskMessageEl = document.getElementById(taskId);
+               if (taskMessageEl) {
+                   if (data.type === 'progress') {
+                       const progressBarEl = taskMessageEl.querySelector('.chat-progress-bar-inner');
+                       const progressTextEl = taskMessageEl.querySelector('.chat-progress-text');
+                       const percentage = (data.current / data.total) * 100;
+                       progressBarEl.style.width = `${percentage}%`;
+                       progressTextEl.textContent = `${data.task}中... (${data.current}/${data.total})`;
+                   } else if (data.type === 'complete') {
+                       let finalMessage = `✅ 任务 '${data.task}' 完成！`;
+                       if (data.processed_file) {
+                           finalMessage += `<br>新文件: ${data.processed_file.split(/[\\/]/).pop()}`;
+                           loadAllSubtitles();
+                       }
+                       if (data.glossary_file) {
+                           finalMessage += `<br>文件已保存: ${data.glossary_file.split(/[\\/]/).pop()}`;
+                       }
+                       taskMessageEl.className = 'chat-message bot-message';
+                       taskMessageEl.innerHTML = finalMessage;
+                       taskMessageEl.removeAttribute('data-task-active');
+                   } else if (data.type === 'cancelled') {
+                       taskMessageEl.className = 'chat-message bot-message';
+                       taskMessageEl.innerHTML = `🚫 任务 '${data.task}' 已取消。`;
+                       taskMessageEl.removeAttribute('data-task-active');
+                   } else if (data.type === 'error') {
+                       taskMessageEl.className = 'chat-message error-message';
+                       taskMessageEl.innerHTML = `❌ 任务 '${data.task || '未知'}' 失败: ${data.message}`;
+                       taskMessageEl.removeAttribute('data-task-active');
+                   }
                }
            };
    
@@ -1406,8 +1500,18 @@
                return /\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url);
            }
     
+           function searchByMetadata(type, value) {
+               // The query format should be something like "演员:苍井空"
+               const query = `${type}:${value}`;
+               const url = `search-results.html?searchType=video&query=${encodeURIComponent(query)}`;
+               window.open(url, '_blank');
+           }
+    
            function buildHtml(obj) {
                const keysToSkip = ['来源', '匹配度', 'JAV刮削结果', '文件信息'];
+               // Keys that should be made clickable for searching
+               const searchableKeys = ['类型', '导演', '制作商', '发行商', '销售商', '演员', '系列', '声优', '制作人员', '类别', '标签', 'Cast', 'Director', 'Studio', 'Label', 'Series', 'Genre'];
+    
                let result = '<ul class="info-list">';
                for (const key in obj) {
                    if (obj.hasOwnProperty(key) && !keysToSkip.includes(key)) {
@@ -1416,6 +1520,8 @@
                        if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
                            continue;
                        }
+    
+                       const isSearchable = searchableKeys.includes(key);
     
                        result += `<li><strong>${key}:</strong> `;
                        if (typeof value === 'object' && value !== null) {
@@ -1435,7 +1541,12 @@
                                        });
                                        result += '</div>';
                                    } else {
-                                       result += `<span>${value.join(', ')}</span>`;
+                                       // This is where arrays of strings are handled.
+                                       if (isSearchable) {
+                                           result += value.map(item => `<a class="searchable-link" onclick="searchByMetadata('${key}', '${String(item).replace(/'/g, "\\'")}')">${item}</a>`).join(', ');
+                                       } else {
+                                           result += `<span>${value.join(', ')}</span>`;
+                                       }
                                    }
                                }
                            } else {
@@ -1448,7 +1559,12 @@
                            } else if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
                                result += `<a href="${value}" target="_blank">${value}</a>`;
                            } else {
-                               result += `<span>${value}</span>`;
+                               // This is where single strings are handled.
+                               if (isSearchable) {
+                                   result += `<a class="searchable-link" onclick="searchByMetadata('${key}', '${String(value).replace(/'/g, "\\'")}')">${value}</a>`;
+                               } else {
+                                   result += `<span>${value}</span>`;
+                               }
                            }
                        }
                        result += '</li>';
@@ -1828,6 +1944,7 @@
             let currentChatMode = 'none'; // 'semantic' or 'subtitle' or 'ai' or 'manual-scrape'
             let aiChatHistory = []; // History for general AI chat
             let manualScrapeState = { active: false, type: null, title: null };
+            let activeTasks = {}; // --- 新增：全局活动任务跟踪器 ---
             
             // State for subtitle download
             let subtitleChatState = 'idle'; // idle, waiting_movie_selection, waiting_lang_selection, waiting_subliminal_confirmation
@@ -1851,11 +1968,53 @@
                playerContainer.classList.remove('chat-mode'); // Close the panel
             }
 
+            async function cancelSubtitleTask(task, vtt_file, taskDisplay) {
+                console.log(`Requesting to cancel task: ${task} for file: ${vtt_file}`);
+                const taskId = `task-${taskDisplay}-${vtt_file}`;
+                const taskMessageEl = document.getElementById(taskId);
+
+                const cancelButton = taskMessageEl ? taskMessageEl.querySelector('.chat-cancel-btn') : null;
+                if (cancelButton) {
+                    cancelButton.disabled = true;
+                    cancelButton.textContent = '取消中...';
+                }
+
+                try {
+                    const response = await fetch('/api/cancel-subtitle-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ task, vtt_file, mediaDir })
+                    });
+                    const result = await response.json();
+                    if (taskMessageEl) {
+                        if (result.success) {
+                            taskMessageEl.className = 'chat-message bot-message';
+                            taskMessageEl.innerHTML = `✅ 任务 '${taskDisplay}' 已取消。`;
+                            taskMessageEl.removeAttribute('data-task-active');
+                            if (activeTasks[taskId]) delete activeTasks[taskId];
+                        } else {
+                            throw new Error(result.message || '未能取消任务。');
+                        }
+                    }
+                } catch (error) {
+                    console.error('取消任务时出错:', error);
+                    if (taskMessageEl) {
+                        if(cancelButton) {
+                            cancelButton.disabled = false;
+                            cancelButton.textContent = '取消';
+                        }
+                        taskMessageEl.innerHTML += `<br><span style="color:red;">取消失败: ${error.message}</span>`;
+                    }
+                }
+            }
             function setupChatPanel(mode, initialData = {}) {
                 currentChatMode = mode;
                 chatMessages.innerHTML = ''; // Clear messages
                 chatInput.disabled = false;
                 sendChatBtn.disabled = false;
+
+               // --- 新增：重新渲染活动任务 ---
+               reRenderActiveTasks();
 
                 if (mode === 'semantic') {
                     chatTitle.textContent = '语义搜索';
@@ -1910,8 +2069,11 @@
                 playerContainer.classList.remove('chat-mode');
             });
    
-           function addChatMessage(message, type, isHtml = true) {
+           function addChatMessage(message, type, isHtml = true, elementId = null) {
                const messageEl = document.createElement('div');
+               if (elementId) {
+                   messageEl.id = elementId;
+               }
                messageEl.className = `chat-message ${type}-message`;
                if (isHtml) {
                    messageEl.innerHTML = message;
@@ -1920,7 +2082,7 @@
                }
                chatMessages.appendChild(messageEl);
                chatMessages.scrollTop = chatMessages.scrollHeight;
-               return messageEl; // Return the element so it can be removed later
+               return messageEl;
            }
    
            function timeStringToSeconds(timeStr) {
@@ -2480,33 +2642,58 @@
                }
 
                const actionText = mode === 'translate' ? '翻译' : '纠错';
-               const loadingMsg = addChatMessage(`正在发送字幕${actionText}请求...`, 'bot');
+               const taskId = `task-${actionText}-${currentSubtitleUrl}`;
                
+               // 添加带进度条的占位符消息
+               const progressPlaceholder = `
+                   <div class="chat-progress-container">
+                       <div class="chat-progress-text">${actionText}中... (0/0)</div>
+                       <div class="chat-progress-bar-container">
+                           <div class="chat-progress-bar-inner" style="width: 0%;"></div>
+                       </div>
+                       <button class="chat-cancel-btn" onclick="cancelSubtitleTask('${mode}', '${currentSubtitleUrl.replace(/'/g, "\\'")}', '${actionText}')">取消</button>
+                   </div>`;
+               const messageEl = addChatMessage(progressPlaceholder, 'bot', true, taskId);
+               messageEl.setAttribute('data-task-active', 'true'); // 标记为活动任务
+
+               // --- 新增：开始跟踪任务 ---
+               activeTasks[taskId] = {
+                   task: actionText,
+                   current: 0,
+                   total: 0, // 初始总数未知
+                   startTime: Date.now()
+               };
+
                const apiUrl = mode === 'translate' ? '/api/translate-subtitle' : '/api/correct-subtitle';
 
-               try {
-                   const response = await fetch(apiUrl, {
-                       method: 'POST',
-                       headers: { 'Content-Type': 'application/json' },
-                       body: JSON.stringify({
-                           vtt_file: currentSubtitleUrl,
-                           mediaDir: mediaDir
-                       })
-                   });
-
-                   const result = await response.json();
-                   loadingMsg.remove();
-
-                   if (response.ok) {
-                       addChatMessage(`✅ 字幕${actionText}成功！<br>新文件已保存: ${result.processed_file}<br>字幕列表已刷新。`, 'bot');
-                       await loadAllSubtitles(); // 刷新字幕列表
-                   } else {
-                       throw new Error(result.error || `${actionText}失败`);
+               fetch(apiUrl, {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({
+                       vtt_file: currentSubtitleUrl,
+                       mediaDir: mediaDir
+                   })
+               }).then(response => {
+                   if (!response.ok && response.status !== 202) { // 202 is "Accepted", which is success for us
+                       return response.json().then(err => Promise.reject(err));
                    }
-               } catch (error) {
-                   loadingMsg.remove();
-                   addChatMessage(`❌ 字幕${actionText}失败: ${error.message}`, 'error');
-               }
+                   // 对于202响应，我们不需要解析body，因为进度会通过websocket发送
+                   return response.status === 202 ? null : response.json();
+               }).then(result => {
+                   if (result) { // 如果API立即返回结果（不太可能了，但作为后备）
+                       const taskMessageEl = document.getElementById(taskId);
+                       if (taskMessageEl) {
+                          taskMessageEl.innerHTML = `✅ 字幕${actionText}成功！<br>新文件已保存: ${result.processed_file}<br>字幕列表已刷新。`;
+                          loadAllSubtitles();
+                       }
+                   }
+               }).catch(error => {
+                   const taskMessageEl = document.getElementById(taskId);
+                   if (taskMessageEl) {
+                      taskMessageEl.className = 'chat-message error-message';
+                      taskMessageEl.innerHTML = `❌ 字幕${actionText}失败: ${error.message || error.error || '未知错误'}`;
+                   }
+               });
            }
 
            async function handleUnloadModels() {
@@ -2538,29 +2725,60 @@
                    return;
                }
 
-               const loadingMsg = addChatMessage('正在生成术语表...', 'bot');
-               try {
-                   const response = await fetch('/api/generate-glossary', {
-                       method: 'POST',
-                       headers: { 'Content-Type': 'application/json' },
-                       body: JSON.stringify({
-                           vtt_file: currentSubtitleUrl,
-                           mediaDir: mediaDir
-                       })
-                   });
+               const taskId = `task-术语表-${currentSubtitleUrl}`;
+               const progressPlaceholder = `
+                   <div class="chat-progress-container">
+                       <div class="chat-progress-text">术语表生成中... (0/0)</div>
+                       <div class="chat-progress-bar-container">
+                           <div class="chat-progress-bar-inner" style="width: 0%;"></div>
+                       </div>
+                       <button class="chat-cancel-btn" onclick="cancelSubtitleTask('glossary', '${currentSubtitleUrl.replace(/'/g, "\\'")}', '术语表')">取消</button>
+                   </div>`;
+               const messageEl = addChatMessage(progressPlaceholder, 'bot', true, taskId);
+               messageEl.setAttribute('data-task-active', 'true');
 
-                   const result = await response.json();
-                   loadingMsg.remove();
+               activeTasks[taskId] = {
+                   task: '术语表',
+                   current: 0,
+                   total: 0,
+                   startTime: Date.now()
+               };
 
-                   if (response.ok) {
-                       addChatMessage(`✅ 术语表生成成功！<br>已保存至: ${result.glossary_file}`, 'bot');
-                   } else {
-                       throw new Error(result.error || '生成失败');
+               fetch('/api/generate-glossary', {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({
+                       vtt_file: currentSubtitleUrl,
+                       mediaDir: mediaDir
+                   })
+               }).then(response => {
+                    if (!response.ok && response.status !== 202) {
+                       return response.json().then(err => Promise.reject(err));
                    }
-               } catch (error) {
-                   loadingMsg.remove();
-                   addChatMessage(`❌ 生成术语表失败: ${error.message}`, 'error');
-               }
+                   return null;
+               }).catch(error => {
+                   const taskMessageEl = document.getElementById(taskId);
+                   if (taskMessageEl) {
+                      taskMessageEl.className = 'chat-message error-message';
+                      taskMessageEl.innerHTML = `❌ 生成术语表失败: ${error.message || error.error || '未知错误'}`;
+                   }
+               });
+           }
+
+           function reRenderActiveTasks() {
+               Object.keys(activeTasks).forEach(taskId => {
+                   const task = activeTasks[taskId];
+                   const percentage = task.total > 0 ? (task.current / task.total) * 100 : 0;
+                   const progressHtml = `
+                       <div class="chat-progress-container">
+                           <div class="chat-progress-text">${task.task}中... (${task.current}/${task.total || '?'})</div>
+                           <div class="chat-progress-bar-container">
+                               <div class="chat-progress-bar-inner" style="width: ${percentage}%;"></div>
+                           </div>
+                       </div>`;
+                   const messageEl = addChatMessage(progressHtml, 'bot', true, taskId);
+                   messageEl.setAttribute('data-task-active', 'true');
+               });
            }
 
         </script>

@@ -12,7 +12,7 @@ import collections
 from tqdm import tqdm
 
 # 假设 VTTCorrector 类定义在 process_subtitle 中
-from process_subtitle import VTTCorrector
+from process_subtitle import VTTCorrector, _report_progress
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,8 @@ class GlossaryGenerator:
             
             # 2. 调用LLM处理每个文本块
             logger.info(f"将字幕分为 {len(groups)} 组进行处理...")
-            for group in tqdm(groups, desc="生成术语表"):
+            total_groups = len(groups)
+            for i, group in enumerate(tqdm(groups, desc="生成术语表")):
                 text_segments = [caption.text.strip() for caption in group]
                 text_chunk = "\n".join(text_segments)
                 
@@ -99,6 +100,9 @@ class GlossaryGenerator:
                 prompt, system_prompt = self._create_glossary_prompt(text_chunk)
                 response = self.corrector.execute_raw_prompt(prompt, system_prompt=system_prompt)
                 self._parse_llm_response(response)
+                
+                # Report progress after processing each group
+                _report_progress("术语表", i + 1, total_groups)
 
             # 3. 后处理
             final_list = []

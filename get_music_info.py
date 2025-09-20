@@ -62,10 +62,15 @@ from io import BytesIO
 
 # --- Constants ---
 # MusicBrainz Constants
-MB_CLIENT_ID = "eDgCefp2TQJNGw1A9YoZ79_att1kUwvS"
-MB_CLIENT_SECRET = "RgGs4vGV6ykcO6TBgTELsceCFkOD8Mfm"
-MB_APP_NAME = "GetMusicInfo"
-MB_APP_VERSION = "1.0"
+# 从 config.json 加载配置
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+    config = json.load(f)
+mb_config = config.get('api_keys', {}).get('musicbrainz', {})
+MB_CLIENT_ID = mb_config.get('client_id')
+MB_CLIENT_SECRET = mb_config.get('client_secret')
+MB_APP_NAME = mb_config.get('app_name')
+MB_APP_VERSION = mb_config.get('app_version')
 
 # Cache directories
 CACHE_LYRICS_DIR = os.path.join(os.getcwd(), 'cache', 'lyrics')
@@ -89,7 +94,7 @@ def main():
     args = parser.parse_args()
 
     # Decode the filepath if it's URL-encoded
-
+    args.filepath = urllib.parse.unquote(args.filepath)
     # Ensure cache directories exist
     os.makedirs(CACHE_LYRICS_DIR, exist_ok=True)
     os.makedirs(CACHE_COVERS_DIR, exist_ok=True)
@@ -411,6 +416,17 @@ def search_netease(track_info, bilingual=True, limit=5, force_match=False, query
         "cover_url": cover_url
     }
 
+def correct_lrc_format(lrc_text):
+    """
+    Corrects non-standard LRC format like [00:00.00-1] to [00:00.00].
+    """
+    if not lrc_text:
+        return lrc_text
+    # Regex to find timestamps with extra numbers like [mm:ss.xx-1]
+    pattern = re.compile(r'(\[\d{2}:\d{2}\.\d{2,3})(-\d+)(\])')
+    corrected_text = pattern.sub(r'\1\3', lrc_text)
+    return corrected_text
+
 def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=False, query_template="{artist} {title}"):
     """Attempts to get song info from Netease API."""
     try:
@@ -502,6 +518,10 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         lyrics = lyric_data.get('lrc', {}).get('lyric', '')
         translated_lyrics = lyric_data.get('tlyric', {}).get('lyric', '')
 
+        # Correct non-standard LRC format
+        lyrics = correct_lrc_format(lyrics)
+        translated_lyrics = correct_lrc_format(translated_lyrics)
+
         if bilingual:
             final_lyrics = combine_lyrics(lyrics, translated_lyrics)
         else:
@@ -521,25 +541,61 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         return None, None, None
     
 def combine_lyrics(lyrics, translated_lyrics):
+    """
+    Combines original and translated LRC format lyrics, aligning them by timestamp.
+    This version is more robust and handles multiple timestamps per line and precision differences.
+    """
     if not lyrics:
         return translated_lyrics
     if not translated_lyrics:
         return lyrics
 
-    lyrics_lines = lyrics.strip().split('\n')
-    translated_lines = translated_lyrics.strip().split('\n')
-    combined_lines = []
+    timed_lyrics = {}
+    time_regex = re.compile(r'\[(\d{2}):(\d{2})\.(\d{2,3})\]')
 
-    # This is a simplified merge. A more robust solution would parse timestamps.
-    for line in lyrics_lines:
-        combined_lines.append(line)
-        # Find a matching translated line (simplified)
-        for t_line in translated_lines:
-            if line.split(']')[0] == t_line.split(']')[0]:
-                combined_lines.append(t_line)
-                break
+    def parse_to_dict(lrc_string, is_translation):
+        for line in lrc_string.strip().split('\n'):
+            matches = time_regex.findall(line)
+            text = time_regex.sub('', line).strip()
+            if not text:
+                continue
+            
+            for m in matches:
+                # Calculate time in seconds
+                time_val = int(m[0]) * 60 + int(m[1]) + int(m[2]) / (100 if len(m[2]) == 2 else 1000)
+                # Round to 2 decimal places to handle precision differences (e.g., .34 vs .340)
+                time_val = round(time_val, 2)
+                
+                if time_val not in timed_lyrics:
+                    timed_lyrics[time_val] = {'original': None, 'translated': None}
+                
+                if is_translation:
+                    timed_lyrics[time_val]['translated'] = text
+                else:
+                    timed_lyrics[time_val]['original'] = text
 
-    return '\n'.join(combined_lines)
+    parse_to_dict(lyrics, is_translation=False)
+    parse_to_dict(translated_lyrics, is_translation=True)
+
+    if not timed_lyrics:
+        return lyrics
+
+    combined_lrc = []
+    sorted_times = sorted(timed_lyrics.keys())
+
+    for time_val in sorted_times:
+        minutes = int(time_val // 60)
+        seconds = int(time_val % 60)
+        milliseconds = int((time_val * 100) % 100)
+        timestamp = f"[{minutes:02d}:{seconds:02d}.{milliseconds:02d}]"
+        
+        entry = timed_lyrics[time_val]
+        if entry['original']:
+            combined_lrc.append(f"{timestamp}{entry['original']}")
+        if entry['translated']:
+            combined_lrc.append(f"{timestamp}{entry['translated']}")
+
+    return '\n'.join(combined_lrc)
 
 def get_netease_cover_from_page(song_id):
     """Fallback to get cover URL by parsing the song's webpage using json-ld."""

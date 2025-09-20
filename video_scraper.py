@@ -114,7 +114,11 @@ class CustomEncoder(json.JSONEncoder):
 # ==============================================================================
 
 # 在此处填入你的 TMDb API 密钥
-TMDB_API_KEY = '005acfcd9ad5fb8e91c3db69f8f8f7af' 
+# 从 config.json 加载配置
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+    config = json.load(f)
+TMDB_API_KEY = config.get('api_keys', {}).get('tmdb')
 TMDB_LANGUAGE = 'zh-CN'  # 设置API返回的语言
 
 # JAV Scraper 配置

@@ -220,8 +220,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
-            Howler.masterGain.connect(analyser);
-            
             const bufferLength = analyser.frequencyBinCount;
             dataArray = new Uint8Array(bufferLength);
             visualizerCtx = canvas.getContext('2d');
@@ -242,36 +240,71 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${url}?v=${new Date().getTime()}`;
     }
 
-    function loadSong(index) {
+    async function loadSong(index, playOnLoad = false, fromFolderLoad = false) {
         if (sound) {
-            sound.unload(); // 卸载上一首
+            sound.unload();
         }
         albumCover.classList.remove('playing');
         const song = playlist[index];
-
-        // 1. 先用播放列表中的基本信息填充UI
+    
+        // If this is the first time a song is played (not from a folder load), fetch the folder playlist
+        if (!fromFolderLoad) {
+            try {
+                // Extract relative path and mediaDir from the song's src
+                const url = new URL(song.src, window.location.origin);
+                const mediaDir = url.searchParams.get('mediaDir');
+                // The pathname is the relative path, e.g., /Music/Song.mp3. Remove leading slash.
+                const relativePath = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+    
+                if (mediaDir && relativePath) {
+                    const response = await fetch(`/api/get-folder-playlist?path=${encodeURIComponent(relativePath)}&mediaDir=${encodeURIComponent(mediaDir)}`);
+                    const result = await response.json();
+    
+                    if (result.success) {
+                        const newPlaylist = result.playlist.map(item => ({
+                            title: item.title,
+                            artist: item.artist,
+                            src: item.src, // Use the src provided by the server
+                            cover: 'cover.jpg', // Default cover
+                            lrc: null // Lyrics will be fetched later
+                        }));
+    
+                        // Find the index of the originally clicked song in the new playlist
+                        const newIndex = newPlaylist.findIndex(item => decodeURIComponent(item.src) === decodeURIComponent(song.src));
+                        
+                        playlist = newPlaylist;
+                        currentSongIndex = (newIndex !== -1) ? newIndex : 0;
+                        
+                        // Re-initialize the playlist UI and reload the song from the new context
+                        initPlaylist();
+                        // Call loadSong again, but this time with fromFolderLoad=true to prevent an infinite loop
+                        loadSong(currentSongIndex, true, true);
+                        return; // Exit this execution, the recursive call will handle playback
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching folder playlist:', error);
+                // Fallback to playing the single song if the folder fetch fails
+            }
+        }
+    
+        // --- Continue with original loadSong logic ---
         songTitle.textContent = song.title;
         songArtist.textContent = song.artist;
         checkMarquee(songTitle);
         checkMarquee(songArtist);
-        albumCover.src = getCacheBustedUrl(song.cover); // 使用默认封面
-        playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
-
-        // 2. 异步获取详细的音乐信息
+        albumCover.src = getCacheBustedUrl(song.cover);
+        playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
+    
         fetchMusicInfo(song);
-
-        const srcParts = song.src.split('?');
-        const path = srcParts[0];
-        const query = srcParts.length > 1 ? `?${srcParts[1]}` : '';
-        // The path is already partially URL-encoded from the server, but special characters
-        // in filenames might not be. Howler.js handles encoding internally, so we just
-        // need to pass the raw path with its query string.
-        const finalSrcForHowler = path + query;
-
+    
+        // The song.src from the server now includes the full path and mediaDir query
+        const finalSrcForHowler = song.src;
+    
         sound = new Howl({
             src: [finalSrcForHowler],
-            format: ['flac', 'mp3'],
-            crossOrigin: 'anonymous',
+            crossOrigin: 'anonymous', // 恢复此行以启用音频可视化
+            format: ['flac', 'mp3', 'm4a', 'ogg'],
             volume: volumeSlider.value,
             onplay: () => {
                 isPlaying = true;
@@ -283,11 +316,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 cancelAnimationFrame(lyricRAF);
                 lyricRAF = requestAnimationFrame(updateLyrics);
                 if (canvas.getContext) {
-                   setupVisualizer();
-                   if(isVisualizerVisible) {
-                       cancelAnimationFrame(visualizerRAF);
-                       draw();
-                   }
+                    setupVisualizer();
+                    // Reconnect the analyser every time a new sound plays
+                    Howler.masterGain.connect(analyser);
+                    if (isVisualizerVisible) {
+                        cancelAnimationFrame(visualizerRAF);
+                        draw();
+                    }
                 }
             },
             onpause: () => {
@@ -299,15 +334,18 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             onend: () => playNext(),
             onload: () => {
-                 durationEl.textContent = formatTime(sound.duration());
-                if (albumCover.complete) {
+                durationEl.textContent = formatTime(sound.duration());
+                if (albumCover.complete && albumCover.naturalWidth > 0) {
                     setThemeColor(albumCover);
                 } else {
                     albumCover.onload = () => setThemeColor(albumCover);
                 }
+                if (playOnLoad) {
+                    playSong();
+                }
             }
         });
-        
+    
         loadLyrics(song.lrc);
         updatePlaylistUI();
     }
@@ -367,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
                    // The new cover URL is ready. We'll assign it to the main album cover
                    // element and use its onload event to trigger background and theme updates.
                    albumCover.onload = () => {
-                       playerBg.style.backgroundImage = `url(${albumCover.src})`;
+                       playerBg.style.backgroundImage = `url("${albumCover.src}")`;
                        setThemeColor(albumCover);
                        albumCover.onload = null; // Clean up
                        albumCover.onerror = null;
@@ -376,7 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
                        console.warn(`Cover image not found at ${coverUrl}, using default.`);
                        // If the new cover fails, revert to the default one.
                        albumCover.src = getCacheBustedUrl(song.cover);
-                       playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
+                       playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
                        
                        // We need to ensure the default cover is loaded before getting its color.
                        // The simplest way is to attach a new onload for the default cover.
@@ -393,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 如果后端没有返回封面文件名，保持原有逻辑或使用默认封面
                     console.warn("No cover_filename in API response, using default cover.");
                     albumCover.src = getCacheBustedUrl(song.cover);
-                    playerBg.style.backgroundImage = `url(${getCacheBustedUrl(song.cover)})`;
+                    playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
                     setThemeColor(albumCover);
                 }
 
@@ -562,8 +600,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 确保我们获取的是最新的索引
                 const latestIndex = Array.from(playlistUl.children).indexOf(li);
                 currentSongIndex = latestIndex;
-                loadSong(latestIndex);
-                playSong();
+                loadSong(latestIndex, true); // Pass true to play on load
+                // playSong() is now handled by the onload event in loadSong
                 if (window.innerWidth <= 768) {
                     togglePlaylist();
                 }
@@ -665,8 +703,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             newLi.querySelector('.song-info').addEventListener('click', () => {
                 currentSongIndex = index;
-                loadSong(index);
-                playSong();
+                loadSong(index, true); // Pass true to play on load
+                // playSong() is now handled by the onload event in loadSong
                 if (window.innerWidth <= 768) {
                     togglePlaylist();
                 }
@@ -1432,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (type === 'cover' && info.cover_url) {
                     const coverUrl = `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`;
                     albumCover.src = getCacheBustedUrl(coverUrl);
-                    playerBg.style.backgroundImage = `url(${getCacheBustedUrl(coverUrl)})`;
+                    playerBg.style.backgroundImage = `url("${getCacheBustedUrl(coverUrl)}")`;
                     setThemeColor(albumCover);
                     showToast('封面匹配成功！', 'success');
                 } else if (type === 'info') {

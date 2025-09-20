@@ -28,19 +28,30 @@ import sys
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'videoinfo') if '__file__' in locals() else os.path.join('.', 'cache', 'videoinfo')
 DB_PATH = os.path.join(CACHE_DIR, 'videocache.db')
 
-def search_value_in_json(data, search_term):
+def search_value_in_json(data, search_term, search_key=None):
     """
     递归搜索 JSON 对象（字典或列表）中是否包含指定的搜索词。
+    如果提供了 search_key，则只在匹配该键的值中搜索。
     """
     if isinstance(data, dict):
-        for key, value in data.items():
-            if search_value_in_json(value, search_term):
-                return True
+        # 如果指定了 search_key，优先检查当前字典的键
+        if search_key and search_key.lower() in (key.lower() for key in data.keys()):
+             for key, value in data.items():
+                 if key.lower() == search_key.lower():
+                     # 键匹配，现在在这个值内部搜索 search_term (不再需要 search_key)
+                     if search_value_in_json(value, search_term):
+                         return True
+        else: # 如果没有 search_key，或者当前层级没有匹配的键，则继续深入所有子节点
+            for key, value in data.items():
+                if search_value_in_json(value, search_term, search_key):
+                    return True
+
     elif isinstance(data, list):
         for item in data:
-            if search_value_in_json(item, search_term):
+            if search_value_in_json(item, search_term, search_key):
                 return True
     elif isinstance(data, str):
+        # 最终的值匹配
         if search_term.lower() in data.lower():
             return True
     # 可以根据需要添加对其他数据类型（如 int, float）的检查
@@ -72,14 +83,23 @@ def find_best_value(data, keys, default="N/A"):
             
     return default
 
-def search_database(search_term):
+def search_database(search_query):
     """
     连接到数据库，并根据用户输入搜索所有视频信息。
+    查询可以是 "关键词" 或 "字段:关键词"。
     """
     if not os.path.exists(DB_PATH):
         print(f"错误: 数据库文件不存在于 '{DB_PATH}'", file=sys.stderr)
         print("请先运行 video_scraper.py 生成数据库缓存。", file=sys.stderr)
-        return
+        return []
+
+    search_key = None
+    search_term = search_query
+    if ':' in search_query:
+        parts = search_query.split(':', 1)
+        if len(parts) == 2:
+            search_key = parts[0].strip()
+            search_term = parts[1].strip()
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -102,7 +122,12 @@ def search_database(search_term):
                 continue
 
             # 检查搜索词是否存在于任何值中
-            if search_value_in_json(scraped_data, search_term):
+            if search_value_in_json(scraped_data, search_term, search_key):
+                # --- 提取文件路径 ---
+                # 优先从 scraped_data['file_info']['path'] 获取最准确的路径
+                # 如果不存在，则回退到使用数据库中的 filename 字段
+                authoritative_filepath = scraped_data.get('file_info', {}).get('path', filepath)
+
                 # 提取所需信息
                 # 标题的可能键名
                 title_keys = ['title', 'title_cn', 'series_title', 'jav_results']
@@ -129,7 +154,7 @@ def search_database(search_term):
                     "title": title,
                     "id": video_id,
                     "local_poster_path": local_poster_path if local_poster_path else "无本地海报",
-                    "filepath": filepath
+                    "filepath": authoritative_filepath
                 })
 
         return results

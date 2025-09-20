@@ -7,17 +7,29 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #1e1e1e;
+            margin: 0px;
+            background: rgba(0,0,0,1);
             color: #e0e0e0;
+            position: relative;
         }
+        body::before {
+             content: "";
+             position: fixed;
+             top: -10px; right: -10px; bottom: -10px; left: -10px;
+             background: url('./bg.png') no-repeat center center fixed;
+             background-size: cover;
+             filter: blur(30px) brightness(50%);
+             z-index: -1;
+         }
         .container {
             max-width: 1200px;
-            margin: auto;
-            background: #2d2d30;
+            margin: 20px auto;
+            background: rgba(15, 15, 15, 0.65);
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
         }
         h1 {
             text-align: center;
@@ -84,7 +96,8 @@
         .result-path {
             font-size: 1.2em;
             color: #a0a0a0;
-            margin-top: 12px;
+            margin-top: 6px;
+            margin-bottom: 6px;
             word-break: break-all;
         }
         .result-meta {
@@ -142,7 +155,6 @@
         .play-btn {
             padding: 10px 20px;
             margin-left: 0px;
-            margin-right: 12px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
@@ -175,6 +187,33 @@
         .download-btn:active {
             transform: scale(0.9);
         }
+        .actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .actions button {
+            flex: 1;
+        }
+        .add-to-playlist-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color: white;
+            background: linear-gradient(to right, #ffc107, #ff9800);
+            transition: all 0.3s ease;
+        }
+        .add-to-playlist-btn:hover {
+            background-color: #e0a800;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.6);
+        }
+        .add-to-playlist-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
     </style>
     <!-- 引入 Fancybox 的 CSS -->
     <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
@@ -206,6 +245,7 @@
        const useRegex = urlParams.get('useRegex') === 'true';
        const maxResults = parseInt(urlParams.get('maxResults')) || 100;
        const dirs = urlParams.get('dirs'); // 获取目录参数
+       const searchType = urlParams.get('searchType') || 'file'; // 获取搜索类型，默认为文件
 
        // 显示搜索参数
        document.getElementById('searchQuery').textContent = query;
@@ -276,6 +316,75 @@
            document.getElementById('loadingMessage').style.display = 'none';
            document.getElementById('errorMessage').textContent = message;
            document.getElementById('errorMessage').style.display = 'block';
+       }
+
+       function showNotification(message) {
+           const notification = document.createElement('div');
+           notification.textContent = message;
+           notification.style.position = 'fixed';
+           notification.style.bottom = '20px';
+           notification.style.left = '50%';
+           notification.style.transform = 'translateX(-50%)';
+           notification.style.backgroundColor = '#28a745';
+           notification.style.color = 'white';
+           notification.style.padding = '10px 20px';
+           notification.style.borderRadius = '5px';
+           notification.style.zIndex = '2000';
+           notification.style.opacity = '0';
+           notification.style.transition = 'opacity 0.5s';
+           document.body.appendChild(notification);
+
+           setTimeout(() => {
+               notification.style.opacity = '1';
+           }, 10);
+
+           setTimeout(() => {
+               notification.style.opacity = '0';
+               setTimeout(() => {
+                   document.body.removeChild(notification);
+               }, 500);
+           }, 3000);
+       }
+
+       function playMusic(fullPath, fileName, mediaDirRoot) {
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedSrc = encodeURIComponent(relativePath);
+           const encodedMediaDir = mediaDirRoot ? encodeURIComponent(mediaDirRoot) : '';
+           const musicPageUrl = `music-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodedMediaDir}`;
+           window.open(musicPageUrl, '_blank');
+       }
+
+       function addToPlaylist(result) {
+           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+           const musicUrl = relativePath.replace(/\\/g, '/');
+           const finalSrc = `${decodeURIComponent(musicUrl)}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
+
+           const parts = result.filename.replace(/\.\w+$/, '').split(' - ');
+           let artist = '未知艺术家';
+           let title = parts[0];
+           if (parts.length > 1) {
+               artist = parts[0];
+               title = parts.slice(1).join(' - ');
+           }
+
+           const song = {
+               title: title,
+               artist: artist,
+               src: finalSrc,
+               cover: 'cover.jpg', // Default cover
+               lrc: null
+           };
+
+           let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+
+           if (playlist.some(pSong => pSong.src === song.src)) {
+               showNotification(`'${song.title}' 已经在播放列表中`);
+               return;
+           }
+
+           playlist.push(song);
+           localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+           showNotification(`'${song.title}' 已添加到播放列表`);
        }
 
        function getRelativePath(fullPath, mediaDirRoot) {
@@ -350,8 +459,13 @@
 
                    // 创建文件名元素
                    const fileName = document.createElement('div');
-                   fileName.className = 'file-name';
+                   fileName.className = 'result-name';
                    fileName.textContent = result.filename;
+
+                   // 创建文件路径元素
+                   const resultPath = document.createElement('div');
+                   resultPath.className = 'result-path';
+                   resultPath.textContent = result.folder_path;
 
                    // 创建文件大小元素
                    const fileSize = document.createElement('div');
@@ -376,6 +490,7 @@
                        const extension = result.filename.split('.').pop().toLowerCase();
                        const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
                        const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
+                       const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
 
                        if (isImage) {
                            // 图片文件显示缩略图，并用 a 标签包裹以支持 Fancybox
@@ -416,6 +531,11 @@
                                thumbnailContainer.appendChild(icon);
                            };
                            thumbnailContainer.appendChild(img);
+                       } else if (isAudio) {
+                           const icon = document.createElement('div');
+                           icon.className = 'icon';
+                           icon.innerHTML = '&#127925;'; // 音乐图标
+                           thumbnailContainer.appendChild(icon);
                        } else {
                            // 其他文件类型显示默认图标
                            const icon = document.createElement('div');
@@ -451,6 +571,8 @@
                            } else if (e.target.tagName.toLowerCase() !== 'img') {
                                if (isVideo) {
                                    playVideo(result.full_path, result.filename, result.media_dir_root);
+                               } else if (isAudio) {
+                                   playMusic(result.full_path, result.filename, result.media_dir_root);
                                } else {
                                    downloadFile(result.full_path, result.filename, result.media_dir_root);
                                }
@@ -467,6 +589,25 @@
                                playVideo(result.full_path, result.filename, result.media_dir_root);
                            };
                            actionsDiv.appendChild(playButton);
+                       } else if (isAudio) {
+                           const playButton = document.createElement('button');
+                           playButton.textContent = '播放';
+                           playButton.className = 'play-btn';
+                           playButton.onclick = (e) => {
+                               e.stopPropagation();
+                               playMusic(result.full_path, result.filename, result.media_dir_root);
+                           };
+                           actionsDiv.appendChild(playButton);
+
+                           const addToPlaylistButton = document.createElement('button');
+                           addToPlaylistButton.textContent = '添加';
+                           addToPlaylistButton.title = '添加到播放列表';
+                           addToPlaylistButton.className = 'add-to-playlist-btn';
+                           addToPlaylistButton.onclick = (e) => {
+                               e.stopPropagation();
+                               addToPlaylist(result);
+                           };
+                           actionsDiv.appendChild(addToPlaylistButton);
                        }
 
                        // 添加下载按钮
@@ -482,6 +623,7 @@
 
                    // 组装文件信息
                    fileInfo.appendChild(fileName);
+                   fileInfo.appendChild(resultPath);
                    fileInfo.appendChild(fileSize);
                    fileInfo.appendChild(actionsDiv);
 
@@ -499,6 +641,102 @@
            lazyLoadImages();
        }
 
+       function displayVideoResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+
+           if (!data.success) {
+               showError(data.error || '视频搜索失败');
+               return;
+           }
+
+           const results = data.results;
+           document.getElementById('resultsSummary').innerHTML = `共找到 ${results.length} 个视频结果`;
+           document.getElementById('resultsSummary').style.display = 'block';
+
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的视频</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+
+                   const img = document.createElement('img');
+                   img.className = 'thumbnail lazy';
+                   img.loading = 'lazy';
+                   img.dataset.src = result.local_poster_path.replace(/\\/g, '/');
+                   img.alt = result.title;
+                   img.onerror = function() {
+                       thumbnailContainer.innerHTML = '<div class="icon">&#128249;</div>';
+                   };
+                   thumbnailContainer.appendChild(img);
+
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   const title = document.createElement('div');
+                   title.className = 'result-name';
+                   title.textContent = result.title;
+
+                   const videoId = document.createElement('div');
+                   videoId.className = 'result-meta';
+                   videoId.textContent = `ID: ${result.id}`;
+                   
+                   const filePath = document.createElement('div');
+                   filePath.className = 'result-path';
+                   filePath.textContent = result.filepath;
+
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+
+                   const playButton = document.createElement('button');
+                   playButton.textContent = '播放';
+                   playButton.className = 'play-btn';
+                   playButton.onclick = (e) => {
+                       e.stopPropagation();
+                       playVideo(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(playButton);
+
+                   const downloadButton = document.createElement('button');
+                   downloadButton.textContent = '下载';
+                   downloadButton.className = 'download-btn';
+                   downloadButton.onclick = (e) => {
+                       e.stopPropagation();
+                       downloadFile(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(downloadButton);
+
+                   fileInfo.appendChild(title);
+                   fileInfo.appendChild(videoId);
+                   fileInfo.appendChild(filePath);
+                   fileInfo.appendChild(actionsDiv);
+
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           resultsContainer.style.display = 'grid';
+           lazyLoadImages();
+       }
+
+       // 根据完整路径查找其所属的媒体根目录
+       function findMediaDirRoot(fullPath) {
+           // 这个函数需要一个已知媒体目录列表。由于 search-results.html 无法直接访问 server.js 的 MEDIA_DIRS，
+           // 我们需要一种方法来传递这个信息，或者在播放时让服务器处理。
+           // 一个简单的客户端解决方法是假设路径结构，但这很脆弱。
+           // 暂时，我们返回一个空字符串，并依赖 playVideo 函数中的逻辑来处理。
+           // 在实际应用中，最好是从服务器获取媒体目录列表。
+           const driveLetter = fullPath.substring(0, 1).toUpperCase();
+           return `${driveLetter}:\\e`; // 这是一个基于您配置的硬编码猜测
+       }
+
        // 导航到文件夹
        function navigateToFolder(fullPath, mediaDirRoot) {
            // 构建新的 URL，模拟进入文件夹
@@ -514,8 +752,9 @@
        // 播放视频
        function playVideo(fullPath, fileName, mediaDirRoot) {
            const relativePath = getRelativePath(fullPath, mediaDirRoot);
-           const encodedSrc = encodeURIComponent(encodeURIComponent(relativePath));
-           const videoPageUrl = `video-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           const encodedSrc = encodeURIComponent(relativePath);
+           const encodedMediaDir = mediaDirRoot ? encodeURIComponent(mediaDirRoot) : '';
+           const videoPageUrl = `video-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodedMediaDir}`;
            window.open(videoPageUrl, '_blank');
        }
 
@@ -533,24 +772,39 @@
 
        // 执行搜索
        async function performSearch() {
-           try {
-               // 构造API URL
-               let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
-               if (matchCase) apiUrl += '&matchCase=true';
-               if (matchWholeWord) apiUrl += '&matchWholeWord=true';
-               if (useRegex) apiUrl += '&useRegex=true';
-               if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
-               
-               const response = await fetch(apiUrl);
-               if (!response.ok) {
-                   throw new Error(`HTTP error! status: ${response.status}`);
+           if (searchType === 'file') {
+               try {
+                   // 构造API URL
+                   let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+                   if (matchCase) apiUrl += '&matchCase=true';
+                   if (matchWholeWord) apiUrl += '&matchWholeWord=true';
+                   if (useRegex) apiUrl += '&useRegex=true';
+                   if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
+                   
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   
+                   const data = await response.json();
+                   displayResults(data);
+               } catch (error) {
+                   console.error('Search error:', error);
+                   showError(`搜索过程中发生错误: ${error.message}`);
                }
-               
-               const data = await response.json();
-               displayResults(data);
-           } catch (error) {
-               console.error('Search error:', error);
-               showError(`搜索过程中发生错误: ${error.message}`);
+           } else if (searchType === 'video') {
+               try {
+                   const apiUrl = `/api/search-videos?query=${encodeURIComponent(query)}`;
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   const data = await response.json();
+                   displayVideoResults(data);
+               } catch (error) {
+                   console.error('Video search error:', error);
+                   showError(`视频搜索过程中发生错误: ${error.message}`);
+               }
            }
        }
 
