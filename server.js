@@ -107,9 +107,10 @@ const server = http.createServer(async (req, res) => {
        if (source) {
            args.push('--source', source);
        }
-       if (noWrite === 'true') {
-           args.push('--no-write');
-       }
+       // Always add --no-write for safety from web UI
+       args.push('--no-write');
+       // Always add --write-db to save metadata for searching
+       args.push('--write-db');
        if (originalLyrics === 'true') {
            args.push('--original-lyrics');
        }
@@ -192,7 +193,9 @@ const server = http.createServer(async (req, res) => {
             'get_music_info.py',
             fullMusicPath,
             '--source', source,
+            // Always add --no-write for safety, and --write-db to save metadata
             '--no-write',
+            '--write-db',
             '--json-output'
         ];
 
@@ -2160,7 +2163,7 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
 // 缩略图缓存目录
 const CACHE_DIR = path.join(__dirname, 'cache');
-const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo'];
+const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo', 'musicdata'];
 const CACHE_FILES = ['foldercache.db'];
 const THUMBNAIL_DIR = path.join(CACHE_DIR, 'thumbnails');
 
@@ -2558,9 +2561,9 @@ server.on('request', async (req, res) => {
                        broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
                        
                        const result = await new Promise((resolve) => {
-                           const args = ['get_music_info.py', fileTask.path, '--source', source, '--json-output'];
+                           const args = ['get_music_info.py', fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
                            const pythonProcess = spawn('python', args, {
-                               env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
                            });
                            let stdoutData = '';
                            let stderrData = '';

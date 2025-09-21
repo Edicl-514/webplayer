@@ -23,7 +23,8 @@ python get_music_info.py [文件路径] [选项]
 选项:
   --source {musicbrainz,netease,local}
                         指定获取音乐信息的来源。默认为 'local'，即只读取本地文件信息。
-  --no-write            一个开关选项，如果使用，则不会将获取到的信息写回音频文件。
+  --no-write            一个开关选项，如果使用，则不会将获取到的元数据（封面、ID3等）写回音频文件。
+  --write-db            一个开关选项，如果使用，则会将音乐信息存入本地数据库，用于艺术家/专辑页面的展示。
   --json-output         一个开关选项，如果使用，则会将最终的元数据以 JSON 格式打印到标准输出。
   --original-lyrics     仅获取原始歌词，不合并翻译版本（仅对网易云音乐源有效）。
   --limit <数字>        指定在线搜索时返回结果的数量限制，默认为 5。
@@ -133,7 +134,8 @@ def main():
     parser = argparse.ArgumentParser(description="Get music info from MusicBrainz or Netease and save it.")
     parser.add_argument("filepath", help="Path to the audio file.")
     parser.add_argument("--source", choices=['musicbrainz', 'netease', 'local'], default='local', help="The source to get music info from.")
-    parser.add_argument("--no-write", action="store_true", help="Do not write the info to the original file.")
+    parser.add_argument("--no-write", action="store_true", help="Do not write the metadata (cover, ID3 tags) back to the audio file.")
+    parser.add_argument("--write-db", action="store_true", help="Write the music info to the local database.")
     parser.add_argument("--json-output", action="store_true", help="Output all metadata as JSON.")
     
     parser.add_argument("--original-lyrics", action="store_true", help="Only get original lyrics, do not combine with translations.")
@@ -199,18 +201,9 @@ def main():
                 cached_cover_filename = cover_filename_base
                 print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
 
-            # If we have everything from cache and we are not fetching new data, we can exit early.
-            if args.source == 'local' and cached_lyrics and cached_cover_filename and args.json_output:
-                print(json.dumps({
-                    "title": title,
-                    "artist": artist,
-                    "album": track_info.get('album'),
-                    "lyrics": cached_lyrics,
-                    "cover_filename": cached_cover_filename,
-                    "cover_url": None,
-                    "from_cache": True
-                }, indent=4, ensure_ascii=False))
-                return
+            # Removed the early exit logic here. The program should now always proceed
+            # to the info fetching and database writing steps, even if all data is available in cache.
+            # This ensures that the database is consistently updated.
 
         # 2. Get music info from the selected source
         if args.source == 'local':
@@ -219,7 +212,7 @@ def main():
                 "title": track_info.get("title"),
                 "artist": track_info.get("artist"),
                 "album": track_info.get("album"),
-                "lyrics": None,
+                "lyrics": cached_lyrics,
                 "cover_data": cover_data,
                 "cover_url": None
             }
@@ -228,10 +221,9 @@ def main():
         else: # netease
             music_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
         
-        # If the source is local, but we still want to fetch lyrics online
-        if args.source == 'local' and not args.no_write:
-            #print("Source is local, but lyrics fetching is enabled. Searching Netease for lyrics.", file=sys.stderr)
-            # We only care about the lyrics from this call
+        # If the source is local and we still don't have lyrics (from cache), try fetching them from Netease.
+        if args.source == 'local' and not music_info.get('lyrics'):
+            print("Source is local but no cached lyrics found, trying to fetch from Netease.", file=sys.stderr)
             netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
             if netease_info and netease_info.get('lyrics'):
                 music_info['lyrics'] = netease_info.get('lyrics')
@@ -252,8 +244,8 @@ def main():
             # Use cached cover filename if it exists and no new one was generated
             final_cover_filename = cover_filename or cached_cover_filename
 
-            # Save info to database
-            if not args.no_write:
+            # Save info to database if requested
+            if args.write_db:
                 db_info = music_info.copy()
                 if final_cover_filename:
                     db_info['cover_path'] = os.path.join(CACHE_COVERS_DIR, final_cover_filename)

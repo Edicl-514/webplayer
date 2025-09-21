@@ -29,8 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const closePlaylistBtn = document.getElementById('close-playlist-btn');
     const networkBtn = document.getElementById('network-btn');
     const fetchLyricsBtn = document.getElementById('fetch-lyrics-btn');
+    const fetchCoverLocalBtn = document.getElementById('fetch-cover-local-btn');
     const fetchCoverNeteaseBtn = document.getElementById('fetch-cover-netease-btn');
     const fetchCoverMbBtn = document.getElementById('fetch-cover-mb-btn');
+    const fetchInfoLocalBtn = document.getElementById('fetch-info-local-btn');
     const fetchInfoNeteaseBtn = document.getElementById('fetch-info-netease-btn');
     const fetchInfoMbBtn = document.getElementById('fetch-info-mb-btn');
    const settingsBtn = document.getElementById('settings-btn');
@@ -367,7 +369,8 @@ document.addEventListener('DOMContentLoaded', () => {
            const params = new URLSearchParams({
                path: musicPath,
                source: settings.infoPriority,
-               'no-write': settings.lyricsFetch === 'false', // Assuming 'false' means don't write
+               // 'no-write' is now handled by the server for safety.
+               // We add 'write-db' implicitly from the web UI.
                'original-lyrics': settings.lyricsType === 'original',
                'limit': settings.searchResultsLimit,
                'force-match': settings.forceMatch,
@@ -1287,8 +1290,10 @@ document.addEventListener('DOMContentLoaded', () => {
             originalBtn.addEventListener('click', () => fetchFromNetwork('lyrics', 'netease', false));
         }
     }
+    fetchCoverLocalBtn.addEventListener('click', () => fetchFromNetwork('cover', 'local'));
     fetchCoverNeteaseBtn.addEventListener('click', () => fetchFromNetwork('cover', 'netease'));
     fetchCoverMbBtn.addEventListener('click', () => fetchFromNetwork('cover', 'musicbrainz'));
+    fetchInfoLocalBtn.addEventListener('click', () => fetchFromNetwork('info', 'local'));
     fetchInfoNeteaseBtn.addEventListener('click', () => fetchFromNetwork('info', 'netease'));
     fetchInfoMbBtn.addEventListener('click', () => fetchFromNetwork('info', 'musicbrainz'));
     toggleLyricsVisualizerBtn.addEventListener('click', toggleLyricsVisualizer);
@@ -1447,7 +1452,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams({
                 path: musicPath,
                 source: source,
-                'no-write': true, // Manual fetch shouldn't write to file
+                // 'no-write' is now handled by the server. We also want to write to DB.
                 'force-match': settings.forceMatch,
                 'limit': settings.searchResultsLimit,
                 'query': settings.queryKeywords,
