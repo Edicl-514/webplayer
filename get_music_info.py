@@ -538,23 +538,44 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         
         # Find best match
         best_song = None
-        if force_match and songs:
-            best_song = songs[0]
-        else:
+        results_with_scores = []
+        if songs:
+            # First, calculate scores for all songs
             for song in songs:
-                if is_match(song.get('name', ''), title) and is_match(song.get('artists', [{}])[0].get('name', ''), artist):
-                    best_song = song
-                    break
+                remote_title = song.get('name', '')
+                remote_artist = song.get('artists', [{}])[0].get('name', '')
+                
+                title_sim = jaccard_similarity(title_clean, remote_title)
+                artist_sim = jaccard_similarity(artist_clean, remote_artist)
+                
+                score = 0.7 * title_sim + 0.3 * artist_sim
+                results_with_scores.append({'song': song, 'score': score})
+
+            # Always determine the best song by score.
+            if results_with_scores:
+                best_result = max(results_with_scores, key=lambda x: x['score'])
+                best_score = best_result['score']
+                best_song = best_result['song']
+                
+                # If force_match is NOT used, apply a quality threshold.
+                # If force_match IS used, we accept the highest-scoring match regardless of how low the score is.
+                if not force_match and best_score < 0.3:
+                    print(f"No good match found. Highest similarity score was {best_score:.2f}, which is below the threshold of 0.3.", file=sys.stderr)
+                    best_song = None
+            else:
+                best_song = None
         
         # Print search results for debugging
-        if songs:
+        if results_with_scores:
             print("--- Netease Search Results ---", file=sys.stderr)
-            for i, song in enumerate(songs):
+            for i, result in enumerate(results_with_scores):
+                song = result['song']
+                score = result['score']
                 song_name = song.get('name')
                 artist_name = song.get('artists', [{}])[0].get('name')
                 album_name = song.get('album', {}).get('name')
                 marker = " <-- Best Match" if best_song and song['id'] == best_song['id'] else ""
-                print(f"  {i+1}. {song_name} - {artist_name} ({album_name}){marker}", file=sys.stderr)
+                print(f"  {i+1}. {song_name} - {artist_name} ({album_name}) | Score: {score:.4f}{marker}", file=sys.stderr)
             print("-----------------------------", file=sys.stderr)
 
         if not best_song:
@@ -677,6 +698,18 @@ def get_netease_cover_from_page(song_id):
     except Exception as e:
         print(f"Failed to get cover from page for song ID {song_id}: {e}", file=sys.stderr)
     return None
+
+def jaccard_similarity(a, b):
+    """Calculates the Jaccard similarity between two character sets of strings."""
+    if not a or not b:
+        return 0.0
+    a_clean = re.sub(r'[^\w]', '', str(a).lower())
+    b_clean = re.sub(r'[^\w]', '', str(b).lower())
+    set_a = set(a_clean)
+    set_b = set(b_clean)
+    intersection = len(set_a.intersection(set_b))
+    union = len(set_a.union(set_b))
+    return intersection / union if union > 0 else 0.0
 
 def is_match(a, b):
     """Checks if two strings are a rough match."""
