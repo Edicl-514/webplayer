@@ -21,3 +21,7 @@ Flask-Cors
 guessit
 tmdbv3api
 numpy
+jaconv
+Unidecode
+opencc
+cloudscraper

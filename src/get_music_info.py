@@ -52,6 +52,7 @@ import requests
 import urllib.parse
 import musicbrainzngs
 import sqlite3
+import difflib
 from mutagen import File
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
@@ -61,6 +62,13 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.easyid3 import EasyID3
 from PIL import Image
 from io import BytesIO
+import jaconv
+from unidecode import unidecode
+try:
+    from opencc import OpenCC
+    _opencc = OpenCC('t2s')  # 繁->简
+except Exception:
+    _opencc = None
 
 # --- Constants ---
 # MusicBrainz Constants
@@ -144,6 +152,7 @@ def main():
     parser.add_argument("--force-match", action="store_true", help="Force match the first result.")
     parser.add_argument("--query", type=str, default="{artist} {title}", help="Keywords to use for searching.")
     parser.add_argument("--force-fetch", action="store_true", help="Force re-fetching from the internet and overwrite local cache.")
+    parser.add_argument("--only", choices=['all', 'lyrics', 'cover', 'info'], default='all', help="Only fetch a specific type: lyrics, cover, info, or all.")
     
     args = parser.parse_args()
 
@@ -207,41 +216,74 @@ def main():
             # This ensures that the database is consistently updated.
 
         # 2. Get music info from the selected source
+        music_info = {
+            "title": track_info.get("title"),
+            "artist": track_info.get("artist"),
+            "album": track_info.get("album"),
+            "lyrics": cached_lyrics,
+            "cover_data": None,
+            "cover_url": None
+        }
+
+        # Helper: decide whether to fetch particular type
+        need_lyrics = args.only in ('all', 'lyrics')
+        need_cover = args.only in ('all', 'cover')
+        need_info = args.only in ('all', 'info')
+
         if args.source == 'local':
-            cover_data = get_local_cover(args.filepath)
-            music_info = {
-                "title": track_info.get("title"),
-                "artist": track_info.get("artist"),
-                "album": track_info.get("album"),
-                "lyrics": cached_lyrics,
-                "cover_data": cover_data,
-                "cover_url": None
-            }
-        elif args.source == 'musicbrainz':
-            music_info = search_musicbrainz(track_info, force_match=args.force_match)
-        else: # netease
-            music_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
-        
-        # If the source is local and we still don't have lyrics (from cache), try fetching them from Netease.
-        if args.source == 'local' and not music_info.get('lyrics'):
-            print("Source is local but no cached lyrics found, trying to fetch from Netease.", file=sys.stderr)
-            netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match, query_template=args.query)
-            if netease_info and netease_info.get('lyrics'):
-                music_info['lyrics'] = netease_info.get('lyrics')
+            # local always provides basic info from tags
+            if need_cover:
+                music_info['cover_data'] = get_local_cover(args.filepath)
+
+            # If lyrics are requested and not cached, try netease as fallback
+            if need_lyrics and not music_info.get('lyrics'):
+                print("Source is local but no cached lyrics found (or forced). Trying Netease for lyrics.", file=sys.stderr)
+                netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match)
+                if netease_info and netease_info.get('lyrics'):
+                    music_info['lyrics'] = netease_info.get('lyrics')
+
+        elif args.source == 'netease':
+            # For netease, call search_netease once and pick requested parts
+            netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match)
+            if netease_info:
+                if need_info:
+                    music_info['title'] = netease_info.get('title') or music_info['title']
+                    music_info['artist'] = netease_info.get('artist') or music_info['artist']
+                    music_info['album'] = netease_info.get('album') or music_info['album']
+                if need_lyrics:
+                    music_info['lyrics'] = netease_info.get('lyrics')
+                if need_cover:
+                    music_info['cover_data'] = netease_info.get('cover_data')
+                    music_info['cover_url'] = netease_info.get('cover_url')
+
+        else: # musicbrainz
+            # MusicBrainz primarily provides info and cover via Cover Art Archive
+            if need_info or need_cover:
+                mb_info = search_musicbrainz(track_info, force_match=args.force_match)
+                if mb_info:
+                    if need_info:
+                        music_info['title'] = mb_info.get('title') or music_info['title']
+                        music_info['artist'] = mb_info.get('artist') or music_info['artist']
+                        music_info['album'] = mb_info.get('album') or music_info['album']
+                    if need_cover:
+                        music_info['cover_data'] = mb_info.get('cover_data')
+                        music_info['cover_url'] = mb_info.get('cover_url')
+            # MusicBrainz doesn't provide lyrics; do not attempt to fetch lyrics from MB
 
 
         # 3. Process the retrieved info (save cover, lyrics, etc.)
         if music_info:
             cover_filename = None
-            if not args.no_write and args.source != 'local':
+            # Embed into audio only if cover was requested and embedding is allowed
+            if need_cover and (not args.no_write) and args.source != 'local':
                 embed_info_to_audio(args.filepath, music_info)
             
-            # Save cover and lyrics to cache
-            if 'cover_data' in music_info and music_info['cover_data']:
+            # Save cover to cache only if cover was requested and we have data
+            if need_cover and 'cover_data' in music_info and music_info['cover_data']:
                 artist_for_save = music_info.get('artist') or track_info.get('artist') or 'Unknown Artist'
                 title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
                 cover_filename = save_cover_art(music_info['cover_data'], artist_for_save, title_for_save, CACHE_COVERS_DIR)
-            
+
             # Use cached cover filename if it exists and no new one was generated
             final_cover_filename = cover_filename or cached_cover_filename
 
@@ -252,9 +294,9 @@ def main():
                     db_info['cover_path'] = os.path.join(CACHE_COVERS_DIR, final_cover_filename)
                 save_info_to_db(args.filepath, db_info)
 
-            # Save lyrics to cache if they were fetched and not already cached
+            # Save lyrics to cache only if lyrics were requested and we have them (and not already cached)
             lyrics_filename = None
-            if 'lyrics' in music_info and music_info['lyrics'] and (not cached_lyrics or args.force_fetch):
+            if need_lyrics and 'lyrics' in music_info and music_info['lyrics'] and (not cached_lyrics or args.force_fetch):
                 artist_for_save = music_info.get('artist') or track_info.get('artist') or 'Unknown Artist'
                 title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
                 lyrics_filename = save_lrc_file(music_info['lyrics'], artist_for_save, title_for_save, CACHE_LYRICS_DIR)
@@ -446,7 +488,7 @@ def search_netease(track_info, bilingual=True, limit=5, force_match=False, query
     title = track_info.get('title', '')
     album = track_info.get('album', '')
     
-    lyrics, cover_url, song_info = try_netease_api(artist, title, album, bilingual=bilingual, limit=limit, force_match=force_match, query_template=query_template)
+    lyrics, cover_url, song_info = try_netease_api(artist, title, album, bilingual=bilingual, limit=limit, force_match=force_match)
     
     if not song_info:
         return None
@@ -480,7 +522,7 @@ def correct_lrc_format(lrc_text):
     corrected_text = pattern.sub(r'\1\3', lrc_text)
     return corrected_text
 
-def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=False, query_template="{artist} {title}"):
+def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=False):
     """Attempts to get song info from Netease API."""
     try:
         search_url = "http://music.163.com/api/search/get/web"
@@ -489,74 +531,193 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
             'Referer': 'http://music.163.com/'
         }
         
-        # Build search term using the query template
-        # Clean artist and title to avoid issues with special characters like '*' in search
-        # japanese_allowed_pattern = r'[^\w\s\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F]'
-        # artist_clean = re.sub(japanese_allowed_pattern, ' ', artist or '').strip()
-        # title_clean = re.sub(japanese_allowed_pattern, ' ', title or '').strip()
-        # search_term = query_template.format(artist=artist_clean, title=title_clean, album=album or '')
-        chars_to_remove_completely = ["＊", "～"]
-        def clean_for_search(text):
-            if text is None:
-                text = ''
-            # 1. 构建正则表达式模式
-            # re.escape() 用于转义所有可能在正则表达式中有特殊含义的字符
-            # 这确保了即使 chars_to_remove 中有 '.*+?[]()|' 等字符也能被正确匹配
-            escaped_chars = [re.escape(char) for char in chars_to_remove_completely]
-            # 将转义后的字符连接起来，并放入一个字符集 `[]` 中
-            # 例如：如果 chars_to_remove_completely 是 ["*", "'"]，模式会是 r"[\*']"
-            pattern = r'[' + ''.join(escaped_chars) + r']'
-            # 2. 执行替换：将匹配到的字符替换为空字符串
-            cleaned_text = re.sub(pattern, '', text)
-            # 3. 最后再次使用 .strip() 移除可能有（原始字符串中就存在）的开头和结尾的空白字符
-            return cleaned_text.strip()
-        artist_clean = clean_for_search(artist)
-        title_clean = clean_for_search(title)
-        search_term = query_template.format(artist=artist_clean, title=title_clean, album=album or '')
-        print(f"DEBUG: Netease search term: '{search_term}'", file=sys.stderr)
+        # Generate variants for title, artist, and album
+        title_vars = sorted(gen_variants(title), key=len, reverse=True)[:3]
+        artist_vars = sorted(gen_variants(artist), key=len, reverse=True)[:3]
+        album_vars = sorted(gen_variants(album), key=len, reverse=True)[:2]
+
+        # Build a list of search term variants to try (prioritized)
+        variants, seen = [], set()
+
+        # Priority 1: Title + Artist variants
+        for t in title_vars:
+            for a in artist_vars:
+                query = f"{t} {a}".strip()
+                if query and query not in seen:
+                    variants.append(query); seen.add(query)
         
-        params = {
-            's': search_term,
-            'type': 1,
-            'limit': limit
-        }
+        # Priority 2: Title + Album variants
+        for t in title_vars:
+            for alb in album_vars:
+                query = f"{t} {alb}".strip()
+                if query and query not in seen:
+                    variants.append(query); seen.add(query)
+
+        # Priority 3: Title only variants
+        for t in title_vars:
+            if t and t not in seen:
+                variants.append(t); seen.add(t)
         
-        resp = requests.get(search_url, params=params, headers=headers)
-        result = resp.json()
-        
-        if not result.get('result') or not result['result'].get('songs'):
-            return None, None, None
+        # Priority 4: Artist + Album variants
+        for a in artist_vars:
+            for alb in album_vars:
+                query = f"{a} {alb}".strip()
+                if query and query not in seen:
+                    variants.append(query); seen.add(query)
+
+        # Final cleanup for any empty strings that might have slipped through
+        variants = [v for v in variants if v]
+
+        # Helper similarity functions
+        def normalize_str(s):
+            if not s:
+                return ''
+            s = str(s).lower()
+            s = re.sub(r'\(.*?\)', '', s)  # remove parenthetical parts
+            s = re.sub(r"[^\w\s]", ' ', s, flags=re.UNICODE)
+            s = re.sub(r'\s+', ' ', s).strip()
+            return s
+
+        def token_jaccard(a, b):
+            if not a or not b:
+                return 0.0
+            set_a = set([t for t in re.split(r"\W+", a) if t])
+            set_b = set([t for t in re.split(r"\W+", b) if t])
+            if not set_a or not set_b:
+                return 0.0
+            inter = len(set_a & set_b)
+            union = len(set_a | set_b)
+            return inter / union if union > 0 else 0.0
+
+        def combined_similarity(a, b):
+            a_n = normalize_str(a)
+            b_n = normalize_str(b)
+            if not a_n or not b_n:
+                return 0.0
             
-        songs = result['result']['songs']
-        
-        # Find best match
+            # If one string is a perfect substring of the other (after normalization), give a high score
+            if a_n in b_n or b_n in a_n:
+                return 0.95 # High score for containing, but not necessarily perfect match
+
+            char_sim = jaccard_similarity(a_n, b_n)
+            token_sim = token_jaccard(a_n, b_n)
+            seq_sim = difflib.SequenceMatcher(None, a_n, b_n).ratio()
+
+            # Emphasize sequence similarity more, as it's good for minor variations
+            # If there's a very high sequence similarity, it's likely a good match
+            if seq_sim > 0.9:
+                return seq_sim * 1.0 # Give it full weight
+
+            # Weighted average, with more emphasis on token and sequence similarity
+            # Character Jaccard is less robust for longer, slightly different strings
+            return (0.3 * char_sim + 0.4 * token_sim + 0.3 * seq_sim)
+
         best_song = None
-        results_with_scores = []
-        if songs:
-            # First, calculate scores for all songs
+        best_overall = None
+        # Accumulate debug rows for printing later
+        all_results_debug = []
+
+        # Try each variant until we find a confident match
+        for v in variants:
+            v = v.strip()
+            if not v:
+                continue
+            print(f"DEBUG: Netease search term: '{v}'", file=sys.stderr)
+            params = {
+                's': v,
+                'type': 1,
+                'limit': limit
+            }
+            try:
+                resp = requests.get(search_url, params=params, headers=headers)
+                result = resp.json()
+            except Exception as e:
+                print(f"Netease request error for term '{v}': {e}", file=sys.stderr)
+                continue
+
+            if not result.get('result') or not result['result'].get('songs'):
+                continue
+
+            songs = result['result']['songs']
+            results_with_scores = []
+            
+            # Define base weights for title, artist, album
+            # These can be adjusted based on empirical testing
+            base_title_weight = 0.45
+            base_artist_weight = 0.4
+            base_album_weight = 0.15 # Increased album weight
+
             for song in songs:
                 remote_title = song.get('name', '')
                 remote_artist = song.get('artists', [{}])[0].get('name', '')
+                remote_album = song.get('album', {}).get('name', '')
+
+                # --- Similarity Calculation ---
+                # Use variants to find the best possible match for each field
+                title_sim = max(combined_similarity(t, remote_title) for t in title_vars) if title_vars else combined_similarity(title, remote_title)
                 
-                title_sim = jaccard_similarity(title_clean, remote_title)
-                artist_sim = jaccard_similarity(artist_clean, remote_artist)
+                # Check for featured artist in title
+                is_featured = any(f"feat. {a.lower()}" in remote_title.lower() for a in artist_vars)
+                artist_sim_primary = max(combined_similarity(a, remote_artist) for a in artist_vars) if artist_vars else combined_similarity(artist, remote_artist)
                 
-                score = 0.7 * title_sim + 0.3 * artist_sim
+                # If the artist is featured, this is a strong signal, often stronger than a wrong primary artist
+                artist_sim = artist_sim_primary
+                if is_featured and artist_sim < 0.8:
+                    artist_sim = 0.8  # Boost score if featured, but primary artist doesn't match well
+
+                album_sim = max(combined_similarity(alb, remote_album) for alb in album_vars) if album_vars else combined_similarity(album, remote_album)
+
+                # --- Scoring ---
+                score = (base_title_weight * title_sim +
+                         base_artist_weight * artist_sim +
+                         base_album_weight * album_sim)
+
+                # --- Bonuses & Penalties ---
+                # 1. Album match is critical. High bonus for match, high penalty for mismatch.
+                if album:
+                    if album_sim > 0.9:
+                        score += 0.3  # Strong bonus for near-perfect album match
+                    elif album_sim < 0.3:
+                        score *= 0.6  # Heavy penalty for clear album mismatch
+
+                # 2. Artist match bonus
+                if artist and (artist_sim > 0.95 or any(normalize_base(a).lower() == normalize_str(remote_artist) for a in artist_vars)):
+                    score += 0.20
+                if is_featured: # Additive bonus for being featured
+                    score += 0.15
+
+                # 3. Remix/Version penalty
+                is_remix_local = "remix" in title.lower() or "ver" in title.lower()
+                is_remix_remote = "remix" in remote_title.lower() or "ver" in remote_title.lower()
+                if is_remix_remote and not is_remix_local:
+                    score *= 0.85 # Penalize if it's a remix and the original wasn't
+
                 results_with_scores.append({'song': song, 'score': score})
 
-            # Always determine the best song by score.
             if results_with_scores:
+                # sort and keep best for this variant
                 best_result = max(results_with_scores, key=lambda x: x['score'])
                 best_score = best_result['score']
-                best_song = best_result['song']
-                
-                # If force_match is NOT used, apply a quality threshold.
-                # If force_match IS used, we accept the highest-scoring match regardless of how low the score is.
-                if not force_match and best_score < 0.3:
-                    print(f"No good match found. Highest similarity score was {best_score:.2f}, which is below the threshold of 0.3.", file=sys.stderr)
-                    best_song = None
-            else:
-                best_song = None
+                # collect debug rows
+                for r in results_with_scores:
+                    s = r['song']
+                    all_results_debug.append((s, r['score']))
+
+                # If we already have a very confident match, pick it
+                if force_match or best_score >= 0.5:
+                    best_overall = best_result
+                    best_song = best_result['song']
+                    break
+                # otherwise keep the best seen so far across variants
+                if not best_overall or best_score > best_overall['score']:
+                    best_overall = best_result
+
+        # If no variant produced results
+        if not best_overall:
+            return None, None, None
+
+        best_song = best_overall['song']
+        results_with_scores = [{'song': s, 'score': sc} for (s, sc) in all_results_debug]
         
         # Print search results for debugging
         if results_with_scores:
@@ -572,11 +733,10 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
             print("-----------------------------", file=sys.stderr)
 
         if not best_song:
-            if not songs:
-                print(f"Search for '{search_term}' returned no results from Netease.", file=sys.stderr)
-            else:
-                # This means nothing matched, regardless of force_match
-                print(f"Could not find a good match for '{title}' by '{artist}'. Showing all results:", file=sys.stderr)
+            print(f"Could not find a good match for '{title}' by '{artist}'.", file=sys.stderr)
+            # If we have any song results from the last query, show them for debugging
+            if 'songs' in locals() and songs:
+                print("Showing all results:", file=sys.stderr)
                 for i, song in enumerate(songs):
                     song_name = song.get('name')
                     artist_name = song.get('artists', [{}])[0].get('name')
@@ -712,6 +872,63 @@ def is_match(a, b):
     b_clean = re.sub(r'[^\w]', '', b.lower())
     return a_clean == b_clean or a_clean in b_clean or b_clean in a_clean
 
+# --- Keyword Generation Functions (from test.py) ---
+
+PUNCT_RE = re.compile(r"[()\[\]{}【】（）·•・/|\\,，.。!！?？:：;；~～\-–—_＋+＝=“”\"'’`]+")
+SUFFIX_RE = re.compile(r"\s+(feat\.?|ft\.?|with|version|ver\.?|remix|edit|tv size|short ver\.?)\b.*", re.IGNORECASE)
+HAS_LATIN = re.compile(r"[A-Za-z]")
+
+def normalize_base(s: str) -> str:
+    s = (s or "").strip()
+    s = SUFFIX_RE.sub("", s)                  # 去尾缀（feat./ver./remix等）
+    s = jaconv.z2h(s, ascii=True, digit=True) # 全角->半角
+    if _opencc:
+        s = _opencc.convert(s)                # 繁到简
+    s = jaconv.kata2hira(s)                   # 统一到平假名
+    s = PUNCT_RE.sub(" ", s)                  # 去标点
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    return s
+
+def gen_variants(text: str) -> set[str]:
+    """
+    生成跨语言/跨写法候选：原文、ASCII 近似、罗马字↔假名。
+    """
+    base = (text or "").strip()
+    if not base:
+        return set()
+
+    variants = set()
+    variants.add(base)
+    variants.add(normalize_base(base))
+
+    # 非拉丁字符 → ASCII 近似
+    ud = unidecode(base)
+    if ud:
+        variants.add(normalize_base(ud))
+
+    # 如果包含拉丁字母：罗马字 -> 假名（先转平假名，再也给片假名）
+    if HAS_LATIN.search(base):
+        try:
+            hira = jaconv.alphabet2kana(base)
+            if hira:
+                variants.add(normalize_base(hira))
+                variants.add(normalize_base(jaconv.hira2kata(hira)))
+        except Exception:
+            pass
+
+    # 如果包含日文假名：假名 → 罗马字
+    if re.search(r"[\u3040-\u30ff]", base):
+        try:
+            hira2 = jaconv.kata2hira(base)
+            roma = jaconv.kana2alphabet(hira2)
+            if roma:
+                variants.add(normalize_base(roma))
+        except Exception:
+            pass
+
+    # 清洗去重
+    variants = {normalize_base(v) for v in variants if v}
+    return {v for v in variants if v}
 
 # --- File Saving Functions ---
 

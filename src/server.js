@@ -47,7 +47,6 @@ const server = http.createServer(async (req, res) => {
                     const baseName = path.parse(musicFile).name;
                     const dirName = path.dirname(musicFile);
                     const lrcFile = lyricsFiles.find(lyric => {
-                        // Case-insensitive matching for filenames and directories
                         return path.dirname(lyric).toLowerCase() === dirName.toLowerCase() &&
                                path.parse(lyric).name.toLowerCase() === baseName.toLowerCase();
                     });
@@ -102,10 +101,15 @@ const server = http.createServer(async (req, res) => {
 
        const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
        
-       const args = [path.join(__dirname, 'get_music_info.py'), fullMusicPath, '--json-output'];
+    const args = [path.join(__dirname, 'get_music_info.py'), fullMusicPath, '--json-output'];
  
        if (source) {
            args.push('--source', source);
+       }
+       // forward `type` param to only fetch specific data when provided
+       const requestedType = parsedUrl.query.type;
+       if (requestedType && ['lyrics','cover','info','all'].includes(requestedType)) {
+           args.push('--only', requestedType);
        }
        // Always add --no-write for safety from web UI
        args.push('--no-write');
@@ -198,6 +202,12 @@ const server = http.createServer(async (req, res) => {
             '--write-db',
             '--json-output'
         ];
+
+        // Forward 'type' to control what to fetch
+        const requestedType2 = parsedUrl.query.type;
+        if (requestedType2 && ['lyrics','cover','info','all'].includes(requestedType2)) {
+            args.push('--only', requestedType2);
+        }
 
         if (originalLyrics === 'true') {
             args.push('--original-lyrics');
@@ -2154,7 +2164,7 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 }
 
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
-// 缩略图缓存目录
+// 缓略图缓存目录 — 启动时 launcher 会先 `cd` 到 `src`，因此缓存目录位于项目根的 `cache`，即 __dirname 的上一级
 const CACHE_DIR = path.join(__dirname, 'cache');
 const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo', 'musicdata'];
 const CACHE_FILES = ['foldercache.db'];
@@ -2555,6 +2565,11 @@ server.on('request', async (req, res) => {
                        
                        const result = await new Promise((resolve) => {
                            const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
+                           // Optionally forward 'type' in scraping requests (defaults to all)
+                           const scrapeType = 'all';
+                           if (scrapeType && ['lyrics','cover','info','all'].includes(scrapeType)) {
+                               args.push('--only', scrapeType);
+                           }
                            const pythonProcess = spawn('python', args, {
                                 env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
                            });

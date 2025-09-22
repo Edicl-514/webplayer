@@ -67,7 +67,7 @@ class FolderInfo:
     method_used: str
 
 class SmartFolderModTimeManager:
-    def __init__(self, everything_path="./src/everything_sdk/es.exe", cache_db=os.path.join("src", "cache", "foldercache.db"), max_workers=8, use_database_cache=True):
+    def __init__(self, everything_path="./everything_sdk/es.exe", cache_db=os.path.join("cache", "foldercache.db"), max_workers=8, use_database_cache=True):
         self.everything_path = everything_path
         self.cache_db = cache_db
         # 增加最大工作线程数以提高并行度

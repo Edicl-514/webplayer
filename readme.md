@@ -35,7 +35,7 @@
 
 
 ### 1. 环境要求
-- **仅支持Windows系统，最好能有一块支持CUDA的NVDIA显卡**
+- **仅支持Windows系统，最好能有一块支持CUDA的NVIDIA显卡**
 - 需配置好 **Node.js** 和 **Python** 环境
 - **Everything**:  必须安装并正在运行 [Everything](https://www.voidtools.com/) 搜索工具。
 - **FFmpeg**: 需要下载 [FFmpeg](https://ffmpeg.org/download.html) 并将其可执行文件路径添加到系统的 PATH 环境变量中。
@@ -53,13 +53,8 @@
 
 3.  **安装 Python 依赖**
     
-    我们推荐使用虚拟环境来管理依赖。
     
     ```bash
-    python -m venv .venv
-
-    .venv\Scripts\activate
-
     # 安装所有依赖 (CPU 版本)
     pip install -r requirements.txt
     ```
@@ -89,52 +84,22 @@
         pip install faiss-gpu
         ```
 
-5.  **配置 API 密钥**
-    -   打开 `video_scraper.py` 文件。
-    -   找到 `TMDB_API_KEY` 变量，并填入您自己的 [TMDb API 密钥](https://www.themoviedb.org/documentation/api)。
-    ```python
-    # video_scraper.py
-    TMDB_API_KEY = 'YOUR_TMDB_API_KEY'
-    ```
-    - 打开 `get_music_info.py` 文件。
-    - 填入 MusicBrainz API 相关信息
-    ```python
-    # get_music_info.py
-    MB_CLIENT_ID = "YOUR_MUSICBRAINZ_ID"
-    MB_CLIENT_SECRET = "YOUR_MUSICBRAINZ_SECRET"
-    MB_APP_NAME = "YOUR_APP_NAME"
-    MB_APP_VERSION = "1.0"
-    ```
+5.  **基础配置**
+    -   打开 `launcher.exe` 。
+    -   转到 `Setings`->`API Keys` ，并填入您自己的 [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API) 和 [TMDb](https://www.themoviedb.org/documentation/api) API相关信息。
+    
+    -   转到 `Media Directories` ，修改或添加您自己的媒体文件夹路径。每个条目包含一个 `path` (完整路径) 和一个 `alias` (将在 Web 界面中显示的别名)。
+    
+    - 转到 `Models`，添加在线或本地模型信息，（对于在线模型Model Path可以随便填），对于不同类型，不同用途的模型，需要调整模型参数和提示词才能达到最佳效果。（推荐使用：Deepseek V3、Gemini系列、Grok系列、Qwen系列、Sakura Galtransl）
 
-6.  **配置媒体目录**
-    -   打开 `server.js` 文件。
-    -   找到 `MEDIA_DIRS` 常量。
-    -   修改或添加您自己的媒体文件夹路径。每个条目包含一个 `path` (完整路径) 和一个 `alias` (将在 Web 界面中显示的别名)。
-    ```javascript
-    // server.js
-    const MEDIA_DIRS = [
-        { path: 'J:\\Movie', alias: 'J盘影视' }, 
-        { path: 'K:\\Anime', alias: 'K盘动漫' },
-        { path: 'L:\\Jav', alias: 'L盘影视' },
-        { path: 'J:\\Music', alias: '音乐' }
-    ];
-    ```
+6.  **启动服务器**
+    
+     *在启动服务器前，可以先在 `Environment Check` 和 `Network Check` 中检测依赖和网络环境*
 
-7.  **启动服务器**
-
-    先启动Python后端服务：
-    ```bash
-    python subtitle_process_backend.py
-    ```
-    *此时会自动生成 ``models`` 文件夹以及相关文件，您可查看其中的 ``README.md`` 来配置在线或本地模型，配置完成后需重启后端服务。*
-
-    然后启动Node后端：
-    ```bash
-    node server.js
-    ```
+    在 `Launcher` 中启动 Node 和 Python 服务
     
 
-8.  **访问 Web 界面**
+7.  **访问 Web 界面**
    
     打开您的浏览器，访问 [http://localhost:8080](http://localhost:8080)。您就可以开始浏览和管理您的媒体文件了。
 
@@ -144,7 +109,7 @@
     -   **首次加载**: 首次访问包含大量视频的文件夹时，缩略图生成可能会消耗较多时间和 CPU 资源。生成后的缩略图会被缓存，后续访问会非常快。
     -   **AI 功能**: 运行字幕生成 (`whisper`) 和其他本地 AI 模型是计算密集型任务，处理大型文件可能需要很长时间，并消耗大量内存或 VRAM。
 - **缓存**:
-    -   所有缓存文件默认存储在项目根目录下的 `cache` 文件夹中。您可以随时通过 Web 界面中的“缓存管理”工具来清理它们。
+    -   所有缓存文件默认存储在 `./src/cache` 文件夹中。您可以随时通过 Web 界面中的“缓存管理”工具来清理它们。
 - **安全性**:
     -   本项目设计为在 **本地网络** 使用。请 **不要** 将其直接暴露在公共互联网上，因为它没有经过安全加固。
 - **兼容性**:

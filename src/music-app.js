@@ -390,19 +390,34 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.data) {
                 const info = result.data;
                 // 用获取到的信息更新UI
-                songTitle.textContent = info.title || song.title;
-                songArtist.textContent = info.artist || song.artist;
-                songAlbum.textContent = info.album || ''; // Update album info
+                // If the user previously modified this song, prefer local cached values (do not overwrite)
+                if (song.userModified) {
+                    songTitle.textContent = song.title || info.title || '';
+                    songArtist.textContent = song.artist || info.artist || '';
+                    songAlbum.textContent = song.album || info.album || '';
+                } else {
+                    songTitle.textContent = info.title || song.title;
+                    songArtist.textContent = info.artist || song.artist;
+                    songAlbum.textContent = info.album || ''; // Update album info
+                }
                 checkMarquee(songTitle);
                 checkMarquee(songArtist);
                 checkMarquee(songAlbum); // Check marquee for album
                 
                 // BUGFIX: 更新播放列表和localStorage中的元数据
-                const hasChanged = (song.title !== songTitle.textContent) || (song.artist !== songArtist.textContent) || (song.album !== songAlbum.textContent);
-                if (hasChanged) {
-                    song.title = songTitle.textContent;
-                    song.artist = songArtist.textContent;
-                    song.album = songAlbum.textContent; // Save album to playlist object
+                // Only update stored song fields if they were previously empty or not userModified
+                let updated = false;
+                if (!song.userModified) {
+                    if (!song.title && songTitle.textContent) { song.title = songTitle.textContent; updated = true; }
+                    if (!song.artist && songArtist.textContent) { song.artist = songArtist.textContent; updated = true; }
+                    if (!song.album && songAlbum.textContent) { song.album = songAlbum.textContent; updated = true; }
+                } else {
+                    // If userModified, still ensure localStorage reflects current song object
+                    // (but do not overwrite user values with remote info)
+                    updated = false;
+                }
+
+                if (updated) {
                     initPlaylist();
                     updatePlaylistUI();
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
@@ -455,6 +470,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // 更新当前歌曲对象的lrc路径
                     song.lrc = lrcUrl;
+                    // Mark user modification for lyrics when user accepted or fetched lyrics
+                    song.userModified = true;
                     
                     // 重新加载歌词
                     loadLyrics(lrcUrl);
@@ -468,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentLyrics = []; // 清空旧歌词
                     parseLrc(info.lyrics);
                     // 注意：这里没有更新 song.lrc，因为内容是临时的
+                    // Do not mark userModified for transient lyric parsing
                     showToast('自动匹配歌词成功！', 'success');
                 }
             }
@@ -1452,6 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams({
                 path: musicPath,
                 source: source,
+                type: type,
                 // 'no-write' is now handled by the server. We also want to write to DB.
                 'force-match': settings.forceMatch,
                 'limit': settings.searchResultsLimit,
@@ -1480,17 +1499,24 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.data) {
                 const info = result.data;
                 console.log('Fetched info:', info);
-    
+
                 if (type === 'lyrics' && info.lyrics) {
-                    currentLyrics = [];
-                    parseLrc(info.lyrics);
-                    showToast('歌词同步成功！', 'success');
+                        currentLyrics = [];
+                        parseLrc(info.lyrics);
+                        showToast('歌词同步成功！', 'success');
+            // Mark as user-modified since user triggered this fetch
+            song.userModified = true;
+            localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                 } else if (type === 'cover' && info.cover_url) {
                     const coverUrl = `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`;
                     albumCover.src = getCacheBustedUrl(coverUrl);
                     playerBg.style.backgroundImage = `url("${getCacheBustedUrl(coverUrl)}")`;
                     setThemeColor(albumCover);
                     showToast('封面匹配成功！', 'success');
+                    // Persist cover change locally
+                    song.cover = albumCover.src;
+                    song.userModified = true;
+                    localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                 } else if (type === 'info') {
                     songTitle.textContent = info.title || song.title;
                     songArtist.textContent = info.artist || song.artist;
@@ -1499,6 +1525,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     playlist[currentSongIndex].artist = info.artist || song.artist;
                     initPlaylist();
                     updatePlaylistUI();
+                    // Mark as user-modified because user accepted network-provided info
+                    playlist[currentSongIndex].userModified = true;
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                     showToast('歌曲信息匹配成功！', 'success');
                 } else {

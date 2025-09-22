@@ -150,6 +150,9 @@ struct MyApp {
     log_receiver: crossbeam_channel::Receiver<String>,
     log_sender: crossbeam_channel::Sender<String>,
     logs: Vec<String>,
+    // 缓存解析好的 LayoutJob，避免每帧都重新解析 ANSI
+    log_jobs: Vec<egui::text::LayoutJob>,
+    logs_scroll_to_bottom: bool,
 }
 
 impl MyApp {
@@ -259,6 +262,8 @@ impl MyApp {
             log_receiver,
             log_sender,
             logs: Vec::new(),
+            log_jobs: Vec::new(),
+            logs_scroll_to_bottom: false,
         }
     }
 
@@ -347,12 +352,32 @@ impl MyApp {
     fn spawn_process(
         command: &str,
         args: &[&str],
+        working_dir: Option<&str>,
         log_sender: crossbeam_channel::Sender<String>,
         process_state: Arc<Mutex<ProcessState>>,
         process_name: &'static str,
     ) {
         let mut cmd = Command::new(command);
         cmd.args(args);
+        if let Some(dir) = working_dir {
+            // If a relative path is provided, resolve it against the launcher's executable directory
+            let resolved_dir = if Path::new(dir).is_absolute() {
+                PathBuf::from(dir)
+            } else {
+                if let Ok(exe_path) = std::env::current_exe() {
+                    if let Some(exe_dir) = exe_path.parent() {
+                        exe_dir.join(dir)
+                    } else {
+                        PathBuf::from(dir)
+                    }
+                } else {
+                    PathBuf::from(dir)
+                }
+            };
+            if let Some(resolved_str) = resolved_dir.to_str() {
+                cmd.current_dir(resolved_str);
+            }
+        }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
@@ -457,7 +482,7 @@ impl MyApp {
                     let sender = self.log_sender.clone();
                     let state = Arc::clone(&self.node_server);
                     thread::spawn(move || {
-                        Self::spawn_process("node", &["./src/server.js"], sender, state, "Node");
+                        Self::spawn_process("node", &["server.js"], Some("./src"), sender, state, "Node");
                     });
                 }
                 if ui.button("Stop").clicked() {
@@ -469,7 +494,7 @@ impl MyApp {
                     let state = Arc::clone(&self.node_server);
                     thread::spawn(move || {
                         thread::sleep(std::time::Duration::from_millis(500));
-                        Self::spawn_process("node", &["./src/server.js"], sender, state, "Node");
+                        Self::spawn_process("node", &["server.js"], Some("./src"), sender, state, "Node");
                     });
                 }
                 ui.end_row();
@@ -482,7 +507,8 @@ impl MyApp {
                     thread::spawn(move || {
                         Self::spawn_process(
                             "python",
-                            &["./src/subtitle_process_backend.py"],
+                            &["subtitle_process_backend.py"],
+                            Some("./src"),
                             sender,
                             state,
                             "Python",
@@ -500,7 +526,8 @@ impl MyApp {
                         thread::sleep(std::time::Duration::from_millis(500));
                         Self::spawn_process(
                             "python",
-                            &["./src/subtitle_process_backend.py"],
+                            &["subtitle_process_backend.py"],
+                            Some("./src"),
                             sender,
                             state,
                             "Python",
@@ -527,43 +554,47 @@ impl MyApp {
         // 使用固定大小的滚动区域
         egui::ScrollArea::vertical()
             .max_height(300.0) // 固定最大高度
-            .stick_to_bottom(true)
             .auto_shrink([false, false]) // 防止自动收缩
             .show(ui, |ui| {
                 // 设置最大宽度以确保文本换行
                 ui.set_max_width(ui.available_width());
                 
-                // 使用等宽字体显示日志，启用自动换行
-                for log in &self.logs {
-                    let job = Self::parse_ansi_to_layout_job(log);
-                    ui.add(egui::Label::new(job).wrap(true)); // 启用自动换行
+                // 使用缓存的 LayoutJobs 渲染日志，避免每帧重新解析
+                for job in &self.log_jobs {
+                    ui.add(egui::Label::new(job.clone()).wrap(true)); // 启用自动换行
+                }
+
+                // 如果有新日志需要滚动到底部，则将光标移动到底部
+                if self.logs_scroll_to_bottom {
+                    ui.scroll_to_cursor(None);
+                    // 已经滚动到底部，重置标志
+                    self.logs_scroll_to_bottom = false;
                 }
             });
     }
 
-    // 改进的 ANSI 解析函数 - 为换行优化
+    // 改进的 ANSI 解析函数 - 为换行优化，使用静态正则以避免重复编译
     fn parse_ansi_to_layout_job(input: &str) -> egui::text::LayoutJob {
-        use regex::Regex;
         use egui::text::{LayoutJob, TextFormat};
+        use once_cell::sync::Lazy;
+        use regex::Regex;
+
+        static ANSI_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\x1b\[(\d+)(;\d+)*m").unwrap());
 
         let mut job = LayoutJob::default();
-        job.wrap.max_width = f32::INFINITY; // 允许自动换行
-        job.break_on_newline = true; // 在换行符处换行
-        
+        job.wrap.max_width = f32::INFINITY;
+        job.break_on_newline = true;
+
         let mut current_color = egui::Color32::WHITE;
 
-        // 首先清理所有 ANSI 转义序列
-        let re = Regex::new(r"\x1b\[(\d+)(;\d+)*m").unwrap();
-        let cleaned_text = re.replace_all(input, "");
-        
-        // 如果没有 ANSI 序列，直接返回
-        if cleaned_text == input {
+        // 快速路径：如果没有匹配，直接作为单一格式追加
+        if !ANSI_RE.is_match(input) {
             job.append(
                 input,
                 0.0,
                 TextFormat {
                     color: current_color,
-                    font_id: egui::FontId::monospace(11.0), // 稍微小一点的字体
+                    font_id: egui::FontId::monospace(11.0),
                     ..Default::default()
                 },
             );
@@ -571,11 +602,11 @@ impl MyApp {
         }
 
         let mut last_end = 0;
-        for cap in re.captures_iter(input) {
-            let start = cap.get(0).unwrap().start();
-            let end = cap.get(0).unwrap().end();
+        for cap in ANSI_RE.captures_iter(input) {
+            let m = cap.get(0).unwrap();
+            let start = m.start();
+            let end = m.end();
 
-            // 添加非转义序列部分
             if start > last_end {
                 let text = &input[last_end..start];
                 if !text.is_empty() {
@@ -584,14 +615,13 @@ impl MyApp {
                         0.0,
                         TextFormat {
                             color: current_color,
-                            font_id: egui::FontId::monospace(11.0), // 保持一致的字体
+                            font_id: egui::FontId::monospace(11.0),
                             ..Default::default()
                         },
                     );
                 }
             }
 
-            // 解析颜色代码
             if let Some(code) = cap.get(1) {
                 match code.as_str() {
                     "31" => current_color = egui::Color32::RED,
@@ -605,7 +635,6 @@ impl MyApp {
             last_end = end;
         }
 
-        // 添加剩余部分
         if last_end < input.len() {
             let text = &input[last_end..];
             if !text.is_empty() {
@@ -935,18 +964,42 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 批量处理日志消息，避免频繁重绘
+        // 批量处理日志消息，避免频繁重绘 —— 只解析并缓存新增日志
         let mut new_logs = Vec::new();
         while let Ok(log_line) = self.log_receiver.try_recv() {
             new_logs.push(log_line);
         }
-        
+
         if !new_logs.is_empty() {
-            self.logs.extend(new_logs);
-            // 限制日志数量
-            if self.logs.len() > 1000 {
-                let excess = self.logs.len() - 1000;
+            // 将文本日志加入列表并为每一行生成对应的 LayoutJob（解析一次）
+            for log in new_logs.into_iter() {
+                // push text
+                self.logs.push(log.clone());
+                // parse and cache layout job
+                let job = Self::parse_ansi_to_layout_job(&log);
+                self.log_jobs.push(job);
+            }
+            self.logs_scroll_to_bottom = true;
+
+            // 限制条目数和总字符数，避免内存暴涨
+            const MAX_LOG_LINES: usize = 1000;
+            const MAX_LOG_CHARS: usize = 200_000; // 大约 200KB of text
+
+            // 裁剪到最大行数（同时裁剪 log_jobs）
+            if self.logs.len() > MAX_LOG_LINES {
+                let excess = self.logs.len() - MAX_LOG_LINES;
                 self.logs.drain(0..excess);
+                self.log_jobs.drain(0..excess);
+            }
+
+            // 如果字符总数仍然过大，则继续从头部删除直到符合限制（同时裁剪 log_jobs）
+            let mut total_chars: usize = self.logs.iter().map(|s| s.len()).sum();
+            while total_chars > MAX_LOG_CHARS && !self.logs.is_empty() {
+                if let Some(removed) = self.logs.get(0) {
+                    total_chars = total_chars.saturating_sub(removed.len());
+                }
+                self.logs.remove(0);
+                self.log_jobs.remove(0);
             }
         }
 
