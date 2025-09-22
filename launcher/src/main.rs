@@ -45,6 +45,16 @@ struct OnlineConfig {
     model_name: String,
 }
 
+impl Default for OnlineConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            api_base: String::new(),
+            model_name: String::new(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct GenerationConfig {
     max_new_tokens: u32,
@@ -78,6 +88,18 @@ struct GgufConfig {
     chat_format: String,
     #[serde(default)]
     use_raw_prompt_for_translation: bool,
+}
+
+impl Default for GgufConfig {
+    fn default() -> Self {
+        Self {
+            n_gpu_layers: -1,
+            n_ctx: 0,
+            n_batch: 0,
+            chat_format: String::new(),
+            use_raw_prompt_for_translation: false,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -735,7 +757,11 @@ impl MyApp {
                                 ui.end_row();
                             });
 
-                        if let Some(online_config) = &mut model.online_config {
+                        // Always provide editable Online Config: create default if missing
+                        {
+                            let online_config = model
+                                .online_config
+                                .get_or_insert_with(OnlineConfig::default);
                             ui.collapsing("Online Config", |ui| {
                                 egui::Grid::new(format!("online_config_grid_{}", i))
                                     .num_columns(2)
@@ -827,7 +853,11 @@ impl MyApp {
                             });
                         });
 
-                        if let Some(gguf_config) = &mut model.gguf_config {
+                        // Always provide editable GGUF Config: create default if missing
+                        {
+                            let gguf_config = model
+                                .gguf_config
+                                .get_or_insert_with(GgufConfig::default);
                             ui.collapsing("GGUF Config", |ui| {
                                 egui::Grid::new(format!("gguf_config_grid_{}", i))
                                     .num_columns(2)
@@ -1258,7 +1288,7 @@ impl Default for Model {
         Self {
             model_path: "New Model Path".to_string(),
             model_format: "auto".to_string(),
-            online_config: None,
+            online_config: Some(OnlineConfig::default()),
             generation_config: GenerationConfig {
                 max_new_tokens: 1024,
                 temperature: 0.7,
@@ -1273,7 +1303,7 @@ impl Default for Model {
                 glossary_system_prompt: "".to_string(),
                 glossary_prompt: "".to_string(),
             },
-            gguf_config: None,
+            gguf_config: Some(GgufConfig::default()),
             batch_max_lines: 20,
             concurrent_threads: 5,
             batch_max_chars: 0,
