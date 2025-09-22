@@ -1,0 +1,2120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebPlayer - Browser</title>
+    <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
+    <script>
+        (function() {
+            var userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            // Checks for mobile devices
+            if (/android/i.test(userAgent) || ((/iPad|iPhone|iPod/.test(userAgent)) && !window.MSStream)) {
+                document.documentElement.classList.add('mobile');
+            }
+        })();
+    </script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0px; background: rgba(0,0,0,1); color: #e0e0e0; position: relative;}
+
+        body::before {
+             content: "";
+             position: fixed;
+             top: -10px; right: -10px; bottom: -10px; left: -10px;
+             background: url('./bg.png') no-repeat center center fixed;
+             background-size: cover;
+             filter: blur(30px) brightness(50%);
+             z-index: -1;
+         }
+        .container { max-width: 1200px; margin: 20px auto; background: rgba(15, 15, 15, 0.65); padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+        h1 { text-align: center; color: #4d9deb; }
+        .path-navigation { margin-bottom: 20px; padding: 10px; background-color: #3a3a3d; border-radius: 5px; display: flex; align-items: center; }
+        .path-navigation span { font-size: 1.1em; color: #a0a0a0; max-width: calc(100% - 200px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        #backButton, #homeButton {
+            margin-right: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        #backButton:hover, #homeButton:hover {
+            background-color: #0066cc;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        
+        #backButton:active, #homeButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
+        /* 搜索区域样式 */
+        .search-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #3a3a3d;
+            border-radius: 5px;
+        }
+
+        #searchForm {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #searchInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 1em;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+
+        #searchButton {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease,transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        #searchButton:hover {
+            background-color: #0066cc;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        #searchButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #searchHelpButton {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            background:linear-gradient(to right, #cc3c22, #cc3457);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        #searchHelpButton:hover {
+            transform: scale(1.05);
+            background-color: #992d1a;
+            box-shadow: 0 6px 12px rgba(204, 60, 34, 0.6);
+        }
+        #searchHelpButton:active {
+            transform: scale(0.8);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #searchOptions {
+            margin-top: 10px;
+            display: none;
+        }
+
+        .search-option-label {
+            margin-right: 15px;
+            color: #e0e0e0;
+        }
+
+        #maxResults {
+            width: 60px;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+            border: 1px solid #555;
+        }
+        
+        /* 排序控件样式 */
+        .sorting-controls {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label[for="sortBy"] {
+            font-weight: bold;
+        }
+
+        #sortBy {
+            padding: 5px;
+            border-radius: 4px;
+            border: 3px solid #555;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+
+        #sortOrder {
+            padding: 5px;
+            border-radius: 4px;
+            border: 3px solid #555;
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+        }
+        
+
+        label[for="mixSort"] {
+            margin-left: 0px;
+        }
+        
+        /* 排序下拉菜单样式 */
+        .sort-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .sort-menu-button {
+            background-color: #3a3a3d;
+            color: #e0e0e0;
+            padding: 5px 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1.2em;
+            line-height: 1;
+            transition: all 0.3s ease;
+        }
+
+        .sort-menu-button:hover {
+            transform: scale(1.1);
+            background-color: #4a4a4d;
+        }
+        .sort-menu-button:active {
+            transform: scale(0.9);
+            background-color: #2a2a2d;
+        }
+
+        .sort-dropdown-content {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background-color: #3a3a3d;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 10px;
+            z-index: 1000;
+            min-width: 200px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+
+        .sort-option {
+            margin-bottom: 10px;
+        }
+
+        .sort-option:last-child {
+            margin-bottom: 0;
+        }
+
+        .sort-option label {
+            display: block;
+            margin-bottom: 5px;
+            color: #e0e0e0;
+        }
+
+        .sort-option select {
+            width: 100%;
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #2d2d30;
+            color: #e0e0e0;
+        }
+
+        /* 网格布局样式 */
+        #fileGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 0;
+            list-style: none;
+        }
+        
+        .grid-item {
+            background: #3a3d41;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            margin: 12px 0;
+            border: 2px solid transparent; /* 默认边框，使其在后面被覆盖 */
+        }
+
+        .grid-item.is-directory {
+            border-color: #ff8c00; /* 文件夹边框 */
+        }
+
+        .grid-item.is-video {
+            border-color: #007bff; /* 视频文件边框 */
+        }
+
+        .grid-item.is-image {
+            border-color: #28a745; /* 图片文件边框 */
+        }
+        
+        .grid-item.is-audio {
+            border-color: #6f42c1; /* 音频文件边框 */
+        }
+
+        .grid-item.is-file:not(.is-video):not(.is-image):not(.is-audio) {
+            border-color: #6c757d; /* 其他文件边框 */
+        }
+        
+        .grid-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5);
+        }
+        
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #45494f;
+            overflow: hidden;
+        }
+        
+        .thumbnail {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .icon {
+            font-size: 3em;
+            color: #a0a0a0;
+        }
+
+        /* 视频缩略图上的播放按钮叠加层 */
+        .grid-item.is-video .thumbnail-container::after {
+            content: '▶'; /* 播放图标 */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4em; /* 更大的图标 */
+            color: rgba(255, 255, 255, 0.8);
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+            pointer-events: none; /* 确保点击事件穿透到下面的元素 */
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+
+        .grid-item.is-video:hover .thumbnail-container::after {
+            opacity: 1;
+        }
+        
+        .file-info {
+            padding: 12px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 8px;
+            word-break: break-word;
+            flex-grow: 1;
+        }
+        
+        .file-size {
+            font-size: 0.85em;
+            color: #a0a0a0;
+            margin-bottom: 10px;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .actions button {
+            flex: 1;
+            padding: 6px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        
+        .play-btn {
+            background:linear-gradient(to right, #28a745, #218838);
+            transition: all 0.3s ease;
+            color: white;
+        }
+        
+        .play-btn:hover {
+            background-color: #18662a;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(40, 167, 69, 0.6);
+        }
+        .play-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
+        .download-btn {
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            transition: all 0.3s ease;
+            color: white;
+        }
+        
+        .download-btn:hover {
+            background-color: #0f6d7a;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        .download-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
+        .add-to-playlist-btn {
+            background: linear-gradient(to right, #ffc107, #ff9800);
+            transition: all 0.3s ease;
+            color: white;
+        }
+        
+        .add-to-playlist-btn:hover {
+            background-color: #e0a800;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.6);
+        }
+        .add-to-playlist-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        
+        #videoPlayerContainer {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        #videoPlayer {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+
+        /* 侧边栏样式 */
+        #sidebar {
+            position: fixed;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            background-color: rgba(60, 60, 60, 0.8);
+            border-radius: 10px;
+            padding: 10px 5px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+
+        #sidebar:hover {
+            opacity: 1;
+        }
+
+        .sidebar-btn {
+            background: none;
+            border: none;
+            color: #e0e0e0;
+            cursor: pointer;
+            padding: 2px;
+            font-size: 10px;
+            font-weight: bold;
+            border-radius: 5px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .sidebar-btn:hover, .sidebar-btn.active {
+            background-color: #0066cc;
+            color: white;
+        }
+
+        /* Mobile Layout Overrides */
+        .mobile body {
+            margin: 0;
+            -webkit-text-size-adjust: 100%; /* Prevent font scaling in landscape */
+        }
+        .mobile .container {
+            max-width: 100%;
+            margin: 0;
+            padding: 10px;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        .mobile h1 {
+            font-size: 1.5em;
+            margin-top: 0;
+        }
+        .mobile .search-container {
+            padding: 10px;
+        }
+        .mobile #searchForm {
+            flex-wrap: wrap;
+        }
+        .mobile #searchInput {
+            flex-basis: 100%; /* Make input take full width */
+            margin-bottom: 0px;
+        }
+        .mobile #searchForm button {
+            flex-grow: 1; /* Make buttons share remaining space */
+        }
+        .mobile #searchOptions label {
+            display: block;
+            margin-right: 0;
+            margin-bottom: 8px;
+        }
+        .mobile .path-navigation {
+            flex-wrap: nowrap;
+            gap: 5px;
+        }
+        .mobile .path-navigation span {
+            max-width: calc(100% - 200px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mobile .path-navigation .sorting-controls {
+            margin-left: auto;
+            width: auto;
+        }
+        
+        .mobile #backButton,
+        .mobile #homeButton {
+            padding: 0;
+            font-size: 0; /* Hide the text */
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .mobile #backButton::before,
+        .mobile #homeButton::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px; /* Icon size */
+            color: white;
+            line-height: 1;
+        }
+        
+        .mobile #backButton::before {
+            content: '↩'; /* Back icon */
+        }
+        
+        .mobile #homeButton::before {
+            content: '⌂'; /* Home icon */
+        }
+
+        /* 移动端排序下拉菜单调整 */
+        .mobile .sort-dropdown-content {
+            min-width: 150px;
+            right: 0;
+            left: auto;
+        }
+        
+        .mobile .sort-option label {
+            font-size: 0.9em;
+        }
+        
+        .mobile .sort-option select {
+            font-size: 0.9em;
+            padding: 3px;
+        }
+        
+        /* 移动端排序图标调整 */
+        .mobile .sort-menu-button {
+            padding: 5px;
+            font-size: 1.1em;
+            min-width: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mobile #fileGrid {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+        .mobile .grid-item {
+            margin-top: 10px;
+        }
+        .mobile .thumbnail-container {
+            height: 120px;
+        }
+    </style>
+    <style>
+        /* 缓存管理面板样式 */
+        #cacheManagerButton {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        #cacheManagerButton:hover {
+            background-color: #0066cc;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        #cacheManagerButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #cache-info-panel {
+            display: none;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #3a3a3d;
+            border-radius: 5px;
+        }
+        #cache-info-panel h2 {
+            margin-top: 0;
+            color: #4d9deb;
+        }
+        #cache-info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        #cache-info-table th, #cache-info-table td {
+            border: 1px solid #555;
+            padding: 8px;
+            text-align: left;
+        }
+        #cache-info-table th {
+            background-color: #2d2d30;
+        }
+        .delete-cache-btn {
+            background: linear-gradient(to right, #dc3545, #c82333);
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .delete-cache-btn:hover {
+            background-color: #a71d2a;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(220, 53, 69, 0.6);
+        }
+        .delete-cache-btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        /* 视频刮削面板样式 */
+        #scraperManagerButton {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #ffc107, #ff9800);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        #scraperManagerButton:hover {
+            background-color: #e0a800;
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.6);
+        }
+        #scraperManagerButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #musicScraperManagerButton {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #6f42c1, #563d7c);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        #musicScraperManagerButton:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(111, 66, 193, 0.6);
+        }
+        #musicScraperManagerButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #scraper-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 450px;
+            max-height: 60vh;
+            background-color: rgba(60, 60, 63, 0.85);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            z-index: 1001;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            color: #e0e0e0;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        #scraper-panel.hidden {
+            display: none;
+        }
+        #scraper-panel h2 {
+            margin-top: 0;
+            color: #4d9deb;
+            text-align: center;
+        }
+        .scraper-controls {
+            margin-bottom: 15px;
+        }
+        .scraper-type-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 10px 0;
+            justify-content: center;
+        }
+        .scraper-type-options label {
+            cursor: pointer;
+        }
+        #startScrapingButton {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(to right, #28a745, #218838);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        #startScrapingButton:hover {
+            transform: scale(1.02);
+        }
+        .scraper-queue {
+            flex-grow: 1;
+            overflow-y: auto;
+            background-color: rgba(45, 45, 48, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            min-height: 100px;
+        }
+        #scraper-task-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-size: 0.9em;
+        }
+        #scraper-task-list li {
+            padding: 8px 5px;
+            border-bottom: 1px solid #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #scraper-task-list li:last-child {
+            border-bottom: none;
+        }
+        .task-name {
+            word-break: break-all;
+            padding-right: 10px;
+        }
+        .task-status {
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        .task-status-waiting { color: #ffc107; }
+        .task-status-success { color: #28a745; }
+        .task-status-failed { color: #dc3545; }
+        .task-status-scraping { color: #17a2b8; }
+
+        #closeScraperPanelButton {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #e0e0e0;
+            font-size: 1.5em;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebPlayer - Browser </h1>
+        <button id="cacheManagerButton">缓存管理</button>
+        <button id="scraperManagerButton">视频刮削</button>
+        <button id="musicScraperManagerButton">音乐刮削</button>
+        <!-- 缓存信息面板 -->
+        <div id="cache-info-panel">
+            <h2>缓存管理</h2>
+            <p>总缓存大小: <span id="totalCacheSize"></span></p>
+            <table id="cache-info-table">
+                <thead>
+                    <tr>
+                        <th>缓存类型</th>
+                        <th>大小</th>
+                        <th>文件数</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="cache-info-tbody">
+                    <!-- 缓存信息将动态插入此处 -->
+                </tbody>
+            </table>
+        </div>
+        <!-- 搜索表单 -->
+        <div class="search-container">
+            <form id="searchForm">
+                <input type="text" id="searchInput" placeholder="输入搜索关键词...">
+                <button type="submit" id="searchButton">搜索</button>
+                <button type="button" id="searchHelpButton">?</button>
+            </form>
+            <div class="search-type-container" style="margin-top: 10px;">
+                <label><input type="radio" name="searchType" value="file" checked> 文件</label>
+                <label><input type="radio" name="searchType" value="video"> 视频</label>
+                <label><input type="radio" name="searchType" value="music"> 音乐</label>
+            </div>
+            <div id="searchOptions">
+                <label class="search-option-label"><input type="checkbox" id="matchCase"> 区分大小写</label>
+                <label class="search-option-label"><input type="checkbox" id="matchWholeWord"> 全词匹配</label>
+                <label class="search-option-label"><input type="checkbox" id="useRegex"> 正则表达式</label>
+                <label>最大结果数: <input type="number" id="maxResults" value="500" min="1" max="1000"></label>
+            </div>
+        </div>
+        <div class="path-navigation">
+            <button id="backButton">返回上一级</button>
+            <button id="homeButton">返回主目录</button>
+            <span id="currentPath">/</span>
+            <div class="sorting-controls">
+                <!-- 排序设置下拉菜单 -->
+                <div class="sort-dropdown">
+                    <button id="sortMenuButton" class="sort-menu-button">⋮</button>
+                    <div id="sortDropdown" class="sort-dropdown-content hidden">
+                        <div class="sort-option">
+                            <label for="sortBy">排序方式:</label>
+                            <select id="sortBy">
+                                <option value="name">文件名</option>
+                                <option value="type">文件类型</option>
+                                <option value="time">修改时间</option>
+                            </select>
+                        </div>
+                        <div class="sort-option">
+                            <label for="sortOrder">排序顺序:</label>
+                            <select id="sortOrder">
+                                <option value="asc">升序</option>
+                                <option value="desc">降序</option>
+                            </select>
+                        </div>
+                        <div class="sort-option">
+                            <label for="mixSort">
+                                <input type="checkbox" id="mixSort"> 混合排序
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="rootDirsGrid" class="hidden">
+            <!-- 根目录媒体目录将在此处动态加载 -->
+        </div>
+        <div id="fileGrid">
+            <!-- 文件和文件夹将在此处动态加载 -->
+        </div>
+        <div id="videoPlayerContainer" class="hidden">
+            <h2>正在播放: <span id="playingFileName"></span></h2>
+            <video id="videoPlayer" controls autoplay></video>
+            <button id="closePlayerButton">关闭播放器</button>
+        </div>
+    </div>
+
+    <!-- 侧边栏导航 -->
+    <div id="sidebar" class="hidden">
+        <!-- 侧边栏按钮将在此处动态加载 -->
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+        function getCharGroup(char) {
+            if (!char) return '...';
+            if (char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z') {
+                return char.toUpperCase();
+            } else if (/^\d$/.test(char)) {
+                return '#';
+            } else if (/^[\u3040-\u309F\u30A0-\u30FF]$/.test(char)) {
+                // 平假名和片假名
+                return 'あ';            
+            } else if (/^[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\u3005]$/.test(char)) {
+                // 汉字
+                return '汉';
+            } else if (/[\u3000-\u303F]/.test(char)) {
+                // CJK符号和标点符号
+                return '@';
+            } else {
+                return '...';
+            }
+        }
+
+        const fileGrid = document.getElementById('fileGrid');
+        const rootDirsGrid = document.getElementById('rootDirsGrid');
+        const currentPathSpan = document.getElementById('currentPath');
+        const backButton = document.getElementById('backButton');
+        const homeButton = document.getElementById('homeButton');
+        const videoPlayerContainer = document.getElementById('videoPlayerContainer');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const playingFileNameSpan = document.getElementById('playingFileName');
+        const closePlayerButton = document.getElementById('closePlayerButton');
+
+        let currentPath = '/';
+        let currentMediaDir = null;
+        let currentFiles = []; // 保存当前目录的文件列表
+        let scrollPositions = {}; // 保存每个路径的滚动位置
+
+        // 添加排序相关的变量
+        const sortBy = document.getElementById('sortBy');
+        const sortOrder = document.getElementById('sortOrder');
+
+        // 添加事件监听器
+        sortBy.addEventListener('change', sortAndDisplayFiles);
+        sortOrder.addEventListener('change', sortAndDisplayFiles);
+        document.getElementById('mixSort').addEventListener('change', sortAndDisplayFiles);
+        
+        // 排序下拉菜单控制
+        const sortMenuButton = document.getElementById('sortMenuButton');
+        const sortDropdown = document.getElementById('sortDropdown');
+        
+        // 点击按钮切换下拉菜单显示/隐藏
+        sortMenuButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            sortDropdown.classList.toggle('hidden');
+        });
+        
+        // 点击页面其他地方隐藏下拉菜单
+        document.addEventListener('click', function(e) {
+            if (!sortMenuButton.contains(e.target) && !sortDropdown.contains(e.target)) {
+                sortDropdown.classList.add('hidden');
+            }
+        });
+ 
+        // 获取根目录媒体目录列表并展示
+        async function fetchRootDirs() {
+            try {
+                const response = await fetch('/api/root-dirs');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const dirs = await response.json();
+                
+                // 显示根目录网格
+                rootDirsGrid.classList.remove('hidden');
+                fileGrid.classList.add('hidden');
+                fileGrid.innerHTML = ''; // 清空文件网格
+                backButton.classList.add('hidden');
+                homeButton.classList.add('hidden');
+                currentPathSpan.textContent = '根目录';
+                
+                // 清空现有内容
+                rootDirsGrid.innerHTML = '';
+                
+                // 展示每个媒体目录
+                dirs.forEach(dir => {
+                    const gridItem = document.createElement('div');
+                    gridItem.className = 'grid-item';
+                    
+                    // 创建缩略图容器
+                    const thumbnailContainer = document.createElement('div');
+                    thumbnailContainer.className = 'thumbnail-container';
+                    
+                    // 创建文件夹图标
+                    const icon = document.createElement('div');
+                    icon.className = 'icon';
+                    icon.innerHTML = '&#128193;'; // 文件夹图标
+                    thumbnailContainer.appendChild(icon);
+                    
+                    // 创建文件信息容器
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'file-info';
+                    
+                    // 创建目录名元素
+                    const dirName = document.createElement('div');
+                    dirName.className = 'file-name';
+                    dirName.textContent = dir.alias || dir.path; // 显示别名或路径
+                    
+                    // 创建路径元素
+                    const dirPath = document.createElement('div');
+                    dirPath.className = 'file-size';
+                    dirPath.textContent = dir.path;
+                    
+                    // 组装文件信息
+                    fileInfo.appendChild(dirName);
+                    fileInfo.appendChild(dirPath);
+                    
+                    // 组装网格项
+                    gridItem.appendChild(thumbnailContainer);
+                    gridItem.appendChild(fileInfo);
+                    
+                    // 添加点击事件
+                    gridItem.onclick = () => switchMediaDir(dir.path);
+                    
+                    // 添加到网格容器
+                    rootDirsGrid.appendChild(gridItem);
+                });
+                history.replaceState({ path: 'root' }, '', '#'); // 确保回到根目录时清除历史记录
+            } catch (error) {
+                console.error('Error fetching root directories:', error);
+                rootDirsGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载目录失败: ${error.message}</div></div>`;
+            }
+        }
+
+        // 切换媒体目录
+        // 增加 currentPath 参数，允许在切换媒体目录后直接导航到指定路径
+        async function switchMediaDir(newDir, targetPath = '/') {
+            try {
+                const response = await fetch('/api/set-media-dir', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ dir: newDir })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                if (result.success) {
+                    currentMediaDir = result.newMediaDir;
+                    currentPath = targetPath; // 切换目录后设置为目标路径
+                    updatePathDisplay();
+                    await fetchFiles(currentPath);
+                    // 隐藏根目录网格，显示文件网格
+                    rootDirsGrid.classList.add('hidden');
+                    fileGrid.classList.remove('hidden');
+                    console.log(`Switched to media directory: ${result.newMediaDir}`);
+                    
+                    // 更新浏览器历史记录
+                    history.replaceState({ path: currentPath, mediaDir: newDir }, '', `#${currentPath}`);
+                } else {
+                    console.error('Failed to switch media directory:', result.message);
+                }
+            } catch (error) {
+                console.error('Error switching media directory:', error);
+            }
+        }
+
+        async function fetchFiles(relativePath) {
+            try {
+                // 对路径进行编码以防止特殊字符（如 #）引起的问题
+                const encodedRelativePath = relativePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                const fetchUrl = `/list${encodedRelativePath === '/' ? '' : encodedRelativePath}`;
+                const response = await fetch(fetchUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const files = await response.json();
+                currentFiles = files; // 保存文件列表
+                sortAndDisplayFiles(); // 应用当前排序
+            } catch (error) {
+                console.error('Error fetching files:', error);
+                fileGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载文件失败: ${error.message}</div></div>`;
+            }
+        }
+
+        async function sortAndDisplayFiles() {
+            const sortTypeValue = sortBy.value;
+            const sortOrderValue = sortOrder.value;
+
+            // Step 1: Sort the files based on current settings
+            if (sortTypeValue === 'time') {
+                try {
+                    const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    currentFiles = await response.json();
+                } catch (error) {
+                    console.error('Error sorting by time:', error);
+                    return; // Exit if sorting fails
+                }
+            } else {
+                currentFiles.sort((a, b) => {
+                    const mixSort = document.getElementById('mixSort').checked;
+
+                    if (!mixSort) {
+                        if (a.isDirectory && !b.isDirectory) return -1;
+                        if (!a.isDirectory && b.isDirectory) return 1;
+                    }
+
+                    // 当启用混合排序且按名称排序时，优先按首字母分组排序
+                    if (mixSort && sortTypeValue === 'name') {
+                        const groupA = getCharGroup(a.name.charAt(0));
+                        const groupB = getCharGroup(b.name.charAt(0));
+                        
+                        // 定义分组的排序顺序
+                        const groupOrder = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), 'あ', '汉', '@', '...'];
+                        const indexA = groupOrder.indexOf(groupA);
+                        const indexB = groupOrder.indexOf(groupB);
+                        
+                        if (indexA !== indexB) {
+                            return sortOrderValue === 'asc' ? indexA - indexB : indexB - indexA;
+                        }
+                        
+                        // 同一分组内按文件名排序
+                        const compareA = a.name.toLowerCase();
+                        const compareB = b.name.toLowerCase();
+                        
+                        if (compareA < compareB) {
+                            return -1;
+                        }
+                        if (compareA > compareB) {
+                            return 1;
+                        }
+                        return 0;
+                    }
+                    
+                    let compareA, compareB;
+                    switch (sortTypeValue) {
+                        case 'name':
+                            compareA = a.name.toLowerCase();
+                            compareB = b.name.toLowerCase();
+                            break;
+                        case 'type':
+                            compareA = a.isDirectory ? '' : a.name.split('.').pop().toLowerCase();
+                            compareB = b.isDirectory ? '' : b.name.split('.').pop().toLowerCase();
+                            break;
+                        default: // default to name sort
+                            compareA = a.name.toLowerCase();
+                            compareB = b.name.toLowerCase();
+                    }
+
+                    if (compareA < compareB) {
+                        return sortOrderValue === 'asc' ? -1 : 1;
+                    }
+                    if (compareA > compareB) {
+                        return sortOrderValue === 'asc' ? 1 : -1;
+                    }
+                    return 0;
+                });
+            }
+
+            // Step 2: Display the sorted files
+            displayFiles(currentFiles);
+
+            // Step 3: Update the sidebar based on the new sort order and settings
+            const sidebar = document.getElementById('sidebar');
+            const mixSortChecked = document.getElementById('mixSort').checked;
+            const shouldShowSidebar = mixSortChecked && sortTypeValue === 'name';
+
+            if (shouldShowSidebar) {
+                updateSidebar();
+                sidebar.classList.remove('hidden');
+            } else {
+                // 确保侧边栏被隐藏
+                sidebar.classList.add('hidden');
+                // 清空侧边栏内容
+                sidebar.innerHTML = '';
+            }
+        }
+
+        function displayFiles(files) {
+            fileGrid.innerHTML = ''; // 清空现有网格
+            videoPlayerContainer.classList.add('hidden'); // 隐藏视频播放器
+
+            // 添加返回上一级按钮和返回主目录按钮
+            if (currentPath !== '/') {
+                backButton.classList.remove('hidden');
+                homeButton.classList.remove('hidden');
+            } else {
+                backButton.classList.add('hidden');
+                homeButton.classList.remove('hidden'); // 在根目录也显示返回主目录按钮
+            }
+
+            files.forEach(file => {
+                // 创建网格项容器
+                const gridItem = document.createElement('div');
+                gridItem.className = 'grid-item';
+                // 使用更安全的方式生成文件项ID，与侧边栏按钮点击处理保持一致
+                gridItem.id = `file-${encodeURIComponent(file.name)}`;
+
+                if (file.isDirectory) {
+                    gridItem.classList.add('is-directory');
+                } else {
+                    gridItem.classList.add('is-file');
+                    const extension = file.name.split('.').pop().toLowerCase();
+                    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                    const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv','wmv'].includes(extension);
+                    const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
+
+                    if (isImage) {
+                        gridItem.classList.add('is-image');
+                    } else if (isVideo) {
+                        gridItem.classList.add('is-video');
+                    } else if (isAudio) {
+                        gridItem.classList.add('is-audio');
+                    }
+                }
+
+                // 创建缩略图容器
+                const thumbnailContainer = document.createElement('div');
+                thumbnailContainer.className = 'thumbnail-container';
+
+                // 创建文件信息容器
+                const fileInfo = document.createElement('div');
+                fileInfo.className = 'file-info';
+
+                // 创建文件名元素
+                const fileName = document.createElement('div');
+                fileName.className = 'file-name';
+                fileName.textContent = file.name;
+
+                // 创建文件大小元素
+                const fileSize = document.createElement('div');
+                fileSize.className = 'file-size';
+                fileSize.textContent = file.isDirectory ? '文件夹' : formatBytes(file.size);
+
+                // 创建操作按钮容器
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'actions';
+
+                if (file.isDirectory) {
+                    const img = document.createElement('img');
+                    img.className = 'thumbnail lazy';
+                    img.loading = 'lazy';
+                    
+                    const folderPath = path.join(currentPath, file.name);
+                    // 确保 encodedFolderPath 不以斜杠开头，除非是根路径
+                    let cleanedFolderPath = folderPath.replace(/^[/\\]+/, ''); // 移除所有前导斜杠
+                    if (cleanedFolderPath === '') { // 如果是根目录，则保持为空字符串
+                        cleanedFolderPath = '';
+                    }
+
+                    const encodedFolderPath = cleanedFolderPath.split(/[/\\]+/).map(segment => encodeURIComponent(segment)).join('/');
+                    
+                    img.dataset.src = `/api/folder-thumbnail/${encodedFolderPath}?mediaDir=${encodeURIComponent(currentMediaDir)}`;
+                    img.alt = file.name;
+                    img.onerror = function() {
+                        // 如果缩略图加载失败，显示默认文件夹图标
+                        this.parentNode.innerHTML = '<div class="icon">&#128193;</div>';
+                    };
+                    thumbnailContainer.appendChild(img);
+
+                    // 文件夹点击事件
+                    gridItem.onclick = () => navigateTo(file.name);
+                } else {
+                    // 为文件创建缩略图或图标
+                    const extension = file.name.split('.').pop().toLowerCase();
+                    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                    const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv','wmv'].includes(extension);
+                    const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
+                    const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                    const encodedFileName = encodeURIComponent(file.name);
+
+                    if (isImage) {
+                        // 图片文件显示缩略图，并用 a 标签包裹以支持 Fancybox
+                        const a = document.createElement('a');
+                        const imageUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+                        a.href = imageUrl;
+                        // a.dataset.fancybox = 'gallery'; // 移除自动扫描触发器
+                        a.dataset.caption = file.name;
+ 
+                        const img = document.createElement('img');
+                        img.className = 'thumbnail lazy';
+                        img.loading = 'lazy';
+                        const thumbnailPath = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+                        img.dataset.src = `/thumbnail${thumbnailPath}`;
+                        img.alt = file.name;
+                        img.onerror = function() {
+                            a.parentNode.innerHTML = '<div class="icon">&#128196;</div>'; // 替换为图标
+                        };
+                        a.appendChild(img);
+                        thumbnailContainer.appendChild(a);
+                    } else if (isVideo) {
+                        // 视频文件显示缩略图
+                        const img = document.createElement('img');
+                        img.className = 'thumbnail lazy'; // 添加 lazy 类
+                        img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                        // 使用服务器端生成的缩略图
+                        const thumbnailPath = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+                        img.dataset.src = `/thumbnail${thumbnailPath}`; // 改为 data-src
+                        img.alt = file.name;
+                        img.onerror = function() {
+                            // 如果缩略图加载失败，显示默认视频图标
+                            thumbnailContainer.innerHTML = '';
+                            const icon = document.createElement('div');
+                            icon.className = 'icon';
+                            icon.innerHTML = '&#128249;'; // 视频图标
+                            thumbnailContainer.appendChild(icon);
+                        };
+                        thumbnailContainer.appendChild(img);
+                    } else if (isAudio) {
+                        const icon = document.createElement('div');
+                        icon.className = 'icon';
+                        icon.innerHTML = '&#127925;'; // 音乐图标
+                        thumbnailContainer.appendChild(icon);
+                    } else {
+                        // 其他文件类型显示默认图标
+                        const icon = document.createElement('div');
+                        icon.className = 'icon';
+                        icon.innerHTML = '&#128196;'; // 文件图标
+                        thumbnailContainer.appendChild(icon);
+                    }
+
+                    gridItem.onclick = (e) => {
+                        if (isImage) {
+                            e.preventDefault(); // 阻止 a 标签的默认跳转行为
+                            const imageFiles = currentFiles.filter(f => {
+                                const ext = f.name.split('.').pop().toLowerCase();
+                                return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
+                            });
+
+                            const gallery = imageFiles.map(imgFile => {
+                                const imgEncodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+                                const imgEncodedFileName = encodeURIComponent(imgFile.name);
+                                const imgUrl = `${imgEncodedPath === '/' ? '' : imgEncodedPath}/${imgEncodedFileName}`.replace(/\\/g, '/');
+                                return {
+                                    src: imgUrl,
+                                    opts: { caption: imgFile.name }
+                                };
+                            });
+
+                            const currentIndex = imageFiles.findIndex(imgFile => imgFile.name === file.name);
+
+                            $.fancybox.open(gallery, {
+                                loop: true,
+                                thumbs: { autoStart: true }
+                            }, currentIndex);
+
+                        } else if (e.target.tagName.toLowerCase() !== 'img') {
+                            if (isVideo) {
+                                playVideo(file.name);
+                            } else if (isAudio) {
+                                playMusic(file.name);
+                            } else {
+                                downloadFile(file.name);
+                            }
+                        }
+                    };
+
+                    // 如果是视频文件，添加播放按钮
+                    if (isVideo) {
+                        const playButton = document.createElement('button');
+                        playButton.textContent = '播放';
+                        playButton.className = 'play-btn';
+                        playButton.onclick = (e) => {
+                            e.stopPropagation(); // 阻止网格项的点击事件
+                            playVideo(file.name);
+                        };
+                        actionsDiv.appendChild(playButton);
+                    } else if (isAudio) {
+                        const playButton = document.createElement('button');
+                        playButton.textContent = '播放';
+                        playButton.className = 'play-btn';
+                        playButton.onclick = (e) => {
+                            e.stopPropagation();
+                            playMusic(file.name);
+                        };
+                        actionsDiv.appendChild(playButton);
+
+                        // 添加“添加到播放列表”按钮
+                        const addToPlaylistButton = document.createElement('button');
+                        addToPlaylistButton.textContent = '添加';
+                        addToPlaylistButton.title = '添加到播放列表';
+                        addToPlaylistButton.className = 'add-to-playlist-btn';
+                        addToPlaylistButton.onclick = (e) => {
+                            e.stopPropagation();
+                            addToPlaylist(file);
+                        };
+                        actionsDiv.appendChild(addToPlaylistButton);
+                    }
+
+                    // 添加下载按钮
+                    const downloadButton = document.createElement('button');
+                    downloadButton.textContent = '下载';
+                    downloadButton.className = 'download-btn';
+                    downloadButton.onclick = (e) => {
+                        e.stopPropagation(); // 阻止网格项的点击事件
+                        downloadFile(file.name);
+                    };
+                    actionsDiv.appendChild(downloadButton);
+                }
+
+                // 组装文件信息
+                fileInfo.appendChild(fileName);
+                fileInfo.appendChild(fileSize);
+                fileInfo.appendChild(actionsDiv);
+
+                // 组装网格项
+                gridItem.appendChild(thumbnailContainer);
+                gridItem.appendChild(fileInfo);
+
+                // 添加到网格容器
+                fileGrid.appendChild(gridItem);
+            });
+        }
+
+        // 更新侧边栏导航
+        function updateSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.innerHTML = ''; // 清空现有按钮
+
+            if (!currentFiles || currentFiles.length === 0) {
+                sidebar.classList.add('hidden');
+                return;
+            }
+
+            // 提取首字母并去重
+            let firstChars = [...new Set(currentFiles.map(file => getCharGroup(file.name.charAt(0))))];
+
+            // 对首字母进行排序，以确保一致性
+            firstChars.sort((a, b) => {
+                const order = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), 'あ', '汉', '@', '...'];
+                const indexA = order.indexOf(a);
+                const indexB = order.indexOf(b);
+
+                if (indexA !== -1 && indexB !== -1) {
+                    return indexA - indexB;
+                }
+                if (indexA !== -1) return -1;
+                if (indexB !== -1) return 1;
+                return a.localeCompare(b); // For any other characters
+            });
+
+            // 根据排序顺序调整侧边栏按钮顺序
+            const sortOrderValue = document.getElementById('sortOrder').value;
+            if (sortOrderValue === 'desc') {
+                firstChars.reverse();
+            }
+
+            // 创建并添加按钮
+            firstChars.forEach(char => {
+                const btn = document.createElement('button');
+                btn.className = 'sidebar-btn';
+                btn.textContent = char;
+                btn.onclick = () => {
+                    // 移除所有按钮的 active 状态
+                    document.querySelectorAll('.sidebar-btn.active').forEach(b => b.classList.remove('active'));
+                    // 给当前按钮添加 active 状态
+                    btn.classList.add('active');
+
+                    // 查找当前排序下第一个匹配字符组的文件
+                    const targetFile = currentFiles.find(file => getCharGroup(file.name.charAt(0)) === char);
+
+                    if (targetFile) {
+                        // 使用更安全的方式生成和查找元素ID
+                        const fileId = `file-${encodeURIComponent(targetFile.name)}`;
+                        const targetElement = document.getElementById(fileId);
+                        if (targetElement) {
+                            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            // 如果通过encodeURI生成的ID找不到元素，则尝试其他可能的ID格式
+                            const fallbackId = `file-${targetFile.name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '-')}`;
+                            const fallbackElement = document.getElementById(fallbackId);
+                            if (fallbackElement) {
+                                fallbackElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }
+                    }
+                };
+                sidebar.appendChild(btn);
+            });
+            
+            // 如果有按钮，则显示侧边栏
+            if (firstChars.length > 0) {
+                sidebar.classList.remove('hidden');
+                enableSidebarScrubbing(sidebar); // 启用滑动功能
+            } else {
+                sidebar.classList.add('hidden');
+            }
+        }
+
+        function navigateTo(folderName) {
+            // 保存导航前的滚动位置
+            scrollPositions[currentPath] = window.scrollY;
+
+            currentPath = path.join(currentPath, folderName);
+            updatePathDisplay();
+            fetchFiles(currentPath).then(() => {
+                // 加载新内容后滚动到顶部
+                window.scrollTo(0, 0);
+            });
+            // 将新路径推入浏览器历史记录
+            history.pushState({ path: currentPath, mediaDir: currentMediaDir }, '', '#' + currentPath);
+        }
+
+        backButton.onclick = async () => {
+            // 返回前保存当前滚动位置
+            scrollPositions[currentPath] = window.scrollY;
+            // 在导航前通知后端停止缩略图生成
+            await fetch('/api/stop-thumbnail-generation', { method: 'POST' });
+            // 使用浏览器历史记录的back方法，让onpopstate处理实际导航
+            history.back();
+        };
+
+        homeButton.onclick = async () => {
+            // 返回主目录前保存当前滚动位置
+            scrollPositions[currentPath] = window.scrollY;
+            // 在导航前通知后端停止缩略图生成
+            await fetch('/api/stop-thumbnail-generation', { method: 'POST' });
+            fetchRootDirs();
+            // 更新浏览器历史记录
+            history.replaceState({ path: 'root' }, '', '#');
+        };
+
+        function updatePathDisplay() {
+            currentPathSpan.textContent = currentPath === '/' ? '/' : currentPath.replace(/\\/g, '/'); // 统一显示为斜杠
+        }
+
+        function playVideo(fileName) {
+            // 视频URL不再需要 /list 前缀
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const videoUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/'); // 统一URL斜杠，并编码路径和文件名
+            
+            // 在新窗口中打开视频播放页面，添加mediaDir参数
+            const videoPageUrl = `video-player.html?src=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
+            window.open(videoPageUrl, '_blank');
+        }
+
+        function playMusic(fileName) {
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const musicUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            
+            const musicPageUrl = `music-player.html?src=${encodeURIComponent(musicUrl)}&title=${encodeURIComponent(fileName)}&mediaDir=${encodeURIComponent(currentMediaDir)}`;
+            window.open(musicPageUrl, '_blank');
+        }
+
+        function showNotification(message) {
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            notification.style.position = 'fixed';
+            notification.style.bottom = '20px';
+            notification.style.left = '50%';
+            notification.style.transform = 'translateX(-50%)';
+            notification.style.backgroundColor = '#28a745';
+            notification.style.color = 'white';
+            notification.style.padding = '10px 20px';
+            notification.style.borderRadius = '5px';
+            notification.style.zIndex = '2000';
+            notification.style.opacity = '0';
+            notification.style.transition = 'opacity 0.5s';
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.opacity = '1';
+            }, 10);
+
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 500);
+            }, 3000);
+        }
+
+        function addToPlaylist(file) {
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(file.name);
+            const musicUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            const finalSrc = `${decodeURIComponent(musicUrl)}?mediaDir=${encodeURIComponent(currentMediaDir)}`;
+
+            const parts = file.name.replace(/\.\w+$/, '').split(' - ');
+            let artist = '未知艺术家';
+            let title = parts[0];
+            if (parts.length > 1) {
+                artist = parts[0];
+                title = parts.slice(1).join(' - ');
+            }
+
+            const song = {
+                title: title,
+                artist: artist,
+                src: finalSrc,
+                cover: 'cover.jpg', // Default cover
+                lrc: null
+            };
+
+            let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+
+            // Check for duplicates based on src
+            if (playlist.some(pSong => pSong.src === song.src)) {
+                showNotification(`'${song.title}' 已经在播放列表中`);
+                return;
+            }
+
+            playlist.push(song);
+            localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+            showNotification(`'${song.title}' 已添加到播放列表`);
+        }
+
+        closePlayerButton.onclick = () => {
+            videoPlayer.pause();
+            videoPlayer.src = ''; // 清空 src 停止加载
+            videoPlayerContainer.classList.add('hidden');
+        };
+
+        function downloadFile(fileName) {
+            // 下载URL不再需要 /list 前缀
+            const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+            const encodedFileName = encodeURIComponent(fileName);
+            const fileUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
+            const a = document.createElement('a');
+            a.href = fileUrl;
+            a.download = fileName; // 强制下载
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+
+        // 简单的路径拼接和获取目录名函数，因为浏览器环境没有 Node.js 的 path 模块
+        const path = {
+            join: (...segments) => {
+                // 确保所有段都是字符串，并去除多余的斜杠
+                const parts = segments.map(s => String(s).replace(/[/\\]+/g, '/').replace(/^\/|\/$/g, ''));
+                let result = parts.filter(s => s !== '').join('/');
+                // 确保以 '/' 开头
+                if (!result.startsWith('/')) {
+                    result = '/' + result;
+                }
+                return result;
+            },
+            dirname: (p) => {
+                const parts = p.split(/[/\\]/).filter(part => part !== '');
+                if (parts.length <= 1) return '/'; // 根目录或只有一个文件/文件夹时返回根目录
+                parts.pop(); // 移除最后一个部分
+                return '/' + parts.join('/');
+            }
+        };
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+
+        // Intersection Observer for lazy loading
+        const lazyLoadImages = () => {
+            const lazyImages = document.querySelectorAll('img.lazy');
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        img.src = img.dataset.src;
+                        img.classList.remove('lazy');
+                        observer.unobserve(img);
+                    }
+                });
+            }, {
+                rootMargin: '0px 0px 100px 0px' // Load images 100px before they enter viewport
+            });
+
+            lazyImages.forEach(img => {
+                observer.observe(img);
+            });
+        };
+
+        // 重新显示文件时调用懒加载
+        const originalDisplayFiles = displayFiles;
+        displayFiles = (files) => {
+            originalDisplayFiles(files);
+            lazyLoadImages();
+        };
+
+        // 处理浏览器后退按钮
+        window.onpopstate = function(event) {
+            if (event.state) {
+                const restoreScroll = () => {
+                    const savedPosition = scrollPositions[event.state.path];
+                    if (typeof savedPosition === 'number') {
+                        // 使用setTimeout确保在DOM更新后执行滚动
+                        setTimeout(() => window.scrollTo(0, savedPosition), 0);
+                    }
+                };
+                
+                if (event.state.path === 'root' || !event.state.path) {
+                    // 返回根目录媒体目录展示
+                    fetchRootDirs();
+                } else if (event.state.mediaDir) {
+                    // 切换到指定的媒体目录，并导航到相应的路径
+                    switchMediaDir(event.state.mediaDir, event.state.path).then(restoreScroll);
+                } else if (event.state.path) {
+                    // 导航到指定路径
+                    currentPath = event.state.path;
+                    updatePathDisplay();
+                    fetchFiles(currentPath).then(restoreScroll);
+                }
+            } else {
+                // 如果没有状态，返回根目录
+                fetchRootDirs();
+            }
+        };
+
+        // 搜索功能相关代码
+        const searchForm = document.getElementById('searchForm');
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const searchHelpButton = document.getElementById('searchHelpButton');
+        const searchOptions = document.getElementById('searchOptions');
+        const matchCase = document.getElementById('matchCase');
+        const matchWholeWord = document.getElementById('matchWholeWord');
+        const useRegex = document.getElementById('useRegex');
+        const maxResults = document.getElementById('maxResults');
+
+        // 切换搜索选项显示/隐藏
+        searchHelpButton.onclick = () => {
+            const computedStyle = window.getComputedStyle(searchOptions);
+            searchOptions.style.display = computedStyle.display === 'none' ? 'block' : 'none';
+        };
+
+        // 处理搜索表单提交
+        searchForm.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const query = searchInput.value.trim();
+            if (!query) {
+                alert('请输入搜索关键词');
+                return;
+            }
+            
+            // 收集搜索选项
+            const options = {
+                query: query,
+                matchCase: matchCase.checked,
+                matchWholeWord: matchWholeWord.checked,
+                useRegex: useRegex.checked,
+                maxResults: parseInt(maxResults.value) || 100,
+                searchType: document.querySelector('input[name="searchType"]:checked').value,
+                mediaDir: currentMediaDir
+            };
+            
+            // 在新标签页中打开搜索结果页面
+            const searchParams = new URLSearchParams(options);
+            const searchUrl = `search-results.html?${searchParams.toString()}`;
+            window.open(searchUrl, '_blank');
+        };
+
+        // 初始加载
+        // 检查URL参数，看是否从搜索结果页面跳转过来
+        const initialUrlParams = new URLSearchParams(window.location.search);
+        const initialMediaDir = initialUrlParams.get('mediaDir');
+        const initialPath = initialUrlParams.get('path') || '/';
+
+        if (initialMediaDir) {
+            // 如果有 mediaDir 参数，说明是从搜索结果页跳转过来，直接切换媒体目录并导航到指定路径
+            switchMediaDir(initialMediaDir, initialPath);
+        } else {
+            // 否则，正常加载根目录媒体目录列表
+            fetchRootDirs();
+            // 设置初始历史状态
+            history.replaceState({ path: 'root' }, '', '#');
+        }
+        
+        // 实现侧边栏长按滑动功能
+        function enableSidebarScrubbing(sidebar) {
+            let isScrubbing = false;
+            let lastTargetButton = null;
+
+            const handleMove = (y) => {
+                if (!isScrubbing) return;
+
+                const button = document.elementFromPoint(sidebar.getBoundingClientRect().left + 10, y);
+                if (button && button.classList.contains('sidebar-btn') && button !== lastTargetButton) {
+                    
+                    // 移除之前按钮的 active 状态
+                    if(lastTargetButton) {
+                        lastTargetButton.classList.remove('active');
+                    }
+
+                    // 触发点击事件并更新 active 状态
+                    button.click();
+                    button.classList.add('active');
+                    lastTargetButton = button;
+                }
+            };
+
+            const startScrubbing = (e) => {
+                e.preventDefault();
+                isScrubbing = true;
+                sidebar.style.userSelect = 'none'; // 防止滑动时选中文本
+                document.body.style.cursor = 'ns-resize';
+                
+                const y = e.clientY || e.touches[0].clientY;
+                handleMove(y);
+            };
+
+            const stopScrubbing = () => {
+                if (!isScrubbing) return;
+                isScrubbing = false;
+                sidebar.style.userSelect = '';
+                document.body.style.cursor = '';
+                // 移除所有 active 状态，而不仅仅是 lastTargetButton
+                setTimeout(() => {
+                    document.querySelectorAll('.sidebar-btn.active').forEach(b => b.classList.remove('active'));
+                }, 300);
+                lastTargetButton = null;
+            };
+            
+            sidebar.addEventListener('mousedown', startScrubbing);
+            sidebar.addEventListener('touchstart', startScrubbing, { passive: false });
+
+            document.addEventListener('mousemove', (e) => {
+                if(isScrubbing) handleMove(e.clientY);
+            });
+            document.addEventListener('touchmove', (e) => {
+                if(isScrubbing) handleMove(e.touches[0].clientY);
+            }, { passive: false });
+
+            document.addEventListener('mouseup', stopScrubbing);
+            document.addEventListener('touchend', stopScrubbing);
+        }
+
+        // 缓存管理
+        const cacheManagerButton = document.getElementById('cacheManagerButton');
+        const cacheInfoPanel = document.getElementById('cache-info-panel');
+
+        cacheManagerButton.onclick = () => {
+            const isHidden = cacheInfoPanel.style.display === 'none' || cacheInfoPanel.style.display === '';
+            if (isHidden) {
+                fetchCacheInfo();
+                cacheInfoPanel.style.display = 'block';
+            } else {
+                cacheInfoPanel.style.display = 'none';
+            }
+        };
+
+        async function fetchCacheInfo() {
+            try {
+                const response = await fetch('/api/cache-info');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success) {
+                    displayCacheInfo(data.cacheSizes, data.totalSize);
+                } else {
+                    console.error('Failed to fetch cache info:', data.message);
+                }
+            } catch (error) {
+                console.error('Error fetching cache info:', error);
+            }
+        }
+
+        function displayCacheInfo(cacheSizes, totalSize) {
+            const totalCacheSizeSpan = document.getElementById('totalCacheSize');
+            const cacheInfoTbody = document.getElementById('cache-info-tbody');
+
+            totalCacheSizeSpan.textContent = formatBytes(totalSize);
+            cacheInfoTbody.innerHTML = '';
+
+            cacheSizes.forEach(cache => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${cache.name}</td>
+                    <td>${formatBytes(cache.size)}</td>
+                    <td>${cache.fileCount}</td>
+                    <td>
+                        <button class="delete-cache-btn" data-dir="${cache.name}" ${cache.fileCount === 0 ? 'disabled' : ''}>
+                            删除
+                        </button>
+                    </td>
+                `;
+                cacheInfoTbody.appendChild(row);
+            });
+
+            // Add event listeners to delete buttons
+            document.querySelectorAll('.delete-cache-btn').forEach(button => {
+                button.onclick = (e) => {
+                    const item = e.target.dataset.dir; // Keep using 'dir' dataset for simplicity
+                    if (confirm(`确定要清空缓存项 '${item}' 吗？`)) {
+                        clearCacheItem(item);
+                    }
+                };
+            });
+        }
+
+        async function clearCacheItem(item) {
+            try {
+                const response = await fetch('/api/clear-cache-item', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ item })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showNotification(`缓存项 '${item}' 已清空`);
+                    fetchCacheInfo(); // Refresh cache info
+                } else {
+                    alert(`清空缓存失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('Error clearing cache item:', error);
+                alert('清空缓存时发生错误');
+            }
+        }
+
+        // 视频刮削
+        const scraperManagerButton = document.getElementById('scraperManagerButton');
+        const scraperPanel = document.getElementById('scraper-panel');
+        const closeScraperPanelButton = document.getElementById('closeScraperPanelButton');
+        const startScrapingButton = document.getElementById('startScrapingButton');
+        const scraperTaskList = document.getElementById('scraper-task-list');
+
+        scraperManagerButton.onclick = () => {
+            scraperPanel.classList.toggle('hidden');
+        };
+
+        closeScraperPanelButton.onclick = () => {
+            scraperPanel.classList.add('hidden');
+        };
+
+        startScrapingButton.onclick = async () => {
+            const selectedType = document.querySelector('input[name="scrapeType"]:checked').value;
+            if (!currentPath || !currentMediaDir) {
+                alert('无法确定当前目录，请先进入一个媒体目录。');
+                return;
+            }
+
+            scraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动刮削任务...</span></li>';
+
+            try {
+                const response = await fetch('/api/scrape-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        path: currentPath,
+                        mediaDir: currentMediaDir,
+                        type: selectedType
+                    })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
+                }
+            } catch (error) {
+                 scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动刮削任务时出错: ${error.message}</span></li>`;
+            }
+        };
+
+        // WebSocket for progress updates
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+
+        ws.onopen = () => {
+            console.log('WebSocket connection established for scraping updates.');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'scrape_start') {
+                scraperTaskList.innerHTML = ''; // Clear previous messages
+                data.files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.id = `task-${file.id}`;
+                    li.innerHTML = `<span class="task-name">${file.name}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                    scraperTaskList.appendChild(li);
+                });
+            } else if (data.type === 'scrape_progress') {
+                const taskItem = document.getElementById(`task-${data.file.id}`);
+                if (taskItem) {
+                    taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
+                }
+            } else if (data.type === 'scrape_complete') {
+                const taskItem = document.getElementById(`task-${data.file.id}`);
+                if (taskItem) {
+                    if (data.result.success) {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
+                    } else {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '"')}">失败: ${data.result.error || data.result.message}</span>`;
+                    }
+                }
+            } else if (data.type === 'scrape_finished_all') {
+                const li = document.createElement('li');
+                li.innerHTML = `<strong>所有任务已完成!</strong>`;
+                scraperTaskList.appendChild(li);
+            } else if (data.type === 'scrape_error') {
+                 scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '"')}">错误: ${data.message}</span></li>`;
+            } else if (data.type === 'music_scrape_start') {
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                // 始终清空并渲染所有文件项，防止被“正在启动”提示覆盖
+                musicScraperTaskList.innerHTML = '';
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.id = `music-task-${file.id}`;
+                        // 文件名显示为相对路径（带子目录），更直观
+                        let displayName = file.name;
+                        if (displayName.startsWith('./') || displayName.startsWith('.\\')) {
+                            displayName = displayName.slice(2);
+                        }
+                        li.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                        musicScraperTaskList.appendChild(li);
+                    });
+                } else {
+                    musicScraperTaskList.innerHTML = '<li><span class="task-status-failed">未找到任何音乐文件</span></li>';
+                }
+            } else if (data.type === 'music_scrape_progress') {
+                const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                if (taskItem) {
+                    taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
+                }
+            } else if (data.type === 'music_scrape_complete') {
+                const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                if (taskItem) {
+                    if (data.result.success) {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
+                    } else {
+                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '"')}">失败: ${data.result.error || data.result.message}</span>`;
+                    }
+                }
+            } else if (data.type === 'music_scrape_finished_all') {
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                const li = document.createElement('li');
+                li.innerHTML = `<strong>所有音乐刮削任务已完成!</strong>`;
+                musicScraperTaskList.appendChild(li);
+            }
+        };
+
+        // 音乐刮削
+        const musicScraperManagerButton = document.getElementById('musicScraperManagerButton');
+        const musicScraperPanel = document.getElementById('music-scraper-panel');
+        const closeMusicScraperPanelButton = document.getElementById('closeMusicScraperPanelButton');
+        const startMusicScrapingButton = document.getElementById('startMusicScrapingButton');
+        const musicScraperTaskList = document.getElementById('music-scraper-task-list'); // 修正：提前获取
+
+        musicScraperManagerButton.onclick = () => {
+            musicScraperPanel.classList.toggle('hidden');
+        };
+
+        closeMusicScraperPanelButton.onclick = () => {
+            musicScraperPanel.classList.add('hidden');
+        };
+
+        startMusicScrapingButton.onclick = async () => {
+            const selectedSource = document.querySelector('input[name="musicScrapeSource"]:checked').value;
+            if (!currentPath || !currentMediaDir) {
+                alert('无法确定当前目录，请先进入一个媒体目录。');
+                return;
+            }
+            // 启动时先清空队列
+            musicScraperTaskList.innerHTML = '';
+            try {
+                const response = await fetch('/api/scrape-music-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        path: currentPath,
+                        mediaDir: currentMediaDir,
+                        source: selectedSource
+                    })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
+                } else {
+                    // 启动成功时显示启动提示
+                    musicScraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动音乐刮削任务...</span></li>';
+                }
+            } catch (error) {
+                musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动音乐刮削任务时出错: ${error.message}</span></li>`;
+            }
+        };
+    });
+</script>
+    <script src="vendor/jquery-3.5.1.min.js"></script>
+    <script src="vendor/jquery.fancybox.min.js"></script>
+    <!-- 视频刮削面板 -->
+    <div id="scraper-panel" class="hidden">
+        <button id="closeScraperPanelButton">&times;</button>
+        <h2>视频刮削</h2>
+        <div class="scraper-controls">
+            <p>请选择要刮削的视频类型：</p>
+            <div class="scraper-type-options">
+                <label><input type="radio" name="scrapeType" value="movie"> 电影</label>
+                <label><input type="radio" name="scrapeType" value="tv"> 电视剧</label>
+                <label><input type="radio" name="scrapeType" value="anime"> 动漫</label>
+                <label><input type="radio" name="scrapeType" value="jav" checked> JAV</label>
+                <label><input type="radio" name="scrapeType" value="fc2"> FC2</label>
+            </div>
+            <button id="startScrapingButton">开始刮削当前目录</button>
+        </div>
+        <div class="scraper-queue">
+            <h3>任务队列</h3>
+            <ul id="scraper-task-list">
+                <!-- 任务项将动态插入此处 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 音乐刮削面板 -->
+    <div id="music-scraper-panel" class="hidden" style="width: 450px; position: fixed; bottom: 20px; right: 20px; max-height: 60vh; background-color: rgba(60, 60, 63, 0.85); border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); z-index: 1001; padding: 20px; display: flex; flex-direction: column; color: #e0e0e0; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+        <button id="closeMusicScraperPanelButton" style="position: absolute; top: 15px; right: 15px; background: none; border: none; color: #e0e0e0; font-size: 1.5em; cursor: pointer; line-height: 1; padding: 0;">&times;</button>
+        <h2 style="margin-top: 0; color: #4d9deb; text-align: center;">音乐刮削</h2>
+        <div class="scraper-controls" style="margin-bottom: 15px;">
+            <p>请选择刮削源：</p>
+            <div class="scraper-type-options" style="display: flex; flex-wrap: wrap; gap: 15px; margin: 10px 0; justify-content: center;">
+                <label><input type="radio" name="musicScrapeSource" value="netease" checked> 网易云</label>
+                <label><input type="radio" name="musicScrapeSource" value="musicbrainz"> MusicBrainz</label>
+                <label><input type="radio" name="musicScrapeSource" value="local"> 仅本地</label>
+            </div>
+            <button id="startMusicScrapingButton" style="width: 100%; padding: 10px; background: linear-gradient(to right, #28a745, #218838); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: all 0.3s ease;">开始刮削当前目录</button>
+        </div>
+        <div class="scraper-queue" style="flex-grow: 1; overflow-y: auto; background-color: rgba(45, 45, 48, 0.8); padding: 10px; border-radius: 4px; min-height: 100px;">
+            <h3>任务队列</h3>
+            <ul id="music-scraper-task-list" style="list-style: none; padding: 0; margin: 0; font-size: 0.9em;">
+                <!-- 音乐刮削任务项将动态插入此处 -->
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

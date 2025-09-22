@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>WebPlayer - Music</title>
+    <link rel="stylesheet" href="vendor/all.min.css">
+    <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+    <div class="player-bg"></div>
+    <div class="player-container">
+
+        <div class="player-main">
+            <div class="main-content">
+                <div class="info-container">
+                    <div class="cover-wrapper">
+                        <img src="" alt="Album Cover" id="album-cover" class="cover-img">
+                    </div>
+                    <div class="song-details">
+                        <h2 id="song-title">歌曲名称</h2>
+                        <p id="song-artist">歌手</p>
+                        <p id="song-album"></p>
+                    </div>
+                </div>
+    
+                <div class="lyrics-container">
+                    <div class="lyrics-controls">
+                        <button id="toggle-lyrics-visualizer-btn" class="control-btn extra-btn" title="切换可视化"><i class="fas fa-chart-bar"></i></button>
+                    </div>
+                    <div class="visualization-container">
+                        <canvas id="visualizer"></canvas>
+                    </div>
+                    <div class="lyrics-wrapper" id="lyrics-wrapper">
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress-container">
+                <span id="current-time">00:00</span>
+                <input type="range" id="progress-bar" class="progress-bar" value="0" step="0.1" min="0" max="100">
+                <span id="duration">00:00</span>
+            </div>
+
+            <div class="controls-container">
+                <div class="main-controls">
+                    <button id="prev-btn" class="control-btn"><i class="fas fa-step-backward"></i></button>
+                    <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
+                    <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
+                </div>
+                
+                <div class="extra-controls">
+                     <button id="mode-btn" class="control-btn extra-btn" title="列表循环"><i class="fas fa-retweet"></i></button>
+                    <div class="volume-control">
+                        <button id="volume-btn" class="control-btn extra-btn"><i class="fas fa-volume-high"></i></button>
+                        <input type="range" id="volume-slider" class="volume-slider" min="0" max="1" step="0.01" value="0.8">
+                    </div>
+                    <div class="speed-control">
+                         <button id="speed-btn" class="control-btn extra-btn">1.0x</button>
+                         <div class="speed-options">
+                            <div data-speed="0.5">0.5x</div>
+                            <div data-speed="0.75">0.75x</div>
+                            <div data-speed="1.0">1.0x</div>
+                            <div data-speed="1.25">1.25x</div>
+                            <div data-speed="1.5">1.5x</div>
+                            <div data-speed="2.0">2.0x</div>
+                        </div>
+                    </div>
+                    <button id="playlist-btn" class="control-btn extra-btn mobile-only"><i class="fas fa-list-ul"></i></button>
+                     <!-- <button id="upload-lrc-btn" class="control-btn extra-btn" title="上传歌词"><i class="fas fa-file-arrow-up"></i></button>
+                    <input type="file" id="lrc-file-input" accept=".lrc,.vtt" style="display: none;"> -->
+                    <div class="network-control">
+                        <button id="network-btn" class="control-btn extra-btn" title="网络功能"><i class="fas fa-globe"></i></button>
+                        <div class="network-options">
+                            <div id="fetch-lyrics-btn">歌词</div>
+                            <div class="cover-options">
+                                <span>封面</span>
+                                <div class="cover-sources">
+                                    <div id="fetch-cover-local-btn">本地</div>
+                                    <div id="fetch-cover-netease-btn">网易云</div>
+                                    <div id="fetch-cover-mb-btn">MusicBrainz</div>
+                                </div>
+                            </div>
+                             <div class="info-options">
+                                <span>信息</span>
+                                <div class="info-sources">
+                                    <div id="fetch-info-local-btn">本地</div>
+                                    <div id="fetch-info-netease-btn">网易云</div>
+                                    <div id="fetch-info-mb-btn">MusicBrainz</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                   <div class="settings-control">
+                       <button id="settings-btn" class="control-btn extra-btn" title="设置"><i class="fas fa-cog"></i></button>
+                       <div class="settings-options">
+                           <div class="settings-option">
+                                <label for="info-priority">信息来源:</label>
+                                <select id="info-priority">
+                                    <option value="local">本地</option>
+                                    <option value="netease">网易云</option>
+                                    <option value="musicbrainz">MusicBrainz</option>
+                                </select>
+                           </div>
+                           <div class="settings-option">
+                                <label for="cover-priority">封面来源:</label>
+                                <select id="cover-priority">
+                                    <option value="local">本地</option>
+                                    <option value="netease">网易云</option>
+                                    <option value="musicbrainz">MusicBrainz</option>
+                                </select>
+                           </div>
+                           <div class="settings-option">
+                                <label for="lyrics-fetch">自动查询歌词:</label>
+                                <select id="lyrics-fetch">
+                                    <option value="true">是</option>
+                                    <option value="false">否</option>
+                                </select>
+                           </div>
+                           <div class="settings-option">
+                                <label for="lyrics-type">歌词偏好:</label>
+                                <select id="lyrics-type">
+                                    <option value="bilingual">双语</option>
+                                    <option value="original">原文</option>
+                                </select>
+                          </div>
+                          <div class="settings-option">
+                              <label for="search-results-limit">搜索数量:</label>
+                              <input type="number" id="search-results-limit" min="1" max="20" value="5">
+                          </div>
+                          <div class="settings-option">
+                              <label for="force-match">强制匹配:</label>
+                              <select id="force-match">
+                                  <option value="false">否</option>
+                                  <option value="true">是</option>
+                              </select>
+                          </div>
+                          <div class="settings-option">
+                              <label for="query-keywords">查询关键词:</label>
+                              <input type="text" id="query-keywords" placeholder="可用: {artist}, {title}, {album}">
+                          </div>
+                      </div>
+                  </div>
+               </div>
+           </div>
+        </div>
+
+        <div class="playlist-panel">
+            <h3>播放列表 <i class="fas fa-times" id="close-playlist-btn"></i></h3>
+            <ul id="playlist-ul">
+                </ul>
+        </div>
+    </div>
+
+    <script src="vendor/howler.min.js"></script>
+    <script src="vendor/color-thief.min.js"></script>
+    <script src="vendor/cptable.full.js"></script>
+    <script src="vendor/Sortable.min.js"></script>
+    <script src="music-app.js?v=1"></script>
+</body>
+</html>

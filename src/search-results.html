@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜索结果 - WebPlayer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0px;
+            background: rgba(0,0,0,1);
+            color: #e0e0e0;
+            position: relative;
+        }
+        body::before {
+             content: "";
+             position: fixed;
+             top: -10px; right: -10px; bottom: -10px; left: -10px;
+             background: url('./bg.png') no-repeat center center fixed;
+             background-size: cover;
+             filter: blur(30px) brightness(50%);
+             z-index: -1;
+         }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            background: rgba(15, 15, 15, 0.65);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        h1 {
+            text-align: center;
+            color: #4d9deb;
+        }
+        .search-info {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #3a3a3d;
+            border-radius: 5px;
+        }
+        .search-options {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #a0a0a0;
+        }
+        .results-summary {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #205060;
+            border-radius: 5px;
+            color: #a0d0e0;
+        }
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .result-item {
+            background: #3a3d41;
+            border-radius: 8px;
+            padding: 15px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .result-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5);
+        }
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            height: 150px; /* Or any other fixed height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #45494f;
+            overflow: hidden;
+        }
+        .thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* This is the key property */
+        }
+        .icon {
+            font-size: 3em;
+            color: #a0a0a0;
+        }
+        .result-name {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 14px;
+            word-break: break-all;
+        }
+        .result-path {
+            font-size: 1.2em;
+            color: #a0a0a0;
+            margin-top: 6px;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .result-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85em;
+            color: #a0a0a0;
+        }
+        .result-type {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .file-type {
+            background-color: #205060;
+            color: #a0d0e0;
+        }
+        .folder-type {
+            background-color: #602020;
+            color: #f0a0a0;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #a0a0a0;
+        }
+        .error {
+            padding: 20px;
+            background-color: #602020;
+            border-radius: 5px;
+            color: #f0a0a0;
+            margin-bottom: 20px;
+        }
+        .back-button {
+            padding: 10px 20px;
+            background: linear-gradient(to right, #cc3c22, #cc3457);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-bottom: 20px;
+            transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .back-button:hover {
+            background-color: #0066cc;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(204, 60, 34, 0.6);
+        }
+        .back-button:active {
+            transform: scale(0.85);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+        .play-btn {
+            padding: 10px 20px;
+            margin-left: 0px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color:white;
+            background: linear-gradient(to right, #3385cc, #225ba3);
+            transition: all 0.3s ease;
+        }
+        .play-btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
+        }
+        .play-btn:active {
+            transform: scale(0.9);
+        }
+        .download-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color: white;
+            background: linear-gradient(to right, #1e7e34, #18662a);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .download-btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(30, 126, 52, 0.6);
+        }
+        .download-btn:active {
+            transform: scale(0.9);
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .actions button {
+            flex: 1;
+        }
+        .add-to-playlist-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            color: white;
+            background: linear-gradient(to right, #ffc107, #ff9800);
+            transition: all 0.3s ease;
+        }
+        .add-to-playlist-btn:hover {
+            background-color: #e0a800;
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.6);
+        }
+        .add-to-playlist-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.5);
+        }
+    </style>
+    <!-- 引入 Fancybox 的 CSS -->
+    <link rel="stylesheet" href="vendor/jquery.fancybox.min.css" />
+</head>
+<body>
+    <div class="container">
+        <button class="back-button" onclick="window.close()">关闭窗口</button>
+        <h1>搜索结果</h1>
+        <div class="search-info">
+            <div>搜索关键词: <span id="searchQuery"></span></div>
+            <div class="search-options">
+                <span id="matchCaseOption" style="display: none;">区分大小写</span>
+                <span id="matchWholeWordOption" style="display: none;">全词匹配</span>
+                <span id="useRegexOption" style="display: none;">正则表达式</span>
+            </div>
+        </div>
+        <div id="resultsSummary" class="results-summary" style="display: none;"></div>
+        <div id="errorMessage" class="error" style="display: none;"></div>
+        <div id="loadingMessage" class="loading">搜索中，请稍候...</div>
+        <div id="resultsContainer" class="results-grid" style="display: none;"></div>
+    </div>
+
+    <script>
+       // 获取URL参数
+       const urlParams = new URLSearchParams(window.location.search);
+       const query = urlParams.get('query');
+       const matchCase = urlParams.get('matchCase') === 'true';
+       const matchWholeWord = urlParams.get('matchWholeWord') === 'true';
+       const useRegex = urlParams.get('useRegex') === 'true';
+       const maxResults = parseInt(urlParams.get('maxResults')) || 100;
+       const dirs = urlParams.get('dirs'); // 获取目录参数
+       const searchType = urlParams.get('searchType') || 'file'; // 获取搜索类型，默认为文件
+
+       // 显示搜索参数
+       document.getElementById('searchQuery').textContent = query;
+       
+       if (matchCase) {
+           document.getElementById('matchCaseOption').style.display = 'inline';
+       }
+       if (matchWholeWord) {
+           document.getElementById('matchWholeWordOption').style.display = 'inline';
+       }
+       if (useRegex) {
+           document.getElementById('useRegexOption').style.display = 'inline';
+       }
+
+       // 格式化文件大小 (从 index.html 复制)
+       function formatBytes(bytes, decimals = 2) {
+           if (bytes === 0) return '0 Bytes';
+           const k = 1024;
+           const dm = decimals < 0 ? 0 : decimals;
+           const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+           const i = Math.floor(Math.log(bytes) / Math.log(k));
+           return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+       }
+
+       // 简单的路径拼接和获取目录名函数，因为浏览器环境没有 Node.js 的 path 模块 (从 index.html 复制)
+       const path = {
+           join: (...segments) => {
+               // 确保所有段都是字符串，并去除多余的斜杠
+               const parts = segments.map(s => String(s).replace(/[/\\]+/g, '/').replace(/^\/|\/$/g, ''));
+               let result = parts.filter(s => s !== '').join('/');
+               // 确保以 '/' 开头
+               if (!result.startsWith('/')) {
+                   result = '/' + result;
+               }
+               return result;
+           },
+           dirname: (p) => {
+               const parts = p.split(/[/\\]/).filter(part => part !== '');
+               if (parts.length <= 1) return '/'; // 根目录或只有一个文件/文件夹时返回根目录
+               parts.pop(); // 移除最后一个部分
+               return '/' + parts.join('/');
+           }
+       };
+
+       // Intersection Observer for lazy loading (从 index.html 复制)
+       const lazyLoadImages = () => {
+           const lazyImages = document.querySelectorAll('img.lazy');
+           const observer = new IntersectionObserver((entries, observer) => {
+               entries.forEach(entry => {
+                   if (entry.isIntersecting) {
+                       const img = entry.target;
+                       img.src = img.dataset.src;
+                       img.classList.remove('lazy');
+                       observer.unobserve(img);
+                   }
+               });
+           }, {
+               rootMargin: '0px 0px 100px 0px' // Load images 100px before they enter viewport
+           });
+
+           lazyImages.forEach(img => {
+               observer.observe(img);
+           });
+       };
+
+       // 显示错误消息
+       function showError(message) {
+           document.getElementById('loadingMessage').style.display = 'none';
+           document.getElementById('errorMessage').textContent = message;
+           document.getElementById('errorMessage').style.display = 'block';
+       }
+
+       function showNotification(message) {
+           const notification = document.createElement('div');
+           notification.textContent = message;
+           notification.style.position = 'fixed';
+           notification.style.bottom = '20px';
+           notification.style.left = '50%';
+           notification.style.transform = 'translateX(-50%)';
+           notification.style.backgroundColor = '#28a745';
+           notification.style.color = 'white';
+           notification.style.padding = '10px 20px';
+           notification.style.borderRadius = '5px';
+           notification.style.zIndex = '2000';
+           notification.style.opacity = '0';
+           notification.style.transition = 'opacity 0.5s';
+           document.body.appendChild(notification);
+
+           setTimeout(() => {
+               notification.style.opacity = '1';
+           }, 10);
+
+           setTimeout(() => {
+               notification.style.opacity = '0';
+               setTimeout(() => {
+                   document.body.removeChild(notification);
+               }, 500);
+           }, 3000);
+       }
+
+       function playMusic(fullPath, fileName, mediaDirRoot) {
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedSrc = encodeURIComponent(relativePath);
+           const encodedMediaDir = mediaDirRoot ? encodeURIComponent(mediaDirRoot) : '';
+           const musicPageUrl = `music-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodedMediaDir}`;
+           window.open(musicPageUrl, '_blank');
+       }
+
+       function addToPlaylist(result) {
+           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+           const musicUrl = relativePath.replace(/\\/g, '/');
+           const finalSrc = `${decodeURIComponent(musicUrl)}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
+
+           const parts = result.filename.replace(/\.\w+$/, '').split(' - ');
+           let artist = '未知艺术家';
+           let title = parts[0];
+           if (parts.length > 1) {
+               artist = parts[0];
+               title = parts.slice(1).join(' - ');
+           }
+
+           const song = {
+               title: title,
+               artist: artist,
+               src: finalSrc,
+               cover: 'cover.jpg', // Default cover
+               lrc: null
+           };
+
+           let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+
+           if (playlist.some(pSong => pSong.src === song.src)) {
+               showNotification(`'${song.title}' 已经在播放列表中`);
+               return;
+           }
+
+           playlist.push(song);
+           localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+           showNotification(`'${song.title}' 已添加到播放列表`);
+       }
+
+       function getRelativePath(fullPath, mediaDirRoot) {
+           let relativePath;
+           // 如果 mediaDirRoot 存在且有效，则计算相对路径
+           if (mediaDirRoot && fullPath.toLowerCase().startsWith(mediaDirRoot.toLowerCase())) {
+               relativePath = fullPath.substring(mediaDirRoot.length);
+           } else {
+               // 否则，从路径中移除驱动器号
+               // 例如 "D:\Movies\file.mp4" -> "/Movies/file.mp4"
+               relativePath = fullPath.substring(fullPath.indexOf(':') + 1);
+           }
+           
+           relativePath = relativePath.replace(/\\/g, '/'); // 统一路径分隔符
+           if (!relativePath.startsWith('/')) {
+               relativePath = '/' + relativePath; // 确保以斜杠开头
+           }
+           return relativePath;
+       }
+
+       function encodePath(path) {
+           return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+       }
+
+       let searchResults = []; // 保存搜索结果
+
+       // 显示搜索结果
+       function displayResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+           
+           if (!data.success) {
+               showError(data.error || '搜索失败');
+               return;
+           }
+
+           searchResults = data.results; // 保存结果
+           const results = data.results;
+           const totalResults = data.total_results;
+           let totalFiles = data.total_files;
+           let totalFolders = data.total_folders;
+
+           // 如果服务器返回的文件/文件夹数量为0，但实际上有结果，则在本地重新统计
+           if (results.length > 0 && (totalFiles === 0 && totalFolders === 0)) {
+               totalFolders = results.filter(r => r.is_folder).length;
+               totalFiles = results.length - totalFolders;
+           }
+           
+           // 显示结果摘要
+           document.getElementById('resultsSummary').innerHTML = `
+               共找到 ${totalResults} 个结果 (文件: ${totalFiles}, 文件夹: ${totalFolders})
+           `;
+           document.getElementById('resultsSummary').style.display = 'block';
+           
+           // 显示结果
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+           
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的结果</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   // 创建缩略图容器
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+                   
+                   // 创建文件信息容器
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   // 创建文件名元素
+                   const fileName = document.createElement('div');
+                   fileName.className = 'result-name';
+                   fileName.textContent = result.filename;
+
+                   // 创建文件路径元素
+                   const resultPath = document.createElement('div');
+                   resultPath.className = 'result-path';
+                   resultPath.textContent = result.folder_path;
+
+                   // 创建文件大小元素
+                   const fileSize = document.createElement('div');
+                   fileSize.className = 'file-size';
+                   fileSize.textContent = result.is_folder ? '文件夹' : formatBytes(result.size);
+
+                   // 创建操作按钮容器
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+                   
+                   if (result.is_folder) {
+                       // 为文件夹创建图标
+                       const icon = document.createElement('div');
+                       icon.className = 'icon';
+                       icon.innerHTML = '&#128193;'; // 文件夹图标
+                       thumbnailContainer.appendChild(icon);
+
+                       // 文件夹点击事件
+                       resultItem.onclick = () => navigateToFolder(result.full_path, result.media_dir_root);
+                   } else {
+                       // 为文件创建缩略图或图标
+                       const extension = result.filename.split('.').pop().toLowerCase();
+                       const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                       const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(extension);
+                       const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
+
+                       if (isImage) {
+                           // 图片文件显示缩略图，并用 a 标签包裹以支持 Fancybox
+                           const a = document.createElement('a');
+                           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+                           const imagePath = encodePath(relativePath);
+                           a.href = `${imagePath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
+                           // a.dataset.fancybox = 'gallery'; // 移除自动扫描触发器
+                           a.dataset.caption = result.filename;
+
+                           const img = document.createElement('img');
+                           img.className = 'thumbnail lazy';
+                           img.loading = 'lazy';
+                           const thumbnailPath = encodePath(relativePath);
+                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`;
+                           img.alt = result.filename;
+                           img.onerror = function() {
+                               a.parentNode.innerHTML = '<div class="icon">&#128196;</div>'; // 替换为图标
+                           };
+                           a.appendChild(img);
+                           thumbnailContainer.appendChild(a);
+                       } else if (isVideo) {
+                           // 视频文件显示缩略图
+                           const img = document.createElement('img');
+                           img.className = 'thumbnail lazy'; // 添加 lazy 类
+                           img.loading = 'lazy'; // 添加 loading="lazy" 属性
+                           // 使用服务器端生成的缩略图
+                           const relativePath = getRelativePath(result.full_path, result.media_dir_root);
+                           const thumbnailPath = encodePath(relativePath);
+                           img.dataset.src = `/thumbnail${thumbnailPath}?mediaDir=${encodeURIComponent(result.media_dir_root)}`; // 改为 data-src，并添加 mediaDir 参数
+                           img.alt = result.filename;
+                           img.onerror = function() {
+                               // 如果缩略图加载失败，显示默认视频图标
+                               thumbnailContainer.innerHTML = '';
+                               const icon = document.createElement('div');
+                               icon.className = 'icon';
+                               icon.innerHTML = '&#128249;'; // 视频图标
+                               thumbnailContainer.appendChild(icon);
+                           };
+                           thumbnailContainer.appendChild(img);
+                       } else if (isAudio) {
+                           const icon = document.createElement('div');
+                           icon.className = 'icon';
+                           icon.innerHTML = '&#127925;'; // 音乐图标
+                           thumbnailContainer.appendChild(icon);
+                       } else {
+                           // 其他文件类型显示默认图标
+                           const icon = document.createElement('div');
+                           icon.className = 'icon';
+                           icon.innerHTML = '&#128196;'; // 文件图标
+                           thumbnailContainer.appendChild(icon);
+                       }
+
+                       resultItem.onclick = (e) => {
+                           if (isImage) {
+                               e.preventDefault();
+                               const imageFiles = searchResults.filter(r => {
+                                   const ext = r.filename.split('.').pop().toLowerCase();
+                                   return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
+                               });
+
+                               const gallery = imageFiles.map(imgResult => {
+                                   const relPath = getRelativePath(imgResult.full_path, imgResult.media_dir_root);
+                                   const imgPath = encodePath(relPath);
+                                   return {
+                                       src: `${imgPath}?mediaDir=${encodeURIComponent(imgResult.media_dir_root)}`,
+                                       opts: { caption: imgResult.filename }
+                                   };
+                               });
+
+                               const currentIndex = imageFiles.findIndex(imgResult => imgResult.full_path === result.full_path);
+
+                               $.fancybox.open(gallery, {
+                                   loop: true,
+                                   thumbs: { autoStart: true }
+                               }, currentIndex);
+
+                           } else if (e.target.tagName.toLowerCase() !== 'img') {
+                               if (isVideo) {
+                                   playVideo(result.full_path, result.filename, result.media_dir_root);
+                               } else if (isAudio) {
+                                   playMusic(result.full_path, result.filename, result.media_dir_root);
+                               } else {
+                                   downloadFile(result.full_path, result.filename, result.media_dir_root);
+                               }
+                           }
+                       };
+
+                       // 如果是视频文件，添加播放按钮
+                       if (isVideo) {
+                           const playButton = document.createElement('button');
+                           playButton.textContent = '播放';
+                           playButton.className = 'play-btn';
+                           playButton.onclick = (e) => {
+                               e.stopPropagation(); // 阻止网格项的点击事件
+                               playVideo(result.full_path, result.filename, result.media_dir_root);
+                           };
+                           actionsDiv.appendChild(playButton);
+                       } else if (isAudio) {
+                           const playButton = document.createElement('button');
+                           playButton.textContent = '播放';
+                           playButton.className = 'play-btn';
+                           playButton.onclick = (e) => {
+                               e.stopPropagation();
+                               playMusic(result.full_path, result.filename, result.media_dir_root);
+                           };
+                           actionsDiv.appendChild(playButton);
+
+                           const addToPlaylistButton = document.createElement('button');
+                           addToPlaylistButton.textContent = '添加';
+                           addToPlaylistButton.title = '添加到播放列表';
+                           addToPlaylistButton.className = 'add-to-playlist-btn';
+                           addToPlaylistButton.onclick = (e) => {
+                               e.stopPropagation();
+                               addToPlaylist(result);
+                           };
+                           actionsDiv.appendChild(addToPlaylistButton);
+                       }
+
+                       // 添加下载按钮
+                       const downloadButton = document.createElement('button');
+                       downloadButton.textContent = '下载';
+                       downloadButton.className = 'download-btn';
+                       downloadButton.onclick = (e) => {
+                               e.stopPropagation(); // 阻止网格项的点击事件
+                               downloadFile(result.full_path, result.filename, result.media_dir_root);
+                       };
+                       actionsDiv.appendChild(downloadButton);
+                   }
+
+                   // 组装文件信息
+                   fileInfo.appendChild(fileName);
+                   fileInfo.appendChild(resultPath);
+                   fileInfo.appendChild(fileSize);
+                   fileInfo.appendChild(actionsDiv);
+
+                   // 组装网格项
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           
+           resultsContainer.style.display = 'grid';
+
+           // 懒加载图片
+           lazyLoadImages();
+       }
+
+       function displayVideoResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+
+           if (!data.success) {
+               showError(data.error || '视频搜索失败');
+               return;
+           }
+
+           const results = data.results;
+           document.getElementById('resultsSummary').innerHTML = `共找到 ${results.length} 个视频结果`;
+           document.getElementById('resultsSummary').style.display = 'block';
+
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的视频</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+
+                   const img = document.createElement('img');
+                   img.className = 'thumbnail lazy';
+                   img.loading = 'lazy';
+                   img.dataset.src = result.local_poster_path.replace(/\\/g, '/');
+                   img.alt = result.title;
+                   img.onerror = function() {
+                       thumbnailContainer.innerHTML = '<div class="icon">&#128249;</div>';
+                   };
+                   thumbnailContainer.appendChild(img);
+
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   const title = document.createElement('div');
+                   title.className = 'result-name';
+                   title.textContent = result.title;
+
+                   const videoId = document.createElement('div');
+                   videoId.className = 'result-meta';
+                   videoId.textContent = `ID: ${result.id}`;
+                   
+                   const filePath = document.createElement('div');
+                   filePath.className = 'result-path';
+                   filePath.textContent = result.filepath;
+
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+
+                   const playButton = document.createElement('button');
+                   playButton.textContent = '播放';
+                   playButton.className = 'play-btn';
+                   playButton.onclick = (e) => {
+                       e.stopPropagation();
+                       playVideo(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(playButton);
+
+                   const downloadButton = document.createElement('button');
+                   downloadButton.textContent = '下载';
+                   downloadButton.className = 'download-btn';
+                   downloadButton.onclick = (e) => {
+                       e.stopPropagation();
+                       downloadFile(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(downloadButton);
+
+                   fileInfo.appendChild(title);
+                   fileInfo.appendChild(videoId);
+                   fileInfo.appendChild(filePath);
+                   fileInfo.appendChild(actionsDiv);
+
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           resultsContainer.style.display = 'grid';
+           lazyLoadImages();
+       }
+
+       function displayMusicResults(data) {
+           document.getElementById('loadingMessage').style.display = 'none';
+
+           if (!data.success) {
+               showError(data.error || '音乐搜索失败');
+               return;
+           }
+
+           const results = data.results;
+           document.getElementById('resultsSummary').innerHTML = `共找到 ${results.length} 个音乐结果`;
+           document.getElementById('resultsSummary').style.display = 'block';
+
+           const resultsContainer = document.getElementById('resultsContainer');
+           resultsContainer.innerHTML = '';
+
+           if (results.length === 0) {
+               resultsContainer.innerHTML = '<div class="result-item">未找到匹配的音乐</div>';
+           } else {
+               results.forEach(result => {
+                   const resultItem = document.createElement('div');
+                   resultItem.className = 'result-item';
+
+                   const thumbnailContainer = document.createElement('div');
+                   thumbnailContainer.className = 'thumbnail-container';
+
+                   if (result.cover_path && result.cover_path !== '无封面') {
+                       const img = document.createElement('img');
+                       img.className = 'thumbnail lazy';
+                       img.loading = 'lazy';
+                       img.dataset.src = result.cover_path.replace(/\\/g, '/');
+                       img.alt = result.title;
+                       img.onerror = function() {
+                           thumbnailContainer.innerHTML = '<div class="icon">&#127925;</div>';
+                       };
+                       thumbnailContainer.appendChild(img);
+                   } else {
+                       thumbnailContainer.innerHTML = '<div class="icon">&#127925;</div>';
+                   }
+
+                   const fileInfo = document.createElement('div');
+                   fileInfo.className = 'file-info';
+
+                   const title = document.createElement('div');
+                   title.className = 'result-name';
+                   title.textContent = result.title || '未知标题';
+
+                   const artist = document.createElement('div');
+                   artist.className = 'result-meta';
+                   artist.textContent = `艺术家: ${result.artist || '未知'}`;
+                   
+                   const album = document.createElement('div');
+                   album.className = 'result-meta';
+                   album.textContent = `专辑: ${result.album || '未知'}`;
+
+                   const filePath = document.createElement('div');
+                   filePath.className = 'result-path';
+                   filePath.textContent = result.filepath;
+
+                   const actionsDiv = document.createElement('div');
+                   actionsDiv.className = 'actions';
+
+                   const playButton = document.createElement('button');
+                   playButton.textContent = '播放';
+                   playButton.className = 'play-btn';
+                   playButton.onclick = (e) => {
+                       e.stopPropagation();
+                       playMusic(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(playButton);
+                   
+                   const addToPlaylistButton = document.createElement('button');
+                   addToPlaylistButton.textContent = '添加';
+                   addToPlaylistButton.className = 'add-to-playlist-btn';
+                   addToPlaylistButton.onclick = (e) => {
+                       e.stopPropagation();
+                       // addToPlaylist function needs to be adapted slightly for this context
+                       const playlistEntry = {
+                           full_path: result.filepath,
+                           media_dir_root: result.media_dir_root,
+                           filename: result.title
+                       };
+                       addToPlaylist(playlistEntry);
+                   };
+                   actionsDiv.appendChild(addToPlaylistButton);
+
+                   const downloadButton = document.createElement('button');
+                   downloadButton.textContent = '下载';
+                   downloadButton.className = 'download-btn';
+                   downloadButton.onclick = (e) => {
+                       e.stopPropagation();
+                       downloadFile(result.filepath, result.title, result.media_dir_root);
+                   };
+                   actionsDiv.appendChild(downloadButton);
+                   
+                   fileInfo.appendChild(title);
+                   fileInfo.appendChild(artist);
+                   fileInfo.appendChild(album);
+                   fileInfo.appendChild(filePath);
+                   fileInfo.appendChild(actionsDiv);
+
+                   resultItem.appendChild(thumbnailContainer);
+                   resultItem.appendChild(fileInfo);
+                   resultsContainer.appendChild(resultItem);
+               });
+           }
+           resultsContainer.style.display = 'grid';
+           lazyLoadImages();
+       }
+
+       // 根据完整路径查找其所属的媒体根目录
+       function findMediaDirRoot(fullPath) {
+           // 这个函数需要一个已知媒体目录列表。由于 search-results.html 无法直接访问 server.js 的 MEDIA_DIRS，
+           // 我们需要一种方法来传递这个信息，或者在播放时让服务器处理。
+           // 一个简单的客户端解决方法是假设路径结构，但这很脆弱。
+           // 暂时，我们返回一个空字符串，并依赖 playVideo 函数中的逻辑来处理。
+           // 在实际应用中，最好是从服务器获取媒体目录列表。
+           const driveLetter = fullPath.substring(0, 1).toUpperCase();
+           return `${driveLetter}:\\e`; // 这是一个基于您配置的硬编码猜测
+       }
+
+       // 导航到文件夹
+       function navigateToFolder(fullPath, mediaDirRoot) {
+           // 构建新的 URL，模拟进入文件夹
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const searchParams = new URLSearchParams({
+               mediaDir: mediaDirRoot,
+               path: relativePath
+           });
+           const newUrl = `index.html?${searchParams.toString()}`;
+           window.open(newUrl, '_blank');
+       }
+
+       // 播放视频
+       function playVideo(fullPath, fileName, mediaDirRoot) {
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedSrc = encodeURIComponent(relativePath);
+           const encodedMediaDir = mediaDirRoot ? encodeURIComponent(mediaDirRoot) : '';
+           const videoPageUrl = `video-player.html?src=${encodedSrc}&title=${encodeURIComponent(fileName)}&mediaDir=${encodedMediaDir}`;
+           window.open(videoPageUrl, '_blank');
+       }
+
+       // 下载文件
+       function downloadFile(fullPath, fileName, mediaDirRoot) {
+           const relativePath = getRelativePath(fullPath, mediaDirRoot);
+           const encodedPath = encodePath(relativePath);
+           const a = document.createElement('a');
+           a.href = `${encodedPath}?mediaDir=${encodeURIComponent(mediaDirRoot)}`;
+           a.download = fileName; // 强制下载
+           document.body.appendChild(a);
+           a.click();
+           document.body.removeChild(a);
+       }
+
+       // 执行搜索
+       async function performSearch() {
+           if (searchType === 'file') {
+               try {
+                   // 构造API URL
+                   let apiUrl = `/api/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+                   if (matchCase) apiUrl += '&matchCase=true';
+                   if (matchWholeWord) apiUrl += '&matchWholeWord=true';
+                   if (useRegex) apiUrl += '&useRegex=true';
+                   if (dirs) apiUrl += `&dirs=${encodeURIComponent(dirs)}`; // 添加目录参数
+                   
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   
+                   const data = await response.json();
+                   displayResults(data);
+               } catch (error) {
+                   console.error('Search error:', error);
+                   showError(`搜索过程中发生错误: ${error.message}`);
+               }
+           } else if (searchType === 'video') {
+               try {
+                   const apiUrl = `/api/search-videos?query=${encodeURIComponent(query)}`;
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   const data = await response.json();
+                   displayVideoResults(data);
+               } catch (error) {
+                   console.error('Video search error:', error);
+                   showError(`视频搜索过程中发生错误: ${error.message}`);
+               }
+           } else if (searchType === 'music') {
+               try {
+                   const apiUrl = `/api/search-music?query=${encodeURIComponent(query)}`;
+                   const response = await fetch(apiUrl);
+                   if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                   }
+                   const data = await response.json();
+                   displayMusicResults(data);
+               } catch (error) {
+                   console.error('Music search error:', error);
+                   showError(`音乐搜索过程中发生错误: ${error.message}`);
+               }
+           }
+       }
+
+       // 页面加载完成后执行搜索
+       window.addEventListener('DOMContentLoaded', () => {
+           performSearch();
+       });
+   </script>
+   <!-- 引入 jQuery 和 Fancybox 的 JS -->
+   <script src="vendor/jquery-3.5.1.min.js"></script>
+   <script src="vendor/jquery.fancybox.min.js"></script>
+</body>
+</html>
