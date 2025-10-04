@@ -532,41 +532,84 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         }
         
         # Generate variants for title, artist, and album
-        title_vars = sorted(gen_variants(title), key=len, reverse=True)[:3]
-        artist_vars = sorted(gen_variants(artist), key=len, reverse=True)[:3]
-        album_vars = sorted(gen_variants(album), key=len, reverse=True)[:2]
+        # We distinguish between: 
+        #  - query_*_vars : truncated variants used to build search queries (keep concise)
+        #  - score_*_vars : full variants (including original raw) used for similarity scoring (avoid dropping exact form)
+        def build_variants(raw_text: str):
+            full_set = gen_variants(raw_text)
+            if raw_text:
+                full_set.add(raw_text.strip())  # ensure raw included
+            ordered = sorted(full_set, key=len, reverse=True)
+            return ordered
+
+        title_all = build_variants(title)
+        artist_all = build_variants(artist)
+        album_all = build_variants(album)
+
+        # Truncated lists for query generation (previous behavior kept length constraints)
+        query_title_vars = title_all[:3]
+        query_artist_vars = artist_all[:3]
+        query_album_vars = album_all[:2]
+
+        # Full lists for scoring
+        title_vars = title_all
+        artist_vars = artist_all
+        album_vars = album_all
 
         # Build a list of search term variants to try (prioritized)
         variants, seen = [], set()
         
-        # Priority 0: Original, unmodified query
+        # Priority 0: Original, unmodified query with all available info
         original_query = f"{title} {artist}".strip()
         if original_query:
             variants.append(original_query)
             seen.add(original_query)
+        
+        # Priority 0.5: Title + Artist + Album (if album exists)
+        if album and album.strip():
+            full_query = f"{title} {artist} {album}".strip()
+            if full_query and full_query not in seen:
+                variants.append(full_query)
+                seen.add(full_query)
+
+        # Priority 0.7: Title + Album (在含专辑信息且不需要艺人辅助时也尝试，防止艺人写法差异影响匹配)
+        if album and album.strip():
+            title_album_query = f"{title} {album}".strip()
+            if title_album_query and title_album_query not in seen:
+                variants.append(title_album_query)
+                seen.add(title_album_query)
 
         # Priority 1: Title + Artist variants
-        for t in title_vars:
-            for a in artist_vars:
+        for t in query_title_vars:
+            for a in query_artist_vars:
                 query = f"{t} {a}".strip()
                 if query and query not in seen:
                     variants.append(query); seen.add(query)
         
+        # Priority 1.5: Title + Artist + Album variants (more comprehensive)
+        if album and album.strip():
+            for t in query_title_vars:
+                for a in query_artist_vars:
+                    for alb in query_album_vars:
+                        query = f"{t} {a} {alb}".strip()
+                        if query and query not in seen:
+                            variants.append(query); seen.add(query)
+        
         # Priority 2: Title + Album variants
-        for t in title_vars:
-            for alb in album_vars:
+        for t in query_title_vars:
+            for alb in query_album_vars:
                 query = f"{t} {alb}".strip()
                 if query and query not in seen:
                     variants.append(query); seen.add(query)
 
         # Priority 3: Title only variants
-        for t in title_vars:
+        for t in query_title_vars:
             if t and t not in seen:
                 variants.append(t); seen.add(t)
         
         # Priority 4: Artist + Album variants
-        for a in artist_vars:
-            for alb in album_vars:
+        for a in query_artist_vars:
+            for alb in query_album_vars:
                 query = f"{a} {alb}".strip()
                 if query and query not in seen:
                     variants.append(query); seen.add(query)
@@ -662,25 +705,47 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 # --- Similarity Calculation ---
                 # 1. Similarity to the original file metadata
                 title_sim = max(combined_similarity(t, remote_title) for t in title_vars) if title_vars else combined_similarity(title, remote_title)
-                
                 is_featured = any(f"feat. {a.lower()}" in remote_title.lower() for a in artist_vars)
                 artist_sim_primary = max(combined_similarity(a, remote_artist) for a in artist_vars) if artist_vars else combined_similarity(artist, remote_artist)
-                
                 artist_sim = artist_sim_primary
                 if is_featured and artist_sim < 0.8:
                     artist_sim = 0.8
-                
                 album_sim = max(combined_similarity(alb, remote_album) for alb in album_vars) if album_vars else combined_similarity(album, remote_album)
+
+                # Exact-form safeguard: if raw title matches remote title after normalization, ensure high similarity
+                if title and remote_title:
+                    if normalize_str(title) == normalize_str(remote_title) and title_sim < 0.9:
+                        title_sim = 0.95
 
                 # 2. Similarity to the search query string itself
                 remote_full_string = f"{remote_title} {remote_artist}".strip()
                 query_sim = combined_similarity(v, remote_full_string)
 
-                # --- Scoring ---
-                score = (base_title_weight * title_sim +
-                         base_artist_weight * artist_sim +
-                         base_album_weight * album_sim +
-                         query_weight * query_sim)
+                # 3. Alternate similarity (title+album) for cases where artist mismatch is expected
+                title_album_alt = 0.0
+                if album and remote_album:
+                    # Combine normalized title+album comparison ignoring artist
+                    title_album_alt = (combined_similarity(title, remote_title) * 0.6 + combined_similarity(album, remote_album) * 0.4)
+                
+                # Dynamic weighting: if artist similarity is very low but title & album are strong, shift weight
+                dynamic_title_weight = base_title_weight
+                dynamic_artist_weight = base_artist_weight
+                dynamic_album_weight = base_album_weight
+                alt_boost = 0.0
+                if (artist_sim_primary < 0.25) and (title_sim >= 0.40 or (album_sim >= 0.45)):
+                    # Reallocate some artist weight to title & album
+                    shift = 0.15  # amount taken from artist weight
+                    dynamic_artist_weight = max(0.10, dynamic_artist_weight - shift)
+                    dynamic_title_weight += shift * 0.6
+                    dynamic_album_weight += shift * 0.4
+                    if title_album_alt >= 0.50:
+                        alt_boost = 0.10  # modest boost if combined title+album is quite good
+
+                score = (dynamic_title_weight * title_sim +
+                         dynamic_artist_weight * artist_sim +
+                         dynamic_album_weight * album_sim +
+                         query_weight * query_sim +
+                         alt_boost)
 
                 # --- Bonuses & Penalties ---
                 # 1. Album match is critical. High bonus for match, high penalty for mismatch.
@@ -703,7 +768,41 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 if is_remix_remote and not is_remix_local:
                     score *= 0.85 # Penalize if it's a remix and the original wasn't
 
-                results_with_scores.append({'song': song, 'score': score})
+                # 4. Instrumental / off vocal / game / karaoke penalties (only if local title does not request them)
+                version_markers_remote = remote_title.lower()
+                version_markers_local = (title or "").lower()
+                marker_map = [
+                    ("instrumental", 0.80),
+                    ("off vocal", 0.82),
+                    ("off-vocal", 0.82),
+                    ("game ver", 0.88),
+                    ("game version", 0.88),
+                    ("karaoke", 0.80),
+                    ("inst.", 0.80),
+                    ("instrumental ver", 0.80),
+                ]
+                applied_version_penalty = None
+                for marker, factor in marker_map:
+                    if marker in version_markers_remote:
+                        if marker not in version_markers_local:
+                            score *= factor
+                            applied_version_penalty = (marker, factor)
+                            break
+
+                # store penalty info for debug
+                if 'dbg_extra' not in song:
+                    song['dbg_extra'] = {}
+                song['dbg_extra']['version_penalty'] = applied_version_penalty
+
+                results_with_scores.append({'song': song, 'score': score, 'dbg': {
+                    'title_sim': title_sim,
+                    'artist_sim': artist_sim,
+                    'album_sim': album_sim,
+                    'query_sim': query_sim,
+                    'title_album_alt': title_album_alt,
+                    'alt_boost': alt_boost,
+                    'weights': (round(dynamic_title_weight,3), round(dynamic_artist_weight,3), round(dynamic_album_weight,3))
+                }})
 
             if results_with_scores:
                 # sort and keep best for this variant
@@ -712,7 +811,7 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 # collect debug rows
                 for r in results_with_scores:
                     s = r['song']
-                    all_results_debug.append((s, r['score']))
+                    all_results_debug.append((s, r['score'], r.get('dbg')))
 
                 # If we already have a very confident match, pick it
                 if force_match or best_score >= 0.5:
@@ -728,7 +827,35 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
             return None, None, None
 
         best_song = best_overall['song']
-        results_with_scores = [{'song': s, 'score': sc} for (s, sc) in all_results_debug]
+        results_with_scores = [
+            {'song': s, 'score': sc, 'dbg': dbg if isinstance(dbg, dict) else {}} 
+            for (s, sc, dbg) in all_results_debug
+        ]
+
+        # Tie-break / preference adjustment after computing overall best:
+        # If chosen best is an instrumental/off-vocal variant and a non-variant with close score exists, prefer the non-variant.
+        def is_variant(title_text: str):
+            if not title_text:
+                return False
+            tl = title_text.lower()
+            return any(k in tl for k in ["instrumental", "off vocal", "off-vocal", "game ver", "game version", "karaoke", "inst."])
+
+        if best_song and is_variant(best_song.get('name','')):
+            variant_score = next((r['score'] for r in results_with_scores if r['song']['id']==best_song['id']), None)
+            # Find best non-variant
+            non_variant_candidates = [r for r in results_with_scores if not is_variant(r['song'].get('name',''))]
+            if non_variant_candidates and variant_score is not None:
+                best_non_variant = max(non_variant_candidates, key=lambda r: r['score'])
+                if best_non_variant['score'] >= (variant_score * 0.96):  # within 4%
+                    best_song = best_non_variant['song']
+                    # annotate tie-break decision
+                    best_non_variant['dbg']['tie_break'] = 'prefer_non_variant'
+                else:
+                    # annotate that variant kept
+                    for r in results_with_scores:
+                        if r['song']['id'] == best_song['id']:
+                            r['dbg']['tie_break'] = 'keep_variant'
+                            break
         
         # Print search results for debugging
         if results_with_scores:
@@ -740,7 +867,32 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 artist_name = song.get('artists', [{}])[0].get('name')
                 album_name = song.get('album', {}).get('name')
                 marker = " <-- Best Match" if best_song and song['id'] == best_song['id'] else ""
+                dbg = result.get('dbg', {}) or {}
+                ve = song.get('dbg_extra', {}).get('version_penalty')
+                tie = dbg.get('tie_break')
+
+                def _sf(val, nd=3):
+                    try:
+                        if val is None:
+                            return 'n/a'
+                        fmt = f"{{:.{nd}f}}"
+                        return fmt.format(float(val))
+                    except Exception:
+                        return 'n/a'
+
                 print(f"  {i+1}. {song_name} - {artist_name} ({album_name}) | Score: {score:.4f}{marker}", file=sys.stderr)
+                print(
+                    "       sims: "
+                    f"T={_sf(dbg.get('title_sim'))} "
+                    f"A={_sf(dbg.get('artist_sim'))} "
+                    f"Al={_sf(dbg.get('album_sim'))} "
+                    f"Q={_sf(dbg.get('query_sim'))} "
+                    f"TA_alt={_sf(dbg.get('title_album_alt'))} "
+                    f"boost={_sf(dbg.get('alt_boost'),2)} "
+                    f"w={dbg.get('weights','n/a')} "
+                    f"ver_pen={ve if ve else 'None'} "
+                    f"tie={tie if tie else 'None'}"
+                , file=sys.stderr)
             print("-----------------------------", file=sys.stderr)
 
         if not best_song:
