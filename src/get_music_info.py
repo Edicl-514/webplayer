@@ -538,6 +538,12 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
 
         # Build a list of search term variants to try (prioritized)
         variants, seen = [], set()
+        
+        # Priority 0: Original, unmodified query
+        original_query = f"{title} {artist}".strip()
+        if original_query:
+            variants.append(original_query)
+            seen.add(original_query)
 
         # Priority 1: Title + Artist variants
         for t in title_vars:
@@ -643,9 +649,10 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
             
             # Define base weights for title, artist, album
             # These can be adjusted based on empirical testing
-            base_title_weight = 0.45
-            base_artist_weight = 0.4
-            base_album_weight = 0.15 # Increased album weight
+            base_title_weight = 0.40
+            base_artist_weight = 0.35
+            base_album_weight = 0.15
+            query_weight = 0.10
 
             for song in songs:
                 remote_title = song.get('name', '')
@@ -653,32 +660,36 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 remote_album = song.get('album', {}).get('name', '')
 
                 # --- Similarity Calculation ---
-                # Use variants to find the best possible match for each field
+                # 1. Similarity to the original file metadata
                 title_sim = max(combined_similarity(t, remote_title) for t in title_vars) if title_vars else combined_similarity(title, remote_title)
                 
-                # Check for featured artist in title
                 is_featured = any(f"feat. {a.lower()}" in remote_title.lower() for a in artist_vars)
                 artist_sim_primary = max(combined_similarity(a, remote_artist) for a in artist_vars) if artist_vars else combined_similarity(artist, remote_artist)
                 
-                # If the artist is featured, this is a strong signal, often stronger than a wrong primary artist
                 artist_sim = artist_sim_primary
                 if is_featured and artist_sim < 0.8:
-                    artist_sim = 0.8  # Boost score if featured, but primary artist doesn't match well
-
+                    artist_sim = 0.8
+                
                 album_sim = max(combined_similarity(alb, remote_album) for alb in album_vars) if album_vars else combined_similarity(album, remote_album)
+
+                # 2. Similarity to the search query string itself
+                remote_full_string = f"{remote_title} {remote_artist}".strip()
+                query_sim = combined_similarity(v, remote_full_string)
 
                 # --- Scoring ---
                 score = (base_title_weight * title_sim +
                          base_artist_weight * artist_sim +
-                         base_album_weight * album_sim)
+                         base_album_weight * album_sim +
+                         query_weight * query_sim)
 
                 # --- Bonuses & Penalties ---
                 # 1. Album match is critical. High bonus for match, high penalty for mismatch.
                 if album:
-                    if album_sim > 0.9:
-                        score += 0.3  # Strong bonus for near-perfect album match
+                    # Only apply strong album bonus if title or artist is a decent match already
+                    if album_sim > 0.9 and (title_sim > 0.5 or artist_sim > 0.5):
+                        score += 0.15  # Reduced bonus
                     elif album_sim < 0.3:
-                        score *= 0.6  # Heavy penalty for clear album mismatch
+                        score *= 0.7  # Penalty for clear album mismatch
 
                 # 2. Artist match bonus
                 if artist and (artist_sim > 0.95 or any(normalize_base(a).lower() == normalize_str(remote_artist) for a in artist_vars)):
@@ -927,7 +938,6 @@ def gen_variants(text: str) -> set[str]:
             pass
 
     # 清洗去重
-    variants = {normalize_base(v) for v in variants if v}
     return {v for v in variants if v}
 
 # --- File Saving Functions ---

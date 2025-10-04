@@ -120,11 +120,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     
         if (playlist.length > 1) {
-            playlistBtn.style.display = 'block';
+            // 播放列表按钮只在移动端显示，通过CSS的mobile-only类控制
+            // playlistBtn在HTML中已有mobile-only类，不需要手动设置display
             prevBtn.style.display = 'block';
             nextBtn.style.display = 'block';
             modeBtn.style.display = 'block';
         } else {
+            // 单曲模式下隐藏所有控制按钮
             playlistBtn.style.display = 'none';
             prevBtn.style.display = 'none';
             nextBtn.style.display = 'none';
@@ -298,8 +300,20 @@ document.addEventListener('DOMContentLoaded', () => {
         checkMarquee(songTitle);
         checkMarquee(songArtist);
         checkMarquee(songAlbum); // Check marquee for album
-        albumCover.src = getCacheBustedUrl(song.cover);
-        playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
+        // 设置默认封面,并等待加载完成后取色
+        const defaultCoverUrl = getCacheBustedUrl(song.cover);
+        albumCover.onload = () => {
+            playerBg.style.backgroundImage = `url("${albumCover.src}")`;
+            setThemeColor(albumCover);
+            albumCover.onload = null;
+            albumCover.onerror = null;
+        };
+        albumCover.onerror = () => {
+            console.warn('Default cover failed to load');
+            albumCover.onload = null;
+            albumCover.onerror = null;
+        };
+        albumCover.src = defaultCoverUrl;
     
         fetchMusicInfo(song);
     
@@ -340,11 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
             onend: () => playNext(),
             onload: () => {
                 durationEl.textContent = formatTime(sound.duration());
-                if (albumCover.complete && albumCover.naturalWidth > 0) {
-                    setThemeColor(albumCover);
-                } else {
-                    albumCover.onload = () => setThemeColor(albumCover);
-                }
+                // 不在这里设置主题色,等待封面真正加载完成后再取色
                 if (playOnLoad) {
                     playSong();
                 }
@@ -454,13 +464,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                    // Trigger the load process
                    albumCover.src = getCacheBustedUrl(coverUrl);
-                } else {
-                    // 如果后端没有返回封面文件名，保持原有逻辑或使用默认封面
-                    console.warn("No cover_filename in API response, using default cover.");
-                    albumCover.src = getCacheBustedUrl(song.cover);
-                    playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
-                    setThemeColor(albumCover);
                 }
+                // 如果后端没有返回封面,loadSong中已经设置了默认封面和onload事件
 
                 // 新增：检查并处理返回的歌词文件或内容
                 if (info.lyrics_filename) {
@@ -1120,21 +1125,167 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setThemeColor(img) {
         try {
-            const dominantColor = colorThief.getColor(img);
-            const palette = colorThief.getPalette(img, 5); // 获取更多颜色
-            const accentColor = getContrastColor(dominantColor, palette); // 选择对比度最高的颜色
+            // 确保图片已完全加载
+            if (!img.complete || !img.naturalWidth) {
+                console.warn('Image not fully loaded, skipping theme color extraction');
+                return;
+            }
+
+            const palette = colorThief.getPalette(img, 10); // 获取更多颜色以筛选
+            
+            // 计算亮度 (0-255)
+            const getBrightness = (c) => (c[0] * 299 + c[1] * 587 + c[2] * 114) / 1000;
+            
+            // 计算饱和度 (0-100)
+            const getSaturation = (c) => {
+                const max = Math.max(c[0], c[1], c[2]);
+                const min = Math.min(c[0], c[1], c[2]);
+                return max === 0 ? 0 : (max - min) / max * 100;
+            };
+            
+            // 转换RGB到HSL以获取色调
+            const rgbToHsl = (r, g, b) => {
+                r /= 255;
+                g /= 255;
+                b /= 255;
+                const max = Math.max(r, g, b);
+                const min = Math.min(r, g, b);
+                let h, s, l = (max + min) / 2;
+
+                if (max === min) {
+                    h = s = 0; // 灰色
+                } else {
+                    const d = max - min;
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    switch (max) {
+                        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                        case g: h = ((b - r) / d + 2) / 6; break;
+                        case b: h = ((r - g) / d + 4) / 6; break;
+                    }
+                }
+                return [h * 360, s * 100, l * 100]; // 色调(0-360), 饱和度(0-100), 亮度(0-100)
+            };
+            
+            // 过滤和评分颜色
+            let accentColor = palette[0];
+            let maxScore = 0;
+            
+            for (const color of palette) {
+                const brightness = getBrightness(color);
+                const saturation = getSaturation(color);
+                const [hue, hslSat, hslLight] = rgbToHsl(color[0], color[1], color[2]);
+                
+                // 过滤条件：亮度至少130，饱和度至少20
+                if (brightness < 130 || saturation < 20) {
+                    continue;
+                }
+                
+                // 降低棕色和灰色的权重
+                // 棕色通常在 20-40 度之间，且饱和度较低
+                let colorPenalty = 0;
+                if (hue >= 20 && hue <= 40 && saturation < 50) {
+                    colorPenalty = 30; // 棕色惩罚
+                }
+                
+                // 灰色惩罚（低饱和度）
+                if (saturation < 30) {
+                    colorPenalty += 20;
+                }
+                
+                // 综合评分：优先考虑高饱和度和亮度
+                // 饱和度权重更高，确保颜色鲜艳
+                const score = (saturation * 0.7 + brightness * 0.3) - colorPenalty;
+                
+                if (score > maxScore) {
+                    maxScore = score;
+                    accentColor = color;
+                }
+            }
+            
+            // 如果没有找到合适的颜色，使用最亮的颜色
+            if (maxScore === 0) {
+                accentColor = palette.reduce((prev, curr) =>
+                    getBrightness(curr) > getBrightness(prev) ? curr : prev
+                );
+            }
+            
+            // 增强饱和度（如果颜色不够鲜艳）
+            const saturation = getSaturation(accentColor);
+            if (saturation < 60) {
+                const [h, s, l] = rgbToHsl(accentColor[0], accentColor[1], accentColor[2]);
+                // 将HSL转回RGB，提高饱和度
+                const hslToRgb = (h, s, l) => {
+                    h /= 360;
+                    s /= 100;
+                    l /= 100;
+                    let r, g, b;
+                    if (s === 0) {
+                        r = g = b = l;
+                    } else {
+                        const hue2rgb = (p, q, t) => {
+                            if (t < 0) t += 1;
+                            if (t > 1) t -= 1;
+                            if (t < 1/6) return p + (q - p) * 6 * t;
+                            if (t < 1/2) return q;
+                            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                            return p;
+                        };
+                        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                        const p = 2 * l - q;
+                        r = hue2rgb(p, q, h + 1/3);
+                        g = hue2rgb(p, q, h);
+                        b = hue2rgb(p, q, h - 1/3);
+                    }
+                    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+                };
+                
+                // 提升饱和度到至少60
+                const enhancedSat = Math.max(s, 60);
+                accentColor = hslToRgb(h, enhancedSat, l);
+            }
             
             const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
                 const hex = x.toString(16);
                 return hex.length === 1 ? '0' + hex : hex;
             }).join('');
             
+            // ---- 额外：保证颜色在桌面端不会过暗 ----
+            const ensureMinBrightness = (rgb, minY = 105) => {
+                // 感知亮度 Y (Rec.601)
+                const y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+                if (y >= minY) return rgb;
+                const factor = minY / (y || 1); // 避免除 0
+                return [0,1,2].map(i => Math.min(255, Math.round(rgb[i] * factor)));
+            };
+
+            // 桌面端(有 hover 能力)才强制提亮，移动端保持原味避免偏灰发光太亮
+            if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                accentColor = ensureMinBrightness(accentColor, 115);
+            }
+
             const accentHex = rgbToHex(accentColor[0], accentColor[1], accentColor[2]);
-            const accentHoverHex = rgbToHex(
-                Math.min(255, accentColor[0] + 20),
-                Math.min(255, accentColor[1] + 20),
-                Math.min(255, accentColor[2] + 20)
-            );
+
+            // 计算 hover 颜色：转 HSL 增加亮度和饱和度再回 RGB
+            const [hH, sH, lH] = rgbToHsl(accentColor[0], accentColor[1], accentColor[2]);
+            const hoverHslL = Math.min(90, lH + 12); // 提亮
+            const hoverHslS = Math.min(100, sH + 10); // 略增饱和
+            const hoverRgb = (() => {
+                const hslToRgb = (h, s, l) => {
+                    h /= 360; s/=100; l/=100;
+                    let r,g,b;
+                    if (s === 0) { r=g=b=l; } else {
+                        const hue2rgb = (p,q,t)=>{ if(t<0) t+=1; if(t>1) t-=1; if(t<1/6) return p+(q-p)*6*t; if(t<1/2) return q; if(t<2/3) return p+(q-p)*(2/3 - t)*6; return p; };
+                        const q = l < .5 ? l * (1 + s) : l + s - l*s;
+                        const p = 2 * l - q;
+                        r = hue2rgb(p,q,h + 1/3);
+                        g = hue2rgb(p,q,h);
+                        b = hue2rgb(p,q,h - 1/3);
+                    }
+                    return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+                };
+                return hslToRgb(hH, hoverHslS, hoverHslL);
+            })();
+            const accentHoverHex = rgbToHex(hoverRgb[0], hoverRgb[1], hoverRgb[2]);
 
             const brightness = Math.round(((parseInt(accentColor[0]) * 299) +
                                          (parseInt(accentColor[1]) * 587) +
@@ -1144,12 +1295,14 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.style.setProperty('--accent-color', accentHex);
             document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
             document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
+            document.documentElement.style.setProperty('--accent-color-rgb', `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`);
         } catch (e) {
             console.error("Error getting color from image:", e);
             // Restore default colors
             document.documentElement.style.setProperty('--accent-color', '#00bcd4');
             document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
             document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
+            document.documentElement.style.setProperty('--accent-color-rgb', '0, 188, 212');
         }
     }
     
