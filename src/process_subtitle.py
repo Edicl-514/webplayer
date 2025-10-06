@@ -28,21 +28,39 @@ from openai import APIError
 from tqdm import tqdm
 import argparse
 import sys
+from urllib.parse import unquote
 
 # --- 进度报告 ---
+# 全局变量用于存储当前处理的文件路径
+_current_vtt_file = None
+_current_media_dir = None
+
+def _set_current_file_info(vtt_file: str, media_dir: str):
+    """设置当前处理的文件信息"""
+    global _current_vtt_file, _current_media_dir
+    # 将反斜杠转换为正斜杠，确保跨平台一致性
+    _current_vtt_file = vtt_file.replace('\\', '/') if vtt_file else vtt_file
+    _current_media_dir = media_dir
+
 def _report_progress(task: str, current: int, total: int):
     """向标准输出打印JSON格式的进度信息"""
     progress_data = {
         "type": "progress",
         "task": task,
         "current": current,
-        "total": total
+        "total": total,
+        "vtt_file": _current_vtt_file,
+        "media_dir": _current_media_dir
     }
     # 使用 sys.stdout.flush() 确保实时输出
     print(json.dumps(progress_data, ensure_ascii=False), flush=True)
+    # 添加调试日志到 stderr（可通过环境变量开启，默认关闭以减少噪音）
+    if os.environ.get('DEBUG_SUBTITLE') == '1':
+        sys.stderr.write(f"[Progress Report] task={task}, current={current}, total={total}, vtt_file={_current_vtt_file}\n")
+        sys.stderr.flush()
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 配置日志（降低默认级别以减少控制台输出）
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -127,16 +145,36 @@ class VTTCorrector:
         Returns:
             模型配置字典
         """
-        # 处理相对路径 ../config.json 的情况
-        if self.config_file.startswith("../"):
-            config_path = Path(self.config_file[3:])  # 去掉 "../" 前缀
+        # 解析 config_file 的真实路径：支持绝对路径、相对于 model_dir、以及相对于当前工作目录
+        cfg_candidate = Path(self.config_file)
+        config_path = None
+
+        if cfg_candidate.is_absolute():
+            config_path = cfg_candidate.resolve()
         else:
-            config_path = self.model_dir / self.config_file
-        
+            # 优先尝试 model_dir 下的相对路径
+            candidate1 = (self.model_dir / cfg_candidate).resolve()
+            if candidate1.exists():
+                config_path = candidate1
+            else:
+                # 其次尝试以当前工作目录为基准
+                candidate2 = Path.cwd() / cfg_candidate
+                if candidate2.exists():
+                    config_path = candidate2.resolve()
+                else:
+                    # 最后尝试直接按给定字符串解析（容忍 '../config.json' 之类）
+                    candidate3 = cfg_candidate.resolve() if hasattr(cfg_candidate, 'resolve') else cfg_candidate
+                    if candidate3.exists():
+                        config_path = candidate3
+
         # 检查配置文件是否存在
-        if not config_path.exists():
-            logger.error(f"配置文件不存在: {config_path}")
+        if not config_path or not Path(config_path).exists():
+            logger.error(f"配置文件不存在: {self.config_file} (尝试过的路径: {self.model_dir / self.config_file}, {Path.cwd() / self.config_file})")
             return []
+
+        # 保存解析后的 config_path 及其目录，后续加载 model_path 时可相对该目录解析
+        self.config_path = Path(config_path).resolve()
+        self.config_dir = self.config_path.parent
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -416,22 +454,32 @@ class VTTCorrector:
         """加载GGUF模型"""
         # 自动处理绝对路径和相对路径
         model_path_obj = Path(model_name)
+        # 如果传入的 model_name 是绝对路径，直接使用
         if model_path_obj.is_absolute():
             model_path = model_path_obj
         else:
-            model_path = self.model_dir / model_name
+            # 如果 model_name 包含目录部分（如 path/to/model.gguf），优先以 config 文件目录解析
+            if model_path_obj.parent != Path('.') and hasattr(self, 'config_dir'):
+                candidate = (self.config_dir / model_path_obj).resolve()
+                if candidate.exists():
+                    model_path = candidate
+                else:
+                    model_path = (self.model_dir / model_path_obj).resolve()
+            else:
+                model_path = (self.model_dir / model_path_obj).resolve()
+
         if not model_path.exists() or not model_path.is_file():
             gguf_files = list(self.model_dir.glob("*.gguf"))
             if gguf_files:
                 model_path = gguf_files[0]
                 logger.info(f"自动选择GGUF模型: {model_path.name}")
-                # 更新配置中的模型路径
-                self.model_config["model_path"] = model_path.name
+                # 更新配置中的模型路径为已解析的文件名
+                self.model_config["model_path"] = str(model_path)
             else:
-                raise FileNotFoundError(f"在 {self.model_dir} 中未找到.gguf模型文件")
+                raise FileNotFoundError(f"在 {self.model_dir} 中未找到.gguf模型文件，也未解析到指定路径: {model_name}")
 
         logger.info(f"正在加载GGUF模型: {model_path}")
-        
+
         gguf_config = self.model_config.get("gguf_config", {})
         try:
             logger.info(f"使用GGUF配置加载模型: {gguf_config}")
@@ -467,17 +515,25 @@ class VTTCorrector:
         if model_path_obj.is_absolute():
             model_path = model_path_obj
         else:
-            model_path = self.model_dir / model_name
+            # 如果 model_name 包含目录部分，优先以 config 文件目录解析
+            if model_path_obj.parent != Path('.') and hasattr(self, 'config_dir'):
+                candidate = (self.config_dir / model_path_obj).resolve()
+                if candidate.exists():
+                    model_path = candidate
+                else:
+                    model_path = (self.model_dir / model_path_obj).resolve()
+            else:
+                model_path = (self.model_dir / model_path_obj).resolve()
         
         if not model_path.exists() or not model_path.is_dir():
             model_dirs = [d for d in self.model_dir.iterdir() if d.is_dir() and (d / "config.json").exists()]
             if model_dirs:
                 model_path = model_dirs[0]
                 logger.info(f"自动选择Transformers模型: {model_path.name}")
-                # 更新配置中的模型路径
-                self.model_config["model_path"] = model_path.name
+                # 更新配置中的模型路径为已解析的路径
+                self.model_config["model_path"] = str(model_path)
             else:
-                raise FileNotFoundError(f"在 {self.model_dir} 中未找到有效的Transformers模型目录")
+                raise FileNotFoundError(f"在 {self.model_dir} 中未找到有效的Transformers模型目录，且未解析到指定路径: {model_name}")
         
         logger.info(f"正在加载Transformers模型: {model_path}")
         
@@ -1411,7 +1467,22 @@ class VTTCorrector:
                 break
 
             logger.info(f"--- 开始第 {round_num}/{max_rounds} 轮 {task_name}, 共 {len(groups_to_process)} 组 ---")
+            sys.stderr.write(f"[MultiRound] Round {round_num}/{max_rounds}, processing {len(groups_to_process)} groups for {task_name}\n")
+            sys.stderr.flush()
+            
             failed_groups = []
+            # 在启动该轮处理前，向前端发送初始的 progress（current=0），以确保 total 能被前端记录
+            try:
+                total_groups = len(groups_to_process)
+                if total_groups > 0:
+                    sys.stderr.write(f"[MultiRound] Sending initial progress: 0/{total_groups} for {task_name}\n")
+                    sys.stderr.flush()
+                    _report_progress(task_name, 0, total_groups)
+            except Exception as e:
+                # 不要因为发送进度失败而中断处理
+                logger.debug(f'发送初始进度信息失败: {e}，继续处理。')
+                sys.stderr.write(f"[MultiRound] Failed to send initial progress: {e}\n")
+                sys.stderr.flush()
             
             with ThreadPoolExecutor(max_workers=concurrent_threads) as executor:
                 future_to_group = {executor.submit(self._process_single_group, group, process_func, task_name, caption_lock): group for group in groups_to_process}
@@ -1581,6 +1652,9 @@ class VTTCorrector:
             self._load_glossary_for_vtt(input_file)
             logger.info(f"开始翻译文件: {input_file}")
             
+            # 立即发送初始进度，让前端知道任务已开始
+            _report_progress("翻译", 0, 1)
+            
             # 1. 读取VTT文件
             vtt = webvtt.read(input_file)
             captions = list(vtt)
@@ -1614,7 +1688,11 @@ class VTTCorrector:
             # 4. 如果不是中文，则翻译
             if lang not in ['zh-cn', 'zh-tw']:
                 logger.info("字幕非中文，开始翻译...")
+                sys.stderr.write(f"[Translate] Starting translation process, language detected: {lang}\n")
+                sys.stderr.flush()
                 caption_groups_for_translation = self._group_captions(processed_captions)
+                sys.stderr.write(f"[Translate] Created {len(caption_groups_for_translation)} caption groups\n")
+                sys.stderr.flush()
                 
                 self._process_groups_multi_round(
                     initial_groups=caption_groups_for_translation,
@@ -1623,6 +1701,8 @@ class VTTCorrector:
                 )
             else:
                 logger.info("字幕为中文，无需翻译。")
+                sys.stderr.write(f"[Translate] Subtitles are in Chinese, skipping translation\n")
+                sys.stderr.flush()
 
             # 5. 保存翻译后的VTT文件
             final_vtt = webvtt.WebVTT()
@@ -1651,6 +1731,9 @@ class VTTCorrector:
             self._load_glossary_for_vtt(input_file)
             logger.info(f"开始纠错文件: {input_file}")
             
+            # 立即发送初始进度，让前端知道任务已开始
+            _report_progress("纠错", 0, 1)
+            
             # 1. 读取VTT文件
             vtt = webvtt.read(input_file)
             captions = list(vtt)
@@ -1674,7 +1757,11 @@ class VTTCorrector:
     
             # 3. 对中文文本进行纠错
             logger.info("开始进行中文纠错...")
+            sys.stderr.write(f"[Correct] Starting correction process\n")
+            sys.stderr.flush()
             caption_groups_for_correction = self._group_captions(processed_captions)
+            sys.stderr.write(f"[Correct] Created {len(caption_groups_for_correction)} caption groups\n")
+            sys.stderr.flush()
             
             self._process_groups_multi_round(
                 initial_groups=caption_groups_for_correction,
@@ -1778,16 +1865,36 @@ def main():
     args = parser.parse_args()
 
     # --- 文件路径处理 ---
-    vtt_file_relative = args.vtt_file
+    # 保存原始路径（用于前端 taskId 匹配）
+    vtt_file_original = args.vtt_file
+    
+    # 先对 URL 编码的路径进行解码（用于文件系统操作）
+    vtt_file_relative = unquote(args.vtt_file)
     media_dir = args.media_dir
     
-    # 优先从 cache/subtitles 目录查找
-    full_vtt_path = os.path.join(os.path.dirname(__file__), vtt_file_relative)
-    if not os.path.exists(full_vtt_path):
-        # 如果缓存中没有，则从媒体目录查找
-        full_vtt_path = os.path.join(media_dir, vtt_file_relative)
+    logger.info(f"接收到的参数 - VTT文件: {args.vtt_file}")
+    logger.info(f"解码后的VTT文件: {vtt_file_relative}")
+    logger.info(f"媒体目录: {media_dir}")
+    
+    # 判断路径是相对于哪个目录的
+    # 如果路径以 cache/ 开头，说明是相对于 src 目录的缓存路径
+    if vtt_file_relative.startswith('cache/') or vtt_file_relative.startswith('cache\\'):
+        # 从 src 目录（脚本所在目录）拼接
+        full_vtt_path = os.path.join(os.path.dirname(__file__), vtt_file_relative)
+        logger.info(f"检测到缓存路径，使用脚本目录拼接: {full_vtt_path}")
+    else:
+        # 先尝试从 cache/subtitles 目录查找
+        cache_path = os.path.join(os.path.dirname(__file__), 'cache', 'subtitles', vtt_file_relative)
+        if os.path.exists(cache_path):
+            full_vtt_path = cache_path
+            logger.info(f"在缓存目录找到文件: {full_vtt_path}")
+        else:
+            # 如果缓存中没有，则从媒体目录查找
+            full_vtt_path = os.path.join(media_dir, vtt_file_relative)
+            logger.info(f"使用媒体目录拼接: {full_vtt_path}")
     
     input_file = os.path.normpath(full_vtt_path)
+    logger.info(f"最终文件路径: {input_file}")
     
     if not os.path.exists(input_file):
         print(json.dumps({"type": "error", "message": f"文件未找到: {input_file}"}, ensure_ascii=False), flush=True)
@@ -1800,22 +1907,26 @@ def main():
             print(json.dumps({"type": "error", "message": "模型未能成功加载。"}, ensure_ascii=False), flush=True)
             sys.exit(1)
 
+        # --- 设置当前文件信息，用于进度报告 ---
+        # 使用原始路径（保持 URL 编码），以便与前端的 currentSubtitleUrl 匹配
+        _set_current_file_info(vtt_file_original, media_dir)
+
         # --- 任务执行 ---
         if args.task == "translate":
             output_file = os.path.join(os.path.dirname(input_file), f"{Path(input_file).stem}_Translated.vtt")
             success = corrector.translate_vtt_file(input_file, output_file)
             if success:
-                print(json.dumps({"type": "complete", "task": "翻译", "processed_file": output_file}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "complete", "task": "翻译", "processed_file": output_file, "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
             else:
-                print(json.dumps({"type": "error", "message": "翻译任务失败。"}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "error", "message": "翻译任务失败。", "task": "翻译", "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
 
         elif args.task == "correct":
             output_file = os.path.join(os.path.dirname(input_file), f"{Path(input_file).stem}_Corrected.vtt")
             success = corrector.correct_vtt_file_only(input_file, output_file)
             if success:
-                print(json.dumps({"type": "complete", "task": "纠错", "processed_file": output_file}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "complete", "task": "纠错", "processed_file": output_file, "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
             else:
-                print(json.dumps({"type": "error", "message": "纠错任务失败。"}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "error", "message": "纠错任务失败。", "task": "纠错", "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
 
         elif args.task == "glossary":
             from generate_glossary import GlossaryGenerator
@@ -1824,15 +1935,15 @@ def main():
             if success:
                 glossary_dir = Path("./cache/subtitles/glossary")
                 glossary_file = glossary_dir / f"{Path(input_file).stem}.txt"
-                print(json.dumps({"type": "complete", "task": "术语表", "glossary_file": str(glossary_file)}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "complete", "task": "术语表", "glossary_file": str(glossary_file), "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
             else:
-                print(json.dumps({"type": "error", "message": "术语表生成失败。"}, ensure_ascii=False), flush=True)
+                print(json.dumps({"type": "error", "message": "术语表生成失败。", "task": "术语表", "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
 
     except Exception as e:
         logger.error(f"命令行任务执行失败: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        print(json.dumps({"type": "error", "message": f"发生意外错误: {e}"}, ensure_ascii=False), flush=True)
+        print(json.dumps({"type": "error", "message": f"发生意外错误: {e}", "vtt_file": vtt_file_original, "media_dir": media_dir}, ensure_ascii=False), flush=True)
         sys.exit(1)
 
 

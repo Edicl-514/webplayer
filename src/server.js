@@ -1852,13 +1852,28 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        // 解码 URL 编码的路径
+        const vttFileDecoded = decodeURIComponent(vtt_file);
+        
+        console.log(`[Semantic Search] VTT file: ${vtt_file}`);
+        console.log(`[Semantic Search] Decoded VTT file: ${vttFileDecoded}`);
+        console.log(`[Semantic Search] Media Dir: ${mediaDir}`);
+
         // 安全地构建 VTT 文件的完整路径
         let fullVttPath;
-        if (vtt_file.startsWith('cache' + path.sep) || vtt_file.startsWith('cache/')) {
-            fullVttPath = path.join(__dirname, vtt_file);
+        if (vttFileDecoded.startsWith('cache' + path.sep) || vttFileDecoded.startsWith('cache/')) {
+            fullVttPath = path.join(__dirname, vttFileDecoded);
         } else {
-            fullVttPath = path.join(mediaDir, vtt_file);
+            // 先尝试缓存目录
+            const cachePath = path.join(__dirname, 'cache', 'subtitles', vttFileDecoded);
+            if (fs.existsSync(cachePath)) {
+                fullVttPath = cachePath;
+            } else {
+                fullVttPath = path.join(mediaDir, vttFileDecoded);
+            }
         }
+        
+        console.log(`[Semantic Search] Full VTT path: ${fullVttPath}`);
 
         // 构建转发参数
         const forwardParams = new URLSearchParams({
@@ -1869,7 +1884,7 @@ const server = http.createServer(async (req, res) => {
         
         const pythonServiceUrl = `http://127.0.0.1:5000/search?${forwardParams.toString()}`;
 
-        //console.log(`Forwarding semantic search request to: ${pythonServiceUrl}`);
+        console.log(`[Semantic Search] Forwarding to: ${pythonServiceUrl}`);
 
         http.get(pythonServiceUrl, (proxyRes) => {
             let data = '';
@@ -1951,7 +1966,10 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
 
-                const taskId = `${task}::${vtt_file}::${mediaDir}`;
+                // Normalize paths to match keys used when starting tasks
+                const normVtt = path.normalize(vtt_file);
+                const normMedia = path.normalize(mediaDir);
+                const taskId = `${task}::${normVtt}::${normMedia}`;
                 const processToKill = runningSubtitleTasks.get(taskId);
 
                 if (processToKill) {
@@ -2871,19 +2889,30 @@ async function findMusicFilesRecursively(dir) {
 // --- 新增：运行字幕处理脚本并广播进度的函数 ---
 const runningSubtitleTasks = new Map(); // 用于跟踪正在运行的进程
 
+// 控制服务器端日志详细程度，默认关闭以减少控制台噪音
+const VERBOSE = process.env.VERBOSE_SERVER === '1';
+
 function runSubtitleProcess(req, res, task) {
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', () => {
         try {
             const { vtt_file, mediaDir } = JSON.parse(body);
+            if (VERBOSE) console.log(`[Subtitle Process] Request received - Task: ${task}, VTT: ${vtt_file}, MediaDir: ${mediaDir}`);
+            
             if (!vtt_file || !mediaDir) {
                 res.statusCode = 400;
                 res.end(JSON.stringify({ error: "Missing 'vtt_file' or 'mediaDir' parameter" }));
                 return;
             }
 
-            const taskId = `${task}::${vtt_file}::${mediaDir}`;
+            // Normalize incoming paths so task IDs are stable across requests
+            const normVtt = path.normalize(vtt_file);
+            const normMedia = path.normalize(mediaDir);
+            const taskId = `${task}::${normVtt}::${normMedia}`;
+            
+            if (VERBOSE) console.log(`[Subtitle Process] Generated Task ID: ${taskId}`);
+            
             if (runningSubtitleTasks.has(taskId)) {
                 res.statusCode = 409; // Conflict
                 res.end(JSON.stringify({ error: `Task '${task}' for this file is already running.` }));
@@ -2893,8 +2922,9 @@ function runSubtitleProcess(req, res, task) {
             res.statusCode = 202;
             res.end(JSON.stringify({ success: true, message: `Task '${task}' started.` }));
 
-            const args = [path.join(__dirname, 'process_subtitle.py'), task, '--vtt-file', vtt_file, '--media-dir', mediaDir];
-            //console.log(`[Subtitle Process] Spawning: python ${args.join(' ')}`);
+            // Use normalized paths when passing to the python script to keep consistency
+            const args = [path.join(__dirname, 'process_subtitle.py'), task, '--vtt-file', normVtt, '--media-dir', normMedia];
+            if (VERBOSE) console.log(`[Subtitle Process] Spawning: python ${args.join(' ')}`);
 
             const pythonProcess = spawn('python', args, {
                 cwd: __dirname,
@@ -2902,9 +2932,11 @@ function runSubtitleProcess(req, res, task) {
             });
 
             runningSubtitleTasks.set(taskId, pythonProcess);
-            //(`[Subtitle Process] Task started with PID: ${pythonProcess.pid} and ID: ${taskId}`);
+            if (VERBOSE) console.log(`[Subtitle Process] Task started with PID: ${pythonProcess.pid} and ID: ${taskId}`);
 
             let stdoutBuffer = '';
+            // Buffer stderr chunks and only broadcast on error/exit to reduce chattiness
+            let stderrBuffer = '';
             pythonProcess.stdout.on('data', (data) => {
                 stdoutBuffer += data.toString();
                 const lines = stdoutBuffer.split('\n');
@@ -2913,26 +2945,34 @@ function runSubtitleProcess(req, res, task) {
                     if (line) {
                         try {
                             const jsonData = JSON.parse(line);
+                            // Only broadcast progress messages; reduce log output unless verbose
+                            if (VERBOSE) console.log(`[Subtitle Process] Broadcasting progress:`, jsonData);
                             broadcast(jsonData);
                         } catch (e) {
-                            console.warn(`[Subtitle Process] Failed to parse JSON from stdout line: "${line}"`, e);
+                            if (VERBOSE) console.warn(`[Subtitle Process] Failed to parse JSON from stdout line: "${line}"`, e);
                         }
                     }
                 }
                 stdoutBuffer = lines[lines.length - 1];
             });
-
             pythonProcess.stderr.on('data', (data) => {
-                console.error(`[Subtitle Process] Stderr for task '${task}' (PID: ${pythonProcess.pid}): ${data.toString()}`);
-                broadcast({ type: 'error', message: `任务 '${task}' 发生错误: ${data.toString()}` });
+                // collect stderr but don't immediately broadcast every chunk
+                stderrBuffer += data.toString();
+                if (VERBOSE) console.error(`[Subtitle Process] Stderr chunk for task '${task}' (PID: ${pythonProcess.pid}): ${data.toString()}`);
             });
 
             pythonProcess.on('close', (code, signal) => {
                 runningSubtitleTasks.delete(taskId);
-                //console.log(`[Subtitle Process] Task '${taskId}' (PID: ${pythonProcess.pid}) finished with code ${code} and signal ${signal}.`);
+                if (VERBOSE) console.log(`[Subtitle Process] Task '${taskId}' (PID: ${pythonProcess.pid}) finished with code ${code} and signal ${signal}.`);
+                // If non-zero exit, broadcast combined stderr as an error message
+                if (code !== 0 || process.env.DEBUG_SUBTITLE === '1') {
+                    const msg = stderrBuffer || `Process exited with code ${code}`;
+                    broadcast({ type: 'error', message: `任务 '${task}' 发生错误: ${msg}` });
+                }
                 if (stdoutBuffer.trim()) {
                      try {
                         const jsonData = JSON.parse(stdoutBuffer.trim());
+                        console.log(`[Subtitle Process] Broadcasting final message:`, jsonData);
                         broadcast(jsonData);
                     } catch (e) {
                          console.warn(`[Subtitle Process] Failed to parse final JSON from stdout: "${stdoutBuffer.trim()}"`, e);
@@ -2952,6 +2992,7 @@ function runSubtitleProcess(req, res, task) {
             });
 
         } catch (e) {
+            console.error(`[Subtitle Process] Error parsing request:`, e);
             if (!res.headersSent) {
                 res.statusCode = 400;
                 res.end(JSON.stringify({ error: 'Invalid JSON request body.' }));

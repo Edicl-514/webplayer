@@ -223,6 +223,15 @@
         <script src="vendor/DPlayer.min.js"></script>
         <script>
            const videoTitle = document.getElementById('videoTitle');
+           // Control client-side debug output. Set DEBUG_CLIENT=1 in query string or window.DEBUG_CLIENT to enable verbose logs.
+           const urlDebug = new URLSearchParams(window.location.search).get('DEBUG_CLIENT');
+           const DEBUG_CLIENT = (typeof window.DEBUG_CLIENT !== 'undefined' && window.DEBUG_CLIENT) || urlDebug === '1';
+           if (!DEBUG_CLIENT) {
+               // Mute less important console methods to reduce noise
+               console.log = () => {};
+               console.info = () => {};
+               console.debug = () => {};
+           }
            const urlParams = new URLSearchParams(window.location.search);
            const videoSrc = urlParams.get('src');
            const title = urlParams.get('title') || '未知视频';
@@ -236,6 +245,13 @@
            let dpOptions; // 提升作用域以便全局访问
            let currentSubtitleUrl = null; // 用于存储当前字幕的URL
    
+           // 规范化路径，用于生成一致的 taskId
+           function normalizePathForTaskId(path) {
+               if (!path) return path;
+               // 将反斜杠转换为正斜杠，保持 URL 编码
+               return path.replace(/\\/g, '/');
+           }
+
            // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
            function buildVideoUrl(src, mediaDir) {
                if (!mediaDir) return src;
@@ -968,13 +984,23 @@
                }
 
                // --- 新的字幕任务进度处理 ---
-               const taskId = `task-${data.task ? data.task.replace(/\s/g, '-') : 'general'}-${currentSubtitleUrl}`;
+               // 使用消息中的 vtt_file 来构建 taskId（如果有的话），否则使用 currentSubtitleUrl
+               const vttFileForTask = data.vtt_file || currentSubtitleUrl;
+               const normalizedVttFile = normalizePathForTaskId(vttFileForTask);
+               const taskId = `task-${data.task ? data.task.replace(/\s/g, '-') : 'general'}-${normalizedVttFile}`;
+               
+               console.log(`WebSocket message received:`, data);
+               console.log(`VTT file from message: ${data.vtt_file}`);
+               console.log(`Current subtitle URL: ${currentSubtitleUrl}`);
+               console.log(`Normalized VTT file: ${normalizedVttFile}`);
+               console.log(`Generated taskId: ${taskId}`);
                
                // 更新或创建任务状态
                if (activeTasks[taskId]) {
                    if (data.type === 'progress') {
-                       activeTasks[taskId].current = data.current;
-                       activeTasks[taskId].total = data.total;
+                       // Guard against zero/undefined total to avoid NaN
+                       activeTasks[taskId].current = typeof data.current === 'number' ? data.current : (activeTasks[taskId].current || 0);
+                       activeTasks[taskId].total = typeof data.total === 'number' ? data.total : (activeTasks[taskId].total || 0);
                    } else if (data.type === 'cancelled') {
                        delete activeTasks[taskId];
                    } else if (data.type === 'complete' || data.type === 'error') {
@@ -987,9 +1013,11 @@
                    if (data.type === 'progress') {
                        const progressBarEl = taskMessageEl.querySelector('.chat-progress-bar-inner');
                        const progressTextEl = taskMessageEl.querySelector('.chat-progress-text');
-                       const percentage = (data.current / data.total) * 100;
+                       // 防止 total 为 0 导致除以零
+                       const safeTotal = (typeof data.total === 'number' && data.total > 0) ? data.total : null;
+                       const percentage = safeTotal ? (data.current / safeTotal) * 100 : 0;
                        progressBarEl.style.width = `${percentage}%`;
-                       progressTextEl.textContent = `${data.task}中... (${data.current}/${data.total})`;
+                       progressTextEl.textContent = safeTotal ? `${data.task}中... (${data.current}/${safeTotal})` : `${data.task}中... (${data.current}/?)`;
                    } else if (data.type === 'complete') {
                        let finalMessage = `✅ 任务 '${data.task}' 完成！`;
                        if (data.processed_file) {
@@ -1011,6 +1039,8 @@
                        taskMessageEl.innerHTML = `❌ 任务 '${data.task || '未知'}' 失败: ${data.message}`;
                        taskMessageEl.removeAttribute('data-task-active');
                    }
+               } else {
+                   console.warn(`No task message element found for taskId: ${taskId}`);
                }
            };
    
@@ -2677,7 +2707,14 @@
                }
 
                const actionText = mode === 'translate' ? '翻译' : '纠错';
-               const taskId = `task-${actionText}-${currentSubtitleUrl}`;
+               const normalizedSubtitleUrl = normalizePathForTaskId(currentSubtitleUrl);
+               const taskId = `task-${actionText}-${normalizedSubtitleUrl}`;
+               
+               console.log(`Starting subtitle task: ${actionText}`);
+               console.log(`Task ID: ${taskId}`);
+               console.log(`VTT File (raw): ${currentSubtitleUrl}`);
+               console.log(`VTT File (normalized): ${normalizedSubtitleUrl}`);
+               console.log(`Media Dir: ${mediaDir}`);
                
                // 添加带进度条的占位符消息
                const progressPlaceholder = `
@@ -2709,6 +2746,7 @@
                        mediaDir: mediaDir
                    })
                }).then(response => {
+                   console.log(`API response status: ${response.status}`);
                    if (!response.ok && response.status !== 202) { // 202 is "Accepted", which is success for us
                        return response.json().then(err => Promise.reject(err));
                    }
@@ -2723,10 +2761,13 @@
                        }
                    }
                }).catch(error => {
+                   console.error(`Task error:`, error);
                    const taskMessageEl = document.getElementById(taskId);
                    if (taskMessageEl) {
                       taskMessageEl.className = 'chat-message error-message';
                       taskMessageEl.innerHTML = `❌ 字幕${actionText}失败: ${error.message || error.error || '未知错误'}`;
+                      taskMessageEl.removeAttribute('data-task-active');
+                      delete activeTasks[taskId];
                    }
                });
            }
@@ -2760,7 +2801,8 @@
                    return;
                }
 
-               const taskId = `task-术语表-${currentSubtitleUrl}`;
+               const normalizedSubtitleUrl = normalizePathForTaskId(currentSubtitleUrl);
+               const taskId = `task-术语表-${normalizedSubtitleUrl}`;
                const progressPlaceholder = `
                    <div class="chat-progress-container">
                        <div class="chat-progress-text">术语表生成中... (0/0)</div>
