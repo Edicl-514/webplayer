@@ -30,6 +30,18 @@ body {
     position: relative;
 }
 
+/* 全局强制所有图标为白色（FontAwesome 等） */
+i, .fa, .fas, .far, .fal, .fab,
+i::before, .fa::before, .fas::before, .far::before, .fal::before, .fab::before {
+    color: #FFFFFF !important;
+}
+
+/* 按钮内的图标继承按钮颜色 */
+button i, button .fa, button .fas, button .far, button .fal, button .fab,
+a i, a .fa, a .fas, a .far, a .fal, a .fab {
+    color: inherit !important;
+}
+
 .player-bg {
     position: fixed;
     top: -20px;
@@ -110,9 +122,24 @@ body {
     justify-content: center;
     align-items: center;
 }
+
+/* 强制按钮图标为白色 */
+.control-btn,
+.control-btn i,
+.control-btn svg {
+    color: #FFFFFF !important;
+}
+
 .control-btn:hover {
     color: var(--accent-color);
 }
+
+.control-btn:hover,
+.control-btn:hover i,
+.control-btn:hover svg {
+    color: var(--accent-color) !important;
+}
+
 .extra-btn {
     font-size: 16px;
     position: relative;
@@ -221,6 +248,11 @@ body {
     background: rgba(0,0,0,0.05);
 }
 
+/* 确保分组标题可读 */
+.subtitle-section-header {
+    color: #FFFFFF !important; /* 强制为白色而非主题色 */
+}
+
 /* 新增：禁用项样式 */
 .subtitle-dropdown-content a.disabled {
     color: var(--secondary-text);
@@ -229,6 +261,11 @@ body {
     cursor: default;
     display: block;
     padding: 8px 15px;
+}
+
+/* 确保禁用项仍然可读（使用浅灰色而非黑色） */
+.subtitle-dropdown-content a.disabled {
+    color: #999999 !important; /* 浅灰色，避免变黑 */
 }
 
 /* 动作项现在使用默认链接样式以保持一致性 */
@@ -266,6 +303,14 @@ body {
     color: var(--primary-text);
     text-decoration: none;
     transition: background-color 0.2s, color 0.2s;
+}
+
+/* 强制下拉菜单文本为白色 */
+.subtitle-dropdown-content a,
+.scraper-dropdown-content a,
+.subtitle-dropdown-content,
+.scraper-dropdown-content {
+    color: #FFFFFF !important;
 }
 
 .subtitle-dropdown-content a:hover {
@@ -333,6 +378,7 @@ body {
    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
    margin-bottom: 10px;
    flex-shrink: 0; /* Prevent title from shrinking */
+   color: #FFFFFF !important; /* 强制为白色，避免深色滤镜影响 */
 }
 
 .panel-content {
@@ -368,6 +414,14 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* 强制 source-container 内所有文本为白色（除了已有特殊样式的元素） */
+.source-container,
+.source-container p,
+/* .source-container span, */
+.source-container div {
+    color: #FFFFFF !important;
+}
+
 .source-container h3 {
     color: var(--accent-hover);
     margin-bottom: 10px;
@@ -376,6 +430,12 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+/* 新增：确保来源标题内的文本节点也为白色 */
+.source-container h3,
+.source-container h3 * {
+    color: #FFFFFF !important; /* 强制标题和其子元素为白色 */
 }
 
 /* 刮削信息来源的删除按钮 */
@@ -726,6 +786,16 @@ body {
 .setting-item label {
     font-size: 16px;
     padding-right: 15px;
+    color: #FFFFFF !important; /* 强制设置项标签为白色 */
+}
+
+/* 强制所有设置相关文本为白色 */
+.setting-category h4,
+.modal-content h2,
+.modal-content p,
+.modal-content label,
+.modal-header h2 {
+    color: #FFFFFF !important;
 }
 
 /* The switch - a checkbox with a custom slider */
@@ -928,6 +998,12 @@ input:checked + .slider:before {
     text-overflow: ellipsis;
     transition: background-color 0.2s, color 0.2s;
 }
+
+/* 强制本地字幕子菜单文本为白色 */
+.subtitle-local-submenu a,
+.subtitle-local-toggle {
+    color: #FFFFFF !important;
+}
 .subtitle-local-submenu a:hover {
     background-color: var(--accent-color);
     color: var(--accent-text-color);
@@ -1047,6 +1123,16 @@ input:checked + .slider:before {
 .chat-header h3 {
     margin: 0;
     font-size: 16px;
+    color: #FFFFFF !important; /* 强制聊天标题为白色 */
+}
+
+/* 强制聊天相关文本为白色 */
+.chat-messages,
+.chat-message,
+.chat-selection-list button,
+.chat-cancel-btn,
+.chat-confirm-btn {
+    color: #FFFFFF !important;
 }
 #closeChatBtn {
     background: none;
@@ -1057,8 +1143,22 @@ input:checked + .slider:before {
     padding: 5px;
     transition: color 0.2s;
 }
+
+/* 强制关闭按钮图标为白色 */
+#closeChatBtn,
+#closeChatBtn i,
+#closeChatBtn svg {
+    color: #FFFFFF !important;
+}
+
 #closeChatBtn:hover {
     color: var(--accent-color);
+}
+
+#closeChatBtn:hover,
+#closeChatBtn:hover i,
+#closeChatBtn:hover svg {
+    color: var(--accent-color) !important;
 }
 
 .chat-messages {
@@ -1121,6 +1221,13 @@ input:checked + .slider:before {
     transition: background-color 0.2s;
     flex-shrink: 0;
 }
+
+/* 确保发送按钮内的图标与背景对比明显 */
+#sendChatBtn i,
+#sendChatBtn svg {
+    color: var(--accent-text-color, #1a1a1a) !important;
+}
+
 #sendChatBtn:hover {
     background: var(--accent-hover);
 }
@@ -1128,6 +1235,11 @@ input:checked + .slider:before {
 #sendChatBtn:disabled {
    background: #555;
    cursor: not-allowed;
+}
+
+#sendChatBtn:disabled i,
+#sendChatBtn:disabled svg {
+    color: #999999 !important;
 }
 
 .chat-message {
@@ -1263,6 +1375,12 @@ input:checked + .slider:before {
     margin-bottom: 8px;
     color: var(--accent-color);
     font-size: 0.9em;
+}
+
+/* 强制模型状态标题和文本为白色 */
+.model-status-category h5,
+.model-selection-list button {
+    color: #FFFFFF !important;
 }
 
 .model-selection-list {

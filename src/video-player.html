@@ -1333,11 +1333,13 @@
                         html += '</div>';
                     });
                     videoInfoContent.innerHTML = html;
-                    // Try to set background from the first JAV result that has a poster
-                    const firstResultWithPoster = data.JAV刮削结果.find(r => r.海报链接 && isImageUrl(r.海报链接));
-                    if (firstResultWithPoster && firstResultWithPoster.海报链接) {
-                        console.log("Found poster in JAV results:", firstResultWithPoster.海报链接);
-                        updateBackgroundAndTheme(firstResultWithPoster.海报链接);
+                    // Try to set background from JAV results in priority order.
+                    // Collect all valid poster URLs from the sources (preserve order of sources)
+                    const javPosterUrls = data.JAV刮削结果.map(r => r.海报链接).filter(u => u && isImageUrl(u));
+                    if (javPosterUrls.length > 0) {
+                        console.log("Found poster(s) in JAV results:", javPosterUrls);
+                        // Pass the array so updateBackgroundAndTheme can attempt sequential fallbacks
+                        updateBackgroundAndTheme(javPosterUrls);
                     } else {
                         console.log("No valid poster found in JAV results, keeping thumbnail as background.");
                     }
@@ -1417,82 +1419,97 @@
                return brightestColor;
            }
    
-          function updateBackgroundAndTheme(imageUrl) {
-               console.log('Attempting to update background and theme with image:', imageUrl);
-               const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
-               console.log('Using proxy URL:', proxyUrl);
+          function updateBackgroundAndTheme(imageUrlOrArray) {
+               // Accept either a single URL or an array of candidate URLs (priority order)
+               const urls = Array.isArray(imageUrlOrArray) ? imageUrlOrArray.slice() : [imageUrlOrArray];
+               if (!urls || urls.length === 0) return;
+
+               console.log('Attempting to update background and theme with image candidates:', urls);
                const playerBg = document.querySelector('.player-bg');
                const colorThief = new ColorThief();
-               const img = new Image();
-   
-               // Set background immediately
-               playerBg.style.backgroundImage = `url('${proxyUrl}')`;
-   
-               img.onload = function() {
-                   console.log(`Image loaded successfully. Dimensions: ${this.naturalWidth}x${this.naturalHeight}. Applying theme.`);
-                   try {
-                       // Pass the loaded image object directly to ColorThief
-                       const dominantColor = colorThief.getColor(this);
-                       const palette = colorThief.getPalette(this, 5);
-                       const accentColor = findBestAccentColor(palette);
-                       console.log("Dominant color:", dominantColor, "Accent color:", accentColor);
-   
-                       // Determine text color based on the brightness of the dominant color of the background
-                       // A more robust method to determine text color based on perceived brightness (Luma)
-                       function getTextColorForBg(rgbColor) {
-                           // Formula for calculating Luma from sRGB
-                           const luma = (0.299 * rgbColor[0] + 0.587 * rgbColor[1] + 0.114 * rgbColor[2]) / 255;
-                           // Use a threshold of 0.5 - greater than 0.5 is a light color, less is a dark color.
-                           // Return black for light backgrounds, white for dark backgrounds for max contrast.
-                           const newColor = luma > 0.5 ? '#000000' : '#FFFFFF';
-                           console.log(`Color: rgb(${rgbColor.join(',')}), Luma: ${luma.toFixed(2)}, Chosen Text Color: ${newColor}`);
-                           return newColor;
+
+               let attemptIndex = 0;
+
+               const tryLoad = (index) => {
+                   const imageUrl = urls[index];
+                   const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+                   console.log(`Attempting image [${index + 1}/${urls.length}]:`, imageUrl, 'proxy ->', proxyUrl);
+
+                   // Immediately set this candidate as background so UI updates quickly
+                   playerBg.style.backgroundImage = `url('${proxyUrl}')`;
+
+                   const img = new Image();
+                   img.crossOrigin = 'Anonymous';
+
+                   img.onload = function() {
+                       console.log(`Image loaded successfully (candidate ${index + 1}). Dimensions: ${this.naturalWidth}x${this.naturalHeight}. Applying theme.`);
+                       try {
+                           const dominantColor = colorThief.getColor(this);
+                           const palette = colorThief.getPalette(this, 5);
+                           const accentColor = findBestAccentColor(palette);
+                           console.log('Dominant color:', dominantColor, 'Accent color:', accentColor);
+
+                           function getTextColorForBg(rgbColor) {
+                               const luma = (0.299 * rgbColor[0] + 0.587 * rgbColor[1] + 0.114 * rgbColor[2]) / 255;
+                               return luma > 0.5 ? '#000000' : '#FFFFFF';
+                           }
+
+                           const newPrimaryTextColor = getTextColorForBg(dominantColor);
+                           const accentTextColor = getTextColorForBg(accentColor);
+
+                           const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
+                               const hex = x.toString(16);
+                               return hex.length === 1 ? '0' + hex : hex;
+                           }).join('');
+
+                           const accentHex = rgbToHex(accentColor[0], accentColor[1], accentColor[2]);
+                           const accentHoverHex = rgbToHex(
+                               Math.min(255, accentColor[0] + 20),
+                               Math.min(255, accentColor[1] + 20),
+                               Math.min(255, accentColor[2] + 20)
+                           );
+
+                           const accentRgb = `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`;
+
+                           document.documentElement.style.setProperty('--primary-text', newPrimaryTextColor);
+                           document.documentElement.style.setProperty('--accent-color', accentHex);
+                           document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
+                           document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
+                           document.documentElement.style.setProperty('--accent-color-rgb', accentRgb);
+
+                           console.log('Theme updated successfully. New primary text:', newPrimaryTextColor, 'New accent:', accentHex);
+                       } catch (e) {
+                           console.error('ColorThief error inside onload:', e);
+                           // Restore default colors on error
+                           document.documentElement.style.setProperty('--primary-text', '#e0e0e0');
+                           document.documentElement.style.setProperty('--accent-color', '#00bcd4');
+                           document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
+                           document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
                        }
-   
-                       const newPrimaryTextColor = getTextColorForBg(dominantColor);
-                       const accentTextColor = getTextColorForBg(accentColor);
-   
-                       const rgbToHex = (r, g, b) => '#' + [r, g, b].map(x => {
-                           const hex = x.toString(16);
-                           return hex.length === 1 ? '0' + hex : hex;
-                       }).join('');
-                       
-                       const accentHex = rgbToHex(accentColor[0], accentColor[1], accentColor[2]);
-                       const accentHoverHex = rgbToHex(
-                           Math.min(255, accentColor[0] + 20),
-                           Math.min(255, accentColor[1] + 20),
-                           Math.min(255, accentColor[2] + 20)
-                       );
-   
-                       const accentRgb = `${accentColor[0]}, ${accentColor[1]}, ${accentColor[2]}`;
-   
-                       document.documentElement.style.setProperty('--primary-text', newPrimaryTextColor);
-                       document.documentElement.style.setProperty('--accent-color', accentHex);
-                       document.documentElement.style.setProperty('--accent-hover', accentHoverHex);
-                       document.documentElement.style.setProperty('--accent-text-color', accentTextColor);
-                       document.documentElement.style.setProperty('--accent-color-rgb', accentRgb);
-                       
-                       console.log('Theme updated successfully. New primary text:', newPrimaryTextColor, 'New accent:', accentHex);
-                   } catch (e) {
-                       console.error("ColorThief error inside onload:", e);
-                       // Restore default colors on error
-                       document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
-                       document.documentElement.style.setProperty('--accent-color', '#00bcd4');
-                       document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
-                       document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
-                   }
+                   };
+
+                   img.onerror = function(e) {
+                       console.error(`Failed to load image candidate ${index + 1} via proxy. The URL was: ${this.src}. This might be a proxy or CORS issue.`, e);
+                       // Try next candidate if any
+                       if (index + 1 < urls.length) {
+                           console.warn(`Falling back to next poster candidate (index ${index + 2}).`);
+                           tryLoad(index + 1);
+                       } else {
+                           console.error('All poster candidates failed to load. Restoring defaults.');
+                           // Restore default theme
+                           document.documentElement.style.setProperty('--primary-text', '#e0e0e0');
+                           document.documentElement.style.setProperty('--accent-color', '#00bcd4');
+                           document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
+                           document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
+                       }
+                   };
+
+                   // Start loading this candidate via proxy
+                   img.src = proxyUrl;
                };
-               img.onerror = function(e) {
-                   console.error(`Failed to load image for ColorThief via proxy. The URL was: ${this.src}. This might be a proxy or CORS issue.`, e);
-                    // Restore default colors on error
-                   document.documentElement.style.setProperty('--primary-text', '#e0e0e0'); // Reset primary text
-                   document.documentElement.style.setProperty('--accent-color', '#00bcd4');
-                   document.documentElement.style.setProperty('--accent-hover', '#00e5ff');
-                   document.documentElement.style.setProperty('--accent-text-color', '#1a1a1a');
-               };
-   
-               img.crossOrigin = 'Anonymous';
-               img.src = proxyUrl;
+
+               // Kick off first attempt
+               tryLoad(0);
            }
     
            function isImageUrl(url) {

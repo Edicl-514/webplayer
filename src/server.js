@@ -348,8 +348,12 @@ const server = http.createServer(async (req, res) => {
 
         function fetchImage(imageUrl, referer) {
             if (currentRedirects >= maxRedirects) {
-                res.statusCode = 500;
-                res.end('Too many redirects');
+                if (!res.headersSent) {
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+                    res.statusCode = 500;
+                    res.end('Too many redirects');
+                }
                 return;
             }
             currentRedirects++;
@@ -373,7 +377,12 @@ const server = http.createServer(async (req, res) => {
                         fetchImage(newUrl, imageUrl); // 使用当前URL作为下一次请求的Referer
                     } else {
                         // 成功获取图片
-                        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                        // Don't forward all upstream headers directly (security). Only set safe headers and CORS.
+                        res.statusCode = proxyRes.statusCode || 200;
+                        res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'image/jpeg');
+                        res.setHeader('Cache-Control', 'public, max-age=86400');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
                         proxyRes.pipe(res);
                     }
                 });
