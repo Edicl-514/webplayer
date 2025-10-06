@@ -17,31 +17,98 @@
    ```bash
    python search_videos.py "你的搜索词"
    ```
+
+可选依赖（用于简繁体转换，以实现“简繁互搜”功能）:
+
+- 推荐: opencc-python-reimplemented
+    安装: 在 PowerShell 中运行:
+    ```powershell
+    pip install opencc-python-reimplemented
+    ```
+
+- 备选: zhconv
+    安装:
+    ```powershell
+    pip install zhconv
+    ```
+
+如果两个包都未安装，脚本仍能工作，但不进行简繁体规范化，搜索将区分简繁体字符。
 """
 import sqlite3
 import json
 import os
 import sys
+import traceback
 
 # --- 配置 ---
 # 假设此脚本与 video_scraper.py 在同一目录下，因此缓存路径的计算方式保持一致
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'videoinfo') if '__file__' in locals() else os.path.join('.', 'cache', 'videoinfo')
 DB_PATH = os.path.join(CACHE_DIR, 'videocache.db')
 
+# 尝试加载简繁转换库（可选依赖）。优先使用 opencc，其次尝试 zhconv；都不可用时退化为恒等函数并给出提示。
+_converter = None
+_converter_type = None
+try:
+    from opencc import OpenCC as _OpenCC
+    _converter = _OpenCC('t2s')
+    _converter_type = 'opencc'
+except Exception:
+    try:
+        # 动态导入 zhconv，避免静态分析器在没有该包的环境中报错
+        import importlib
+        _zhconv = importlib.import_module('zhconv')
+        _converter = _zhconv
+        _converter_type = 'zhconv'
+    except Exception:
+        _converter = None
+        _converter_type = None
+
+if _converter_type is None:
+    print("[search_videos] 注意: 未检测到 opencc/zhconv，简繁转换功能不可用。建议安装：pip install opencc-python-reimplemented", file=sys.stderr)
+
+def normalize_chinese(text):
+    """将输入字符串标准化为简体（如果可用），并返回原始字符串的副本（始终返回字符串）。
+
+    目的：在比较前把所有文本都转为同一规范（这里是简体），从而实现简繁互搜。
+    """
+    if text is None:
+        return ''
+    s = str(text)
+    try:
+        if _converter_type == 'opencc':
+            return _converter.convert(s)
+        elif _converter_type == 'zhconv':
+            # zhconv.convert(s, 'zh-cn') 将字符串转为简体
+            return _converter.convert(s, 'zh-cn')
+        else:
+            return s
+    except Exception:
+        # 避免任何意外导致搜索崩溃，退回到原始字符串
+        try:
+            # 打印一次堆栈以便诊断（在 stderr）
+            traceback.print_exc()
+        except Exception:
+            pass
+        return s
+
 def search_value_in_json(data, search_term, search_key=None):
     """
     递归搜索 JSON 对象（字典或列表）中是否包含指定的搜索词。
     如果提供了 search_key，则只在匹配该键的值中搜索。
     """
+    # 预先做简繁和大小写规范化，后续比较都用规范后的值
+    norm_search_term = normalize_chinese(search_term).lower() if search_term is not None else ''
+    norm_search_key = normalize_chinese(search_key).lower() if search_key is not None else None
+
     if isinstance(data, dict):
-        # 如果指定了 search_key，优先检查当前字典的键
-        if search_key and search_key.lower() in (key.lower() for key in data.keys()):
-             for key, value in data.items():
-                 if key.lower() == search_key.lower():
-                     # 键匹配，现在在这个值内部搜索 search_term (不再需要 search_key)
-                     if search_value_in_json(value, search_term):
-                         return True
-        else: # 如果没有 search_key，或者当前层级没有匹配的键，则继续深入所有子节点
+        # 如果指定了 search_key，优先检查当前字典的键（在规范化后比较）
+        if norm_search_key and any(norm_search_key == normalize_chinese(k).lower() for k in data.keys()):
+            for key, value in data.items():
+                if normalize_chinese(key).lower() == norm_search_key:
+                    # 键匹配，现在在这个值内部搜索 search_term (不再需要 search_key)
+                    if search_value_in_json(value, search_term):
+                        return True
+        else:  # 如果没有 search_key，或者当前层级没有匹配的键，则继续深入所有子节点
             for key, value in data.items():
                 if search_value_in_json(value, search_term, search_key):
                     return True
@@ -51,9 +118,18 @@ def search_value_in_json(data, search_term, search_key=None):
             if search_value_in_json(item, search_term, search_key):
                 return True
     elif isinstance(data, str):
-        # 最终的值匹配
-        if search_term.lower() in data.lower():
+        # 在比较前将数据值也做简繁及大小写规范化
+        norm_data = normalize_chinese(data).lower()
+        if norm_search_term in norm_data:
             return True
+    else:
+        # 其他原子类型（int/float/bool），转换为字符串后比较
+        try:
+            norm_data = normalize_chinese(str(data)).lower()
+            if norm_search_term in norm_data:
+                return True
+        except Exception:
+            pass
     # 可以根据需要添加对其他数据类型（如 int, float）的检查
     # elif isinstance(data, (int, float)):
     #     if str(search_term).lower() == str(data).lower():

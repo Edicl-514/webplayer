@@ -36,7 +36,9 @@ const server = http.createServer(async (req, res) => {
             .then(allFiles => {
                 const musicFiles = allFiles.filter(file => {
                     const lowerFile = file.toLowerCase();
-                    return lowerFile.endsWith('.mp3') || lowerFile.endsWith('.flac');
+                    return lowerFile.endsWith('.mp3') || lowerFile.endsWith('.flac') || 
+                           lowerFile.endsWith('.m4a') || lowerFile.endsWith('.ogg') || 
+                           lowerFile.endsWith('.wav');
                 });
                 const lyricsFiles = allFiles.filter(file => {
                     const lowerFile = file.toLowerCase();
@@ -99,17 +101,17 @@ const server = http.createServer(async (req, res) => {
         const baseDir = allowedMediaDir ? allowedMediaDir.path : MUSIC_DIR; // 如果无效或未提供，则回退到默认
         const fullMusicPath = path.join(baseDir, musicPath);
 
-       const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, query } = parsedUrl.query;
+       const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, only } = parsedUrl.query;
        
     const args = [path.join(__dirname, 'get_music_info.py'), fullMusicPath, '--json-output'];
  
        if (source) {
            args.push('--source', source);
        }
-       // forward `type` param to only fetch specific data when provided
-       const requestedType = parsedUrl.query.type;
-       if (requestedType && ['lyrics','cover','info','all'].includes(requestedType)) {
-           args.push('--only', requestedType);
+       // forward `only` param to only fetch specific data when provided
+       const requestedOnly = only || parsedUrl.query.type; // Support both 'only' and 'type' for backward compatibility
+       if (requestedOnly && ['lyrics','cover','info','all'].includes(requestedOnly)) {
+           args.push('--only', requestedOnly);
        }
        // Always add --no-write for safety from web UI
        args.push('--no-write');
@@ -123,9 +125,6 @@ const server = http.createServer(async (req, res) => {
        }
        if (limit) {
            args.push('--limit', limit);
-       }
-       if (query) {
-           args.push('--query', query);
        }
 
         const pythonProcess = spawn('python', args, {
@@ -582,15 +581,28 @@ const server = http.createServer(async (req, res) => {
 
                 if (fs.existsSync(thumbnailPath)) {
                     const readStream = fs.createReadStream(thumbnailPath);
+                    
+                    // 监听客户端断开连接
+                    req.on('close', () => readStream.destroy());
+                    req.on('error', () => readStream.destroy());
+                    res.on('close', () => readStream.destroy());
+                    res.on('error', () => readStream.destroy());
+                    
                     readStream.on('error', (err) => {
                         console.error(`Error streaming existing thumbnail ${thumbnailPath}:`, err);
                         if (!res.headersSent) {
                             res.statusCode = 404; // Or 500, 404 seems reasonable if it disappeared
                             res.end('Thumbnail file not found or unreadable.');
                         }
+                        readStream.destroy();
                     });
+                    
                     res.setHeader('Content-Type', 'image/jpeg');
-                    readStream.pipe(res);
+                    if (!res.headersSent && !res.finished) {
+                        readStream.pipe(res);
+                    } else {
+                        readStream.destroy();
+                    }
                     return;
                 }
 
@@ -602,15 +614,28 @@ const server = http.createServer(async (req, res) => {
                     generateVideoThumbnail(fullPath, thumbnailPath)
                         .then(() => {
                             const readStream = fs.createReadStream(thumbnailPath);
+                            
+                            // 监听客户端断开连接
+                            req.on('close', () => readStream.destroy());
+                            req.on('error', () => readStream.destroy());
+                            res.on('close', () => readStream.destroy());
+                            res.on('error', () => readStream.destroy());
+                            
                             readStream.on('error', (err) => {
                                 console.error(`Error streaming thumbnail after generation for ${thumbnailPath}:`, err);
                                 if (!res.headersSent) {
                                     res.statusCode = 500;
                                     res.end('Error reading generated thumbnail.');
                                 }
+                                readStream.destroy();
                             });
+                            
                             res.setHeader('Content-Type', 'image/jpeg');
-                            readStream.pipe(res);
+                            if (!res.headersSent && !res.finished) {
+                                readStream.pipe(res);
+                            } else {
+                                readStream.destroy();
+                            }
                         })
                         .catch((error) => {
                             console.error('Error generating video thumbnail:', error);
@@ -619,8 +644,28 @@ const server = http.createServer(async (req, res) => {
                         });
                 } else if (isImage) {
                     const readStream = fs.createReadStream(fullPath);
+                    
+                    // 监听客户端断开连接
+                    req.on('close', () => readStream.destroy());
+                    req.on('error', () => readStream.destroy());
+                    res.on('close', () => readStream.destroy());
+                    res.on('error', () => readStream.destroy());
+                    
+                    readStream.on('error', (err) => {
+                        console.error(`Error streaming image ${fullPath}:`, err);
+                        if (!res.headersSent) {
+                            res.statusCode = 500;
+                            res.end('Error reading image.');
+                        }
+                        readStream.destroy();
+                    });
+                    
                     res.setHeader('Content-Type', getContentType(fullPath));
-                    readStream.pipe(res);
+                    if (!res.headersSent && !res.finished) {
+                        readStream.pipe(res);
+                    } else {
+                        readStream.destroy();
+                    }
                 } else {
                     res.statusCode = 404;
                     res.end('Thumbnails not available for this file type');
@@ -694,8 +739,29 @@ const server = http.createServer(async (req, res) => {
                     const coverFile = name + ext;
                     if (files.some(f => f.toLowerCase() === coverFile)) {
                         const streamPath = path.join(fullPath, coverFile);
+                        const stream = fs.createReadStream(streamPath);
+                        
+                        // 监听客户端断开连接
+                        req.on('close', () => stream.destroy());
+                        req.on('error', () => stream.destroy());
+                        res.on('close', () => stream.destroy());
+                        res.on('error', () => stream.destroy());
+                        
+                        stream.on('error', (err) => {
+                            console.error(`Error streaming cover file ${streamPath}:`, err);
+                            if (!res.headersSent) {
+                                res.statusCode = 500;
+                                res.end('Error reading cover file.');
+                            }
+                            stream.destroy();
+                        });
+                        
                         res.setHeader('Content-Type', getContentType(streamPath));
-                        fs.createReadStream(streamPath).pipe(res);
+                        if (!res.headersSent && !res.finished) {
+                            stream.pipe(res);
+                        } else {
+                            stream.destroy();
+                        }
                         return;
                     }
                 }
@@ -717,8 +783,29 @@ const server = http.createServer(async (req, res) => {
             const firstImage = files.find(f => imageExtensions.includes(path.extname(f).toLowerCase()));
             if (firstImage) {
                  const streamPath = path.join(fullPath, firstImage);
+                const stream = fs.createReadStream(streamPath);
+                
+                // 监听客户端断开连接
+                req.on('close', () => stream.destroy());
+                req.on('error', () => stream.destroy());
+                res.on('close', () => stream.destroy());
+                res.on('error', () => stream.destroy());
+                
+                stream.on('error', (err) => {
+                    console.error(`Error streaming first image ${streamPath}:`, err);
+                    if (!res.headersSent) {
+                        res.statusCode = 500;
+                        res.end('Error reading image file.');
+                    }
+                    stream.destroy();
+                });
+                
                 res.setHeader('Content-Type', getContentType(streamPath));
-                fs.createReadStream(streamPath).pipe(res);
+                if (!res.headersSent && !res.finished) {
+                    stream.pipe(res);
+                } else {
+                    stream.destroy();
+                }
                 return;
             }
             
@@ -1877,6 +1964,164 @@ const server = http.createServer(async (req, res) => {
         });
         return;
     }
+
+    if (pathname === '/api/scrape-directory' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', async () => {
+            try {
+                const { path: relativePath, mediaDir, type: videoType } = JSON.parse(body);
+                const fullPath = path.join(mediaDir, relativePath);
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, message: 'Scraping process started.' }));
+
+                // Run scraping in the background
+                (async () => {
+                    const videoFiles = await findVideoFilesRecursively(fullPath);
+                    const fileTasks = videoFiles.map((filePath, index) => ({
+                        id: `file_${index}_${Date.now()}`,
+                        path: filePath,
+                        name: path.relative(fullPath, filePath) || path.basename(filePath)
+                    }));
+                    
+                    broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+
+                    for (const fileTask of fileTasks) {
+                        broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                        
+                        const result = await new Promise((resolve) => {
+                            const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType];
+                            const pythonProcess = spawn('python', args, {
+                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                            });
+                            let stdoutData = '';
+                            let stderrData = '';
+                            pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                            pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                            pythonProcess.on('close', (code) => {
+                                if (stderrData) { console.error(`[Scraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                                if (code !== 0) {
+                                    resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                                } else {
+                                    try {
+                                        const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                        if (jsonMatch && jsonMatch[1]) {
+                                            const scrapedData = JSON.parse(jsonMatch[1]);
+                                            if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
+                                                resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
+                                            } else {
+                                                resolve({ success: true, data: scrapedData });
+                                            }
+                                        } else {
+                                            resolve({ success: false, error: '无法解析输出', details: stdoutData });
+                                        }
+                                    } catch (e) {
+                                        resolve({ success: false, error: '解析JSON失败', details: stdoutData });
+                                    }
+                                }
+                            });
+                        });
+                        
+                        broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                    }
+                    broadcast({ type: 'scrape_finished_all' });
+                })();
+            } catch (e) {
+                 // This catch is for the initial request parsing.
+                 // It's unlikely to be hit if the scraping is running in the background,
+                 // but good to have for robustness.
+                if (!res.headersSent) {
+                    res.statusCode = 400;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
+                }
+                console.error('Error starting scrape-directory process:', e);
+           }
+       });
+       return;
+   }
+
+   if (pathname === '/api/scrape-music-directory' && req.method === 'POST') {
+       let body = '';
+       req.on('data', chunk => { body += chunk.toString(); });
+       req.on('end', async () => {
+           try {
+               const { path: relativePath, mediaDir, source } = JSON.parse(body);
+               const fullPath = path.join(mediaDir, relativePath);
+
+               res.statusCode = 200;
+               res.setHeader('Content-Type', 'application/json');
+               res.end(JSON.stringify({ success: true, message: 'Music scraping process started.' }));
+
+               // Run scraping in the background
+               (async () => {
+                   const musicFiles = await findMusicFilesRecursively(fullPath);
+                   const fileTasks = musicFiles.map((filePath, index) => ({
+                       id: `music_${index}_${Date.now()}`,
+                       path: filePath,
+                       name: path.relative(fullPath, filePath) || path.basename(filePath)
+                   }));
+                   
+                   broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+
+                   for (const fileTask of fileTasks) {
+                       broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                       
+                       const result = await new Promise((resolve) => {
+                           const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
+                           // Optionally forward 'type' in scraping requests (defaults to all)
+                           const scrapeType = 'all';
+                           if (scrapeType && ['lyrics','cover','info','all'].includes(scrapeType)) {
+                                args.push('--only', scrapeType);
+                           }
+                           const pythonProcess = spawn('python', args, {
+                                 env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                           });
+                           let stdoutData = '';
+                           let stderrData = '';
+                           pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                           pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                           pythonProcess.on('close', (code) => {
+                               if (stderrData) { console.error(`[MusicScraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                               if (code !== 0) {
+                                   resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                               } else {
+                                   try {
+                                       const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                       if (jsonMatch && jsonMatch[1]) {
+                                           const parsedData = JSON.parse(jsonMatch[1]);
+                                           if(parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
+                                               resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
+                                           } else {
+                                               resolve({ success: true, data: parsedData });
+                                           }
+                                       } else {
+                                           resolve({ success: false, error: '未找到匹配', details: stdoutData });
+                                       }
+                                   } catch (e) {
+                                       resolve({ success: false, error: '解析JSON失败', details: stdoutData });
+                                   }
+                               }
+                           });
+                       });
+                       
+                       broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                   }
+                   broadcast({ type: 'music_scrape_finished_all' });
+               })();
+           } catch (e) {
+               if (!res.headersSent) {
+                   res.statusCode = 400;
+                   res.setHeader('Content-Type', 'application/json');
+                   res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
+               }
+               console.error('Error starting scrape-music-directory process:', e);
+           }
+       });
+       return;
+   }
  
      // 新增：处理 /node_modules 的请求
      if (pathname.startsWith('/node_modules/')) {
@@ -1901,12 +2146,38 @@ const server = http.createServer(async (req, res) => {
         // Security check to prevent path traversal attacks
         if (fullMusicPath.startsWith(path.resolve(MUSIC_DIR))) {
             const stream = fs.createReadStream(fullMusicPath);
+            
+            // 监听客户端断开连接
+            req.on('close', () => {
+                stream.destroy();
+            });
+            
+            req.on('error', () => {
+                stream.destroy();
+            });
+            
+            res.on('close', () => {
+                stream.destroy();
+            });
+            
+            res.on('error', () => {
+                stream.destroy();
+            });
+            
             stream.on('error', (err) => {
                 console.error(`Error streaming file ${fullMusicPath}:`, err);
-                res.statusCode = 404;
-                res.end('File not found');
+                if (!res.headersSent && !res.finished) {
+                    res.statusCode = 404;
+                    res.end('File not found');
+                }
+                stream.destroy();
             });
-            stream.pipe(res);
+            
+            if (!res.headersSent && !res.finished) {
+                stream.pipe(res);
+            } else {
+                stream.destroy();
+            }
         } else {
             res.statusCode = 403;
             res.end('Forbidden');
@@ -1932,17 +2203,22 @@ const server = http.createServer(async (req, res) => {
             const dirsToSearch = [currentMediaDir, ...MEDIA_DIRS.map(d => d.path).filter(p => p !== currentMediaDir)];
 
             const tryDir = (index) => {
-                if (index >= dirsToSearch.length) {
-                    // 所有目录都尝试完毕，未找到
-                    callback(new Error('File not found in any media directory'), null, null);
+                // 如果已经找到文件，或者已经搜索完所有目录，则停止
+                if (found || index >= dirsToSearch.length) {
+                    // 如果是搜完都没找到，才调用失败回调
+                    if (!found && index >= dirsToSearch.length) {
+                        callback(new Error('File not found in any media directory'), null, null);
+                    }
                     return;
                 }
+
                 const potentialPath = path.join(dirsToSearch[index], relativePath);
                 fs.stat(potentialPath, (statErr, stats) => {
-                    if (!statErr && stats.isFile()) {
-                        found = true;
+                    // 确保在stat成功且文件未被找到时才处理
+                    if (!statErr && stats.isFile() && !found) {
+                        found = true; // 标记为已找到，防止后续重复触发
                         fullPath = potentialPath;
-                        callback(null, stats, fullPath);
+                        callback(null, stats, fullPath); // 成功回调
                     } else {
                         // 继续尝试下一个目录
                         tryDir(index + 1);
@@ -1966,7 +2242,28 @@ const server = http.createServer(async (req, res) => {
                 if (staticStats.isFile()) {
                     const contentType = getContentType(staticFilePath);
                     res.setHeader('Content-Type', contentType);
-                    fs.createReadStream(staticFilePath).pipe(res);
+                    const staticStream = fs.createReadStream(staticFilePath);
+                    
+                    // 监听客户端断开连接
+                    req.on('close', () => staticStream.destroy());
+                    req.on('error', () => staticStream.destroy());
+                    res.on('close', () => staticStream.destroy());
+                    res.on('error', () => staticStream.destroy());
+                    
+                    staticStream.on('error', (err) => {
+                        console.error(`Error streaming static file ${staticFilePath}:`, err);
+                        if (!res.headersSent) {
+                            res.statusCode = 500;
+                            res.end('Error reading file.');
+                        }
+                        staticStream.destroy();
+                    });
+                    
+                    if (!res.headersSent && !res.finished) {
+                        staticStream.pipe(res);
+                    } else {
+                        staticStream.destroy();
+                    }
                 } else {
                     res.statusCode = 404;
                     res.end(`File not found: ${pathname}`);
@@ -2000,12 +2297,54 @@ const server = http.createServer(async (req, res) => {
                 res.setHeader('Content-Length', chunksize);
                 res.setHeader('Content-Type', contentType);
 
-                const stream = fs.createReadStream(resolvedPath, { start, end });
-                stream.on('open', () => stream.pipe(res));
+                const stream = fs.createReadStream(resolvedPath, { start, end, highWaterMark: 8 * 1024 });
+                
+                let streamCleaned = false;
+                
+                const cleanupStream = () => {
+                    if (!streamCleaned) {
+                        streamCleaned = true;
+                        
+                        // 1. 立即暂停流，停止读取
+                        stream.pause();
+                        
+                        // 2. 断开 pipe
+                        stream.unpipe(res);
+                        
+                        // 3. 销毁流（autoClose=true 会自动关闭文件描述符）
+                        stream.destroy();
+                        
+                        // 4. 销毁响应连接
+                        if (!res.destroyed) {
+                            res.destroy();
+                        }
+                    }
+                };
+                
+                // 监听所有可能的断开事件
+                req.on('close', cleanupStream);
+                req.on('error', cleanupStream);
+                req.on('aborted', cleanupStream);
+                res.on('close', cleanupStream);
+                res.on('error', cleanupStream);
+
                 stream.on('error', (streamErr) => {
-                    res.statusCode = 500;
-                    res.end(streamErr.message);
+                    if (streamErr.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+                        console.error('Stream error:', streamErr);
+                    }
+                    cleanupStream();
                 });
+                
+                // 正常结束时标记已清理
+                stream.on('end', () => {
+                    streamCleaned = true;
+                });
+                
+                stream.on('close', () => {
+                    streamCleaned = true;
+                });
+                
+                stream.pipe(res);
             } else {
                 // 文件下载或普通文件提供
                 res.statusCode = 200;
@@ -2014,12 +2353,54 @@ const server = http.createServer(async (req, res) => {
                 // 对于下载，可以添加 Content-Disposition
                 // res.setHeader('Content-Disposition', `attachment; filename="${path.basename(resolvedPath)}"`);
 
-                const readStream = fs.createReadStream(resolvedPath);
-                readStream.on('open', () => readStream.pipe(res));
+                const readStream = fs.createReadStream(resolvedPath, { highWaterMark: 8 * 1024 });
+                
+                let readStreamCleaned = false;
+                
+                const cleanupReadStream = () => {
+                    if (!readStreamCleaned) {
+                        readStreamCleaned = true;
+                        
+                        // 1. 立即暂停流，停止读取
+                        readStream.pause();
+                        
+                        // 2. 断开 pipe
+                        readStream.unpipe(res);
+                        
+                        // 3. 销毁流
+                        readStream.destroy();
+                        
+                        // 4. 销毁响应连接
+                        if (!res.destroyed) {
+                            res.destroy();
+                        }
+                    }
+                };
+                
+                // 监听所有可能的断开事件
+                req.on('close', cleanupReadStream);
+                req.on('error', cleanupReadStream);
+                req.on('aborted', cleanupReadStream);
+                res.on('close', cleanupReadStream);
+                res.on('error', cleanupReadStream);
+
                 readStream.on('error', (readErr) => {
-                    res.statusCode = 500;
-                    res.end(readErr.message);
+                    if (readErr.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+                        console.error('Read stream error:', readErr);
+                    }
+                    cleanupReadStream();
                 });
+                
+                // 正常结束时标记已清理
+                readStream.on('end', () => {
+                    readStreamCleaned = true;
+                });
+                
+                readStream.on('close', () => {
+                    readStreamCleaned = true;
+                });
+
+                readStream.pipe(res);
             }
         }
     });
@@ -2451,176 +2832,11 @@ async function findVideoFilesRecursively(dir) {
 }
 
 
-server.on('request', async (req, res) => {
-    const parsedUrl = url.parse(req.url, true);
-    let pathname;
-    try {
-        pathname = decodeURIComponent(parsedUrl.pathname);
-    } catch (e) {
-        pathname = parsedUrl.pathname;
-    }
-
-    if (pathname === '/api/scrape-directory' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        req.on('end', async () => {
-            try {
-                const { path: relativePath, mediaDir, type: videoType } = JSON.parse(body);
-                const fullPath = path.join(mediaDir, relativePath);
-
-                res.statusCode = 200;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ success: true, message: 'Scraping process started.' }));
-
-                // Run scraping in the background
-                (async () => {
-                    const videoFiles = await findVideoFilesRecursively(fullPath);
-                    const fileTasks = videoFiles.map((filePath, index) => ({
-                        id: `file_${index}_${Date.now()}`,
-                        path: filePath,
-                        name: path.relative(fullPath, filePath) || path.basename(filePath)
-                    }));
-                    
-                    broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
-
-                    for (const fileTask of fileTasks) {
-                        broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
-                        
-                        const result = await new Promise((resolve) => {
-                            const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType];
-                            const pythonProcess = spawn('python', args, {
-                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
-                            });
-                            let stdoutData = '';
-                            let stderrData = '';
-                            pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
-                            pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
-                            pythonProcess.on('close', (code) => {
-                                if (stderrData) { console.error(`[Scraper] Stderr for ${fileTask.name}: ${stderrData}`); }
-                                if (code !== 0) {
-                                    resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
-                                } else {
-                                    try {
-                                        const jsonMatch = stdoutData.match(/({[\s\S]*})/);
-                                        if (jsonMatch && jsonMatch[1]) {
-                                            const scrapedData = JSON.parse(jsonMatch[1]);
-                                            if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
-                                                resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
-                                            } else {
-                                                resolve({ success: true, data: scrapedData });
-                                            }
-                                        } else {
-                                            resolve({ success: false, error: '无法解析输出', details: stdoutData });
-                                        }
-                                    } catch (e) {
-                                        resolve({ success: false, error: '解析JSON失败', details: stdoutData });
-                                    }
-                                }
-                            });
-                        });
-                        
-                        broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
-                    }
-                    broadcast({ type: 'scrape_finished_all' });
-                })();
-            } catch (e) {
-                 // This catch is for the initial request parsing.
-                 // It's unlikely to be hit if the scraping is running in the background,
-                 // but good to have for robustness.
-                if (!res.headersSent) {
-                    res.statusCode = 400;
-                    res.setHeader('Content-Type', 'application/json');
-                    res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
-                }
-                console.error('Error starting scrape-directory process:', e);
-           }
-       });
-   }
-
-   if (pathname === '/api/scrape-music-directory' && req.method === 'POST') {
-       let body = '';
-       req.on('data', chunk => { body += chunk.toString(); });
-       req.on('end', async () => {
-           try {
-               const { path: relativePath, mediaDir, source } = JSON.parse(body);
-               const fullPath = path.join(mediaDir, relativePath);
-
-               res.statusCode = 200;
-               res.setHeader('Content-Type', 'application/json');
-               res.end(JSON.stringify({ success: true, message: 'Music scraping process started.' }));
-
-               // Run scraping in the background
-               (async () => {
-                   const musicFiles = await findMusicFilesRecursively(fullPath);
-                   const fileTasks = musicFiles.map((filePath, index) => ({
-                       id: `music_${index}_${Date.now()}`,
-                       path: filePath,
-                       name: path.relative(fullPath, filePath) || path.basename(filePath)
-                   }));
-                   
-                   broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
-
-                   for (const fileTask of fileTasks) {
-                       broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
-                       
-                       const result = await new Promise((resolve) => {
-                           const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
-                           // Optionally forward 'type' in scraping requests (defaults to all)
-                           const scrapeType = 'all';
-                           if (scrapeType && ['lyrics','cover','info','all'].includes(scrapeType)) {
-                               args.push('--only', scrapeType);
-                           }
-                           const pythonProcess = spawn('python', args, {
-                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
-                           });
-                           let stdoutData = '';
-                           let stderrData = '';
-                           pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
-                           pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
-                           pythonProcess.on('close', (code) => {
-                               if (stderrData) { console.error(`[MusicScraper] Stderr for ${fileTask.name}: ${stderrData}`); }
-                               if (code !== 0) {
-                                   resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
-                               } else {
-                                   try {
-                                       const jsonMatch = stdoutData.match(/({[\s\S]*})/);
-                                       if (jsonMatch && jsonMatch[1]) {
-                                           const parsedData = JSON.parse(jsonMatch[1]);
-                                           if(parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
-                                               resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
-                                           } else {
-                                               resolve({ success: true, data: parsedData });
-                                           }
-                                       } else {
-                                           resolve({ success: false, error: '未找到匹配', details: stdoutData });
-                                       }
-                                   } catch (e) {
-                                       resolve({ success: false, error: '解析JSON失败', details: stdoutData });
-                                   }
-                               }
-                           });
-                       });
-                       
-                       broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
-                   }
-                   broadcast({ type: 'music_scrape_finished_all' });
-               })();
-           } catch (e) {
-               if (!res.headersSent) {
-                   res.statusCode = 400;
-                   res.setHeader('Content-Type', 'application/json');
-                   res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
-               }
-               console.error('Error starting scrape-music-directory process:', e);
-           }
-       });
-   }
-});
 
 // --- 新增：音乐刮削功能 ---
 async function findMusicFilesRecursively(dir) {
     let musicFiles = [];
-    const musicExtensions = ['.mp3', '.flac', '.m4a', '.ogg'];
+    const musicExtensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav'];
     try {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {

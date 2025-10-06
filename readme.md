@@ -22,10 +22,10 @@
     -   **在线字幕下载**: 可根据影片标题或 IMDb ID 自动搜索和下载字幕，支持Subtitle Cat和Subliminal。
     -   **语义搜索**: 在字幕文件中进行基于 AI 的语义搜索，可以根据意义而不仅仅是关键词来查找对话。
     -   **AI 翻译与校对**: 调用大型语言模型对现有字幕进行翻译或润色校对。支持在线API（OpenAI格式）和本地模型（GGUF和Hugging Face Transformers）。
-- **🎵 音乐**:
+- **音乐**:
     -   支持简单的播放列表功能。
     -   支持自动获取元数据、专辑封面和歌词文件（ID3解析、网易云音乐、MusicBrainz(需配置API，免费的)）。
-- **🛠️ 实用工具集**:
+- **实用工具集**:
     -   **视频转码**: 内置视频转换工具，可将非标准格式的视频文件转换为兼容性更好的 MP4 格式。
     -   **缓存管理**: 提供界面来查看和清理各种缓存（缩略图、封面、数据库等）。
 
@@ -40,7 +40,7 @@
 - **Everything**:  必须安装并正在运行 [Everything](https://www.voidtools.com/) 搜索工具。
 - **FFmpeg**: 需要下载 [FFmpeg](https://ffmpeg.org/download.html) 并将其可执行文件路径添加到系统的 PATH 环境变量中。
 
-### 2. 📖 安装与使用
+### 2. 安装与使用
 
 1.  **克隆或下载项目**
    
@@ -48,6 +48,7 @@
 2.  **安装 Node.js 依赖**
     
     ```bash
+    cd src
     npm install
     ```
 
@@ -63,6 +64,8 @@
 4.  **GPU 加速配置 (推荐)**
     
     如果您的计算机拥有支持 CUDA 的 NVIDIA 显卡，可以按以下步骤安装部分库的 GPU 版本以获得显著的性能提升。
+    
+    在进行以下步骤前，请确保您安装了正确版本的 NVIDIA 显卡驱动、 CUDA Toolkit 和 Visual Studio（用于编译llama-cpp-python）
     
     *   **PyTorch**:
         `requirements.txt` 中的 `torch` 是 CPU 版本。请访问 [PyTorch 官网](https://pytorch.org/get-started/locally/)，根据您的 CUDA 版本获取并运行正确的安装命令。
@@ -96,7 +99,7 @@
     
      *在启动服务器前，可以先在 `Environment Check` 和 `Network Check` 中检测依赖和网络环境*
 
-    在 `Launcher` 中启动 Node 和 Python 服务
+    在 `Launcher` 中启动 Node 和 Python 服务即可
     
 
 7.  **访问 Web 界面**

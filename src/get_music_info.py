@@ -53,6 +53,7 @@ import urllib.parse
 import musicbrainzngs
 import sqlite3
 import difflib
+import struct
 from mutagen import File
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
@@ -88,6 +89,123 @@ CACHE_LYRICS_DIR = os.path.join(SRC_DIR, 'cache', 'lyrics')
 CACHE_COVERS_DIR = os.path.join(SRC_DIR, 'cache', 'covers')
 CACHE_DB_DIR = os.path.join(SRC_DIR, 'cache', 'musicdata')
 DB_PATH = os.path.join(CACHE_DB_DIR, 'music_metadata.db')
+
+# --- WAV file handling functions ---
+def _read_wav_chunks(file_path):
+    """遍历 WAV 文件的 RIFF 块，返回 (chunk_id, data, offset) 元组列表"""
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(12)
+            if len(header) < 12 or header[:4] != b'RIFF' or header[8:] != b'WAVE':
+                return []
+            chunks = []
+            offset = 12  # 跳过 RIFF header
+            while True:
+                ch = f.read(8)
+                if len(ch) < 8:
+                    break
+                cid, size = struct.unpack('<4sI', ch)
+                cid = cid.decode('ascii', errors='replace')
+                data = f.read(size)
+                chunks.append((cid, data, offset))
+                offset += 8 + size
+                if size % 2:  # RIFF 块必须 2 字节对齐
+                    f.read(1)  # 跳过填充字节
+                    offset += 1
+            return chunks
+    except Exception:
+        return []
+
+def _parse_wav_info(data):
+    """解析 WAV INFO 列表块"""
+    pos = 0
+    info = {}
+    while pos + 8 <= len(data):
+        sub_id = data[pos:pos + 4].decode('ascii', errors='replace')
+        sub_len = struct.unpack('<I', data[pos + 4:pos + 8])[0]
+        raw = data[pos + 8:pos + 8 + sub_len]
+        # 去掉末尾 NUL，尝试 UTF-8，若失败回退到 GBK
+        try:
+            txt = raw.rstrip(b'\x00').decode('utf-8')
+        except UnicodeDecodeError:
+            txt = raw.rstrip(b'\x00').decode('cp936', errors='replace')
+        info[sub_id] = txt
+        pos += 8 + sub_len
+        if sub_len % 2:  # 对齐
+            pos += 1
+    return info
+
+def _fallback_wav_metadata(file_path):
+    """当 mutagen 无法读取 WAV 标签时的回退方案"""
+    result = {}
+    chunks = _read_wav_chunks(file_path)
+    
+    # INFO 块的四字符码到友好名称的映射
+    info_map = {
+        "INAM": "title",
+        "IART": "artist",
+        "IPRD": "album",
+    }
+    
+    for cid, cdata, _ in chunks:  # 解包三元组 (chunk_id, data, offset)
+        if cid == 'LIST' and cdata[:4] == b'INFO':
+            info = _parse_wav_info(cdata[4:])
+            for code, friendly in info_map.items():
+                if code in info:
+                    result[friendly] = info[code]
+            break
+    
+    return result
+
+def _extract_wav_cover(file_path):
+    """
+    从WAV文件中提取封面图片。
+    支持以下格式：
+    1. ID3v2标签（部分WAV文件在末尾或开头附加ID3标签）
+    2. RIFF块中嵌入的图片数据
+    3. 通过魔术字节识别的图片块
+    """
+    cover_data = None
+    
+    # 方法1: 尝试使用mutagen读取（可能有ID3标签）
+    try:
+        audio = File(file_path, easy=False)
+        if audio is not None and hasattr(audio, 'tags') and audio.tags:
+            # 检查是否有APIC标签（ID3格式）
+            if hasattr(audio.tags, 'getall'):
+                apic_frames = audio.tags.getall('APIC')
+                if apic_frames:
+                    print("DEBUG: Found APIC in WAV file's ID3 tags.", file=sys.stderr)
+                    return BytesIO(apic_frames[0].data)
+    except Exception as e:
+        print(f"DEBUG: mutagen could not extract WAV cover: {e}", file=sys.stderr)
+    
+    # 方法2: 尝试直接读取ID3标签（某些WAV在文件末尾有ID3v2）
+    try:
+        id3 = ID3(file_path)
+        apic_key = next((k for k in id3.keys() if k.startswith('APIC')), None)
+        if apic_key:
+            print("DEBUG: Found APIC in WAV file's appended ID3 tags.", file=sys.stderr)
+            return BytesIO(id3[apic_key].data)
+    except Exception:
+        pass
+    
+    # 方法3: 解析RIFF块查找图片数据
+    # 某些编码器会添加自定义块如 'JUNK', 'PAD ', 或自定义块包含图片
+    chunks = _read_wav_chunks(file_path)
+    for cid, cdata, _ in chunks:
+        # 检查是否为图片数据（通过魔术字节判断）
+        if len(cdata) > 8:
+            # JPEG 魔术字节
+            if cdata[:2] == b'\xff\xd8':
+                print(f"DEBUG: Found JPEG image in WAV chunk '{cid}'.", file=sys.stderr)
+                return BytesIO(cdata)
+            # PNG 魔术字节
+            if cdata[:8] == b'\x89PNG\r\n\x1a\n':
+                print(f"DEBUG: Found PNG image in WAV chunk '{cid}'.", file=sys.stderr)
+                return BytesIO(cdata)
+    
+    return None
 
 def init_db():
     """Initializes the database and creates the table if it doesn't exist."""
@@ -166,8 +284,28 @@ def main():
     
     # Setup MusicBrainz client if needed
     if args.source == 'musicbrainz':
-        musicbrainzngs.set_useragent(MB_APP_NAME, MB_APP_VERSION)
-        musicbrainzngs.auth(MB_CLIENT_ID, MB_CLIENT_SECRET)
+        # Ensure app name/version are not empty (musicbrainzngs requires non-empty values)
+        app_name = MB_APP_NAME or 'webplayer'
+        app_version = MB_APP_VERSION or '0.0'
+        try:
+            musicbrainzngs.set_useragent(app_name, app_version)
+        except ValueError:
+            # Fallback to safe non-empty values
+            fallback_app, fallback_version = 'webplayer', '0.0'
+            try:
+                musicbrainzngs.set_useragent(fallback_app, fallback_version)
+                print(f"Warning: MusicBrainz app/version not set in config; using fallback {fallback_app}/{fallback_version}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error setting MusicBrainz useragent even with fallback: {e}", file=sys.stderr)
+
+        # Only attempt auth if both client ID and secret are provided
+        if MB_CLIENT_ID and MB_CLIENT_SECRET:
+            try:
+                musicbrainzngs.auth(MB_CLIENT_ID, MB_CLIENT_SECRET)
+            except Exception as e:
+                print(f"Warning: MusicBrainz auth failed: {e}", file=sys.stderr)
+        else:
+            print("Warning: MusicBrainz client_id/client_secret not configured; proceeding unauthenticated.", file=sys.stderr)
 
     if not os.path.exists(args.filepath):
         print(f"Error: File not found at {args.filepath}", file=sys.stderr)
@@ -185,8 +323,14 @@ def main():
 
         #print(f"DEBUG: Final track_info before processing: {track_info}", file=sys.stderr)
 
+        # Helper: decide whether to fetch particular type
+        need_lyrics = args.only in ('all', 'lyrics')
+        need_cover = args.only in ('all', 'cover')
+        need_info = args.only in ('all', 'info')
+
         # --- Cache Check ---
         cached_lyrics = None
+        cached_lyrics_filename = None  # Track the cached lyrics filename
         cached_cover_filename = None
         # Only check cache if force-fetch is NOT specified
         if not args.force_fetch:
@@ -195,21 +339,26 @@ def main():
             safe_artist = sanitize_filename(artist)
             safe_title = sanitize_filename(title)
             
-            lrc_filename = f"{safe_artist} - {safe_title}.lrc"
-            lrc_filepath = os.path.join(CACHE_LYRICS_DIR, lrc_filename)
-            if os.path.exists(lrc_filepath):
-                try:
-                    with open(lrc_filepath, 'r', encoding='utf-8') as f:
-                        cached_lyrics = f.read()
-                    print(f"Found cached lyrics at: {lrc_filepath}", file=sys.stderr)
-                except Exception as e:
-                    print(f"Error reading cached lyrics: {e}", file=sys.stderr)
+            # Only check for cached lyrics if lyrics are needed
+            if need_lyrics:
+                lrc_filename = f"{safe_artist} - {safe_title}.lrc"
+                lrc_filepath = os.path.join(CACHE_LYRICS_DIR, lrc_filename)
+                if os.path.exists(lrc_filepath):
+                    try:
+                        with open(lrc_filepath, 'r', encoding='utf-8') as f:
+                            cached_lyrics = f.read()
+                        cached_lyrics_filename = lrc_filename  # Store the filename
+                        print(f"Found cached lyrics at: {lrc_filepath}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"Error reading cached lyrics: {e}", file=sys.stderr)
 
-            cover_filename_base = f"{safe_artist} - {safe_title}_cover.jpg"
-            cover_filepath = os.path.join(CACHE_COVERS_DIR, cover_filename_base)
-            if os.path.exists(cover_filepath):
-                cached_cover_filename = cover_filename_base
-                print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
+            # Only check for cached cover if cover is needed
+            if need_cover:
+                cover_filename_base = f"{safe_artist} - {safe_title}_cover.jpg"
+                cover_filepath = os.path.join(CACHE_COVERS_DIR, cover_filename_base)
+                if os.path.exists(cover_filepath):
+                    cached_cover_filename = cover_filename_base
+                    print(f"Found cached cover at: {cover_filepath}", file=sys.stderr)
 
             # Removed the early exit logic here. The program should now always proceed
             # to the info fetching and database writing steps, even if all data is available in cache.
@@ -220,19 +369,15 @@ def main():
             "title": track_info.get("title"),
             "artist": track_info.get("artist"),
             "album": track_info.get("album"),
-            "lyrics": cached_lyrics,
+            "lyrics": cached_lyrics if need_lyrics else None,  # Only include lyrics if needed
             "cover_data": None,
             "cover_url": None
         }
 
-        # Helper: decide whether to fetch particular type
-        need_lyrics = args.only in ('all', 'lyrics')
-        need_cover = args.only in ('all', 'cover')
-        need_info = args.only in ('all', 'info')
-
         if args.source == 'local':
             # local always provides basic info from tags
-            if need_cover:
+            # Only extract cover from file if cover is needed AND no cached cover exists
+            if need_cover and not cached_cover_filename:
                 music_info['cover_data'] = get_local_cover(args.filepath)
 
             # If lyrics are requested and not cached, try netease as fallback
@@ -244,28 +389,35 @@ def main():
 
         elif args.source == 'netease':
             # For netease, call search_netease once and pick requested parts
-            netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match)
-            if netease_info:
-                if need_info:
-                    music_info['title'] = netease_info.get('title') or music_info['title']
-                    music_info['artist'] = netease_info.get('artist') or music_info['artist']
-                    music_info['album'] = netease_info.get('album') or music_info['album']
-                if need_lyrics:
-                    music_info['lyrics'] = netease_info.get('lyrics')
-                if need_cover:
-                    music_info['cover_data'] = netease_info.get('cover_data')
-                    music_info['cover_url'] = netease_info.get('cover_url')
+            # Skip fetching if cached cover exists
+            should_fetch_from_netease = need_info or (need_lyrics and not cached_lyrics) or (need_cover and not cached_cover_filename)
+            
+            if should_fetch_from_netease:
+                netease_info = search_netease(track_info, bilingual=not args.original_lyrics, limit=args.limit, force_match=args.force_match)
+                if netease_info:
+                    if need_info:
+                        music_info['title'] = netease_info.get('title') or music_info['title']
+                        music_info['artist'] = netease_info.get('artist') or music_info['artist']
+                        music_info['album'] = netease_info.get('album') or music_info['album']
+                    if need_lyrics and not cached_lyrics:
+                        music_info['lyrics'] = netease_info.get('lyrics')
+                    if need_cover and not cached_cover_filename:
+                        music_info['cover_data'] = netease_info.get('cover_data')
+                        music_info['cover_url'] = netease_info.get('cover_url')
 
         else: # musicbrainz
             # MusicBrainz primarily provides info and cover via Cover Art Archive
-            if need_info or need_cover:
+            # Skip fetching if cached cover exists
+            should_fetch_from_mb = need_info or (need_cover and not cached_cover_filename)
+            
+            if should_fetch_from_mb:
                 mb_info = search_musicbrainz(track_info, force_match=args.force_match)
                 if mb_info:
                     if need_info:
                         music_info['title'] = mb_info.get('title') or music_info['title']
                         music_info['artist'] = mb_info.get('artist') or music_info['artist']
                         music_info['album'] = mb_info.get('album') or music_info['album']
-                    if need_cover:
+                    if need_cover and not cached_cover_filename:
                         music_info['cover_data'] = mb_info.get('cover_data')
                         music_info['cover_url'] = mb_info.get('cover_url')
             # MusicBrainz doesn't provide lyrics; do not attempt to fetch lyrics from MB
@@ -301,6 +453,11 @@ def main():
                 title_for_save = music_info.get('title') or track_info.get('title') or 'Unknown Title'
                 lyrics_filename = save_lrc_file(music_info['lyrics'], artist_for_save, title_for_save, CACHE_LYRICS_DIR)
 
+            # Use cached lyrics filename if it exists, no new one was generated, and lyrics are needed
+            final_lyrics_filename = None
+            if need_lyrics:
+                final_lyrics_filename = lyrics_filename or cached_lyrics_filename
+
             # Output JSON if requested
             if args.json_output:
                 json_info = music_info.copy()
@@ -308,11 +465,14 @@ def main():
                     del json_info['cover_data']
                 if final_cover_filename:
                     json_info['cover_filename'] = final_cover_filename
-                if lyrics_filename:
-                    json_info['lyrics_filename'] = lyrics_filename
-                # If lyrics came from cache, make sure they are in the output
-                if cached_lyrics and 'lyrics' not in json_info and not args.force_fetch:
+                if final_lyrics_filename:
+                    json_info['lyrics_filename'] = final_lyrics_filename
+                # If lyrics came from cache, make sure they are in the output (only if lyrics were requested)
+                if need_lyrics and cached_lyrics and 'lyrics' not in json_info and not args.force_fetch:
                     json_info['lyrics'] = cached_lyrics
+                # Remove lyrics from output if they were not requested
+                if not need_lyrics and 'lyrics' in json_info:
+                    del json_info['lyrics']
                 print(json.dumps(json_info, indent=4, ensure_ascii=False))
     except Exception as e:
         print(f"An unexpected error occurred in main: {e}", file=sys.stderr)
@@ -326,31 +486,59 @@ def get_local_cover(file_path):
     (e.g., cover.jpg, folder.png) in the same directory.
     """
     cover_data = None
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
     # 1. Try to extract embedded cover art first
     try:
         #print(f"DEBUG: Attempting to extract embedded cover from {os.path.basename(file_path)}", file=sys.stderr)
-        with open(file_path, 'rb') as f:
-            audio = File(f, easy=False) # Use easy=False for more detailed tags
-            if audio is not None:
-                if isinstance(audio, MP3):
-                    apic_key = next((k for k in audio.tags.keys() if k.startswith('APIC')), None)
-                    if apic_key:
-                        print("DEBUG: Found APIC tag in MP3.", file=sys.stderr)
-                        cover_data = audio.tags[apic_key].data
-                elif isinstance(audio, FLAC):
-                    if audio.pictures:
-                        print("DEBUG: Found picture data in FLAC.", file=sys.stderr)
-                        cover_data = audio.pictures[0].data
-                elif isinstance(audio, MP4):
-                    if 'covr' in audio.tags and audio.tags['covr']:
-                        print("DEBUG: Found 'covr' tag in MP4.", file=sys.stderr)
-                        cover_data = audio.tags['covr'][0]
-                
-                if cover_data:
-                    #print("SUCCESS: Found and extracted embedded cover art.", file=sys.stderr)
-                    return BytesIO(cover_data)
-                #else:
-                    #print("DEBUG: No embedded cover art found in the file's tags.", file=sys.stderr)
+        
+        # Special handling for WAV files
+        if file_ext == '.wav':
+            cover_io = _extract_wav_cover(file_path)
+            if cover_io:
+                return cover_io
+        else:
+            # Standard handling for other formats
+            with open(file_path, 'rb') as f:
+                audio = File(f, easy=False) # Use easy=False for more detailed tags
+                if audio is not None:
+                    if isinstance(audio, MP3):
+                        apic_key = next((k for k in audio.tags.keys() if k.startswith('APIC')), None)
+                        if apic_key:
+                            print("DEBUG: Found APIC tag in MP3.", file=sys.stderr)
+                            cover_data = audio.tags[apic_key].data
+                    elif isinstance(audio, FLAC):
+                        if audio.pictures:
+                            print("DEBUG: Found picture data in FLAC.", file=sys.stderr)
+                            cover_data = audio.pictures[0].data
+                    elif isinstance(audio, MP4):
+                        if 'covr' in audio.tags and audio.tags['covr']:
+                            print("DEBUG: Found 'covr' tag in MP4.", file=sys.stderr)
+                            cover_data = audio.tags['covr'][0]
+                    elif isinstance(audio, OggVorbis):
+                        # OGG Vorbis may store cover in METADATA_BLOCK_PICTURE
+                        if hasattr(audio, 'get') and audio.get('metadata_block_picture'):
+                            import base64
+                            try:
+                                pic_data = base64.b64decode(audio['metadata_block_picture'][0])
+                                # Parse FLAC picture block
+                                # Skip picture type (4 bytes), mime length (4 bytes)
+                                mime_len = struct.unpack('>I', pic_data[4:8])[0]
+                                # Skip mime, description length, description, and metadata
+                                pos = 8 + mime_len
+                                desc_len = struct.unpack('>I', pic_data[pos:pos+4])[0]
+                                pos += 4 + desc_len + 16  # skip description + width/height/depth/colors
+                                pic_len = struct.unpack('>I', pic_data[pos:pos+4])[0]
+                                cover_data = pic_data[pos+4:pos+4+pic_len]
+                                print("DEBUG: Found picture data in OGG Vorbis.", file=sys.stderr)
+                            except Exception as e:
+                                print(f"DEBUG: Could not parse OGG Vorbis picture: {e}", file=sys.stderr)
+                    
+                    if cover_data:
+                        #print("SUCCESS: Found and extracted embedded cover art.", file=sys.stderr)
+                        return BytesIO(cover_data)
+                    #else:
+                        #print("DEBUG: No embedded cover art found in the file's tags.", file=sys.stderr)
     except PermissionError:
         print(f"ERROR: Permission denied while reading embedded cover art from {file_path}. The file might be online-only or locked.", file=sys.stderr)
     except Exception as e:
@@ -667,7 +855,8 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
         all_results_debug = []
 
         # Try each variant until we find a confident match
-        for v in variants:
+        # Keep track of which variant index we're testing so we can avoid early-stop for the first 3 attempts
+        for variant_index, v in enumerate(variants, start=1):
             v = v.strip()
             if not v:
                 continue
@@ -762,37 +951,91 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 if is_featured: # Additive bonus for being featured
                     score += 0.15
 
-                # 3. Remix/Version penalty
-                is_remix_local = "remix" in title.lower() or "ver" in title.lower()
-                is_remix_remote = "remix" in remote_title.lower() or "ver" in remote_title.lower()
-                if is_remix_remote and not is_remix_local:
-                    score *= 0.85 # Penalize if it's a remix and the original wasn't
-
-                # 4. Instrumental / off vocal / game / karaoke penalties (only if local title does not request them)
-                version_markers_remote = remote_title.lower()
-                version_markers_local = (title or "").lower()
-                marker_map = [
-                    ("instrumental", 0.80),
-                    ("off vocal", 0.82),
-                    ("off-vocal", 0.82),
-                    ("game ver", 0.88),
-                    ("game version", 0.88),
-                    ("karaoke", 0.80),
-                    ("inst.", 0.80),
-                    ("instrumental ver", 0.80),
+                # 3. Enhanced Version Keyword Recognition and Scoring
+                # Define comprehensive version keywords to check
+                version_keywords = [
+                    # Remix variations
+                    ('remix', ['remix', 'rmx', 'mix']),
+                    # Version variations
+                    ('version', ['version', 'ver.', 'ver']),
+                    # Instrumental variations
+                    ('instrumental', ['instrumental', 'inst.', 'inst', 'off vocal', 'off-vocal', 'offvocal']),
+                    # Extended variations
+                    ('extended', ['extended', 'ext.', 'ext', 'long ver', 'long version']),
+                    # Remaster variations
+                    ('remaster', ['remaster', 'remastered', 'rmst', 'rmstr']),
+                    # Other special versions
+                    ('edit', ['edit', 'edited']),
+                    ('acoustic', ['acoustic', 'unplugged']),
+                    ('live', ['live', 'concert']),
+                    ('cover', ['cover', 'covered by']),
+                    ('karaoke', ['karaoke', 'backing track']),
+                    ('game', ['game ver', 'game version']),
+                    ('tv', ['tv size', 'tv ver', 'tv version', 'tv edit']),
+                    ('radio', ['radio edit', 'radio ver', 'radio version']),
+                    ('demo', ['demo', 'demo ver', 'demo version']),
+                    ('deluxe', ['deluxe', 'deluxe edition']),
                 ]
+                
+                def extract_version_keywords(text):
+                    """Extract all version keywords present in the text"""
+                    if not text:
+                        return set()
+                    text_lower = text.lower()
+                    found = set()
+                    for keyword_type, variations in version_keywords:
+                        for variation in variations:
+                            if variation in text_lower:
+                                found.add(keyword_type)
+                                break  # Found this keyword type, move to next
+                    return found
+                
+                local_keywords = extract_version_keywords(title)
+                remote_keywords = extract_version_keywords(remote_title)
+                
+                # Calculate keyword matching score
+                keyword_bonus = 0.0
+                keyword_penalty = 0.0
                 applied_version_penalty = None
-                for marker, factor in marker_map:
-                    if marker in version_markers_remote:
-                        if marker not in version_markers_local:
-                            score *= factor
-                            applied_version_penalty = (marker, factor)
-                            break
+                
+                if local_keywords or remote_keywords:
+                    # Both have keywords - check for matches
+                    matched_keywords = local_keywords & remote_keywords
+                    local_only = local_keywords - remote_keywords
+                    remote_only = remote_keywords - local_keywords
+                    
+                    # Award bonus for matching keywords
+                    if matched_keywords:
+                        # Base bonus: 0.05 per matched keyword, max 0.15
+                        keyword_bonus = min(len(matched_keywords) * 0.05, 0.15)
+                        print(f"DEBUG: Matched version keywords {matched_keywords}, bonus={keyword_bonus:.3f}", file=sys.stderr)
+                    
+                    # Penalty for mismatched keywords
+                    if local_only:
+                        # Local file has keywords that remote doesn't have - significant penalty
+                        keyword_penalty = len(local_only) * 0.10
+                        print(f"DEBUG: Local-only keywords {local_only}, penalty={keyword_penalty:.3f}", file=sys.stderr)
+                    
+                    if remote_only:
+                        # Remote has keywords that local doesn't - moderate penalty
+                        # This means remote is a special version but local isn't looking for it
+                        remote_penalty = len(remote_only) * 0.08
+                        keyword_penalty += remote_penalty
+                        applied_version_penalty = (f"remote_extra: {remote_only}", 1.0 - remote_penalty)
+                        print(f"DEBUG: Remote-only keywords {remote_only}, penalty={remote_penalty:.3f}", file=sys.stderr)
+                
+                # Apply keyword bonus and penalty
+                score += keyword_bonus
+                score *= (1.0 - min(keyword_penalty, 0.30))  # Cap total keyword penalty at 30%
 
-                # store penalty info for debug
+                # Store keyword matching info for debug
                 if 'dbg_extra' not in song:
                     song['dbg_extra'] = {}
                 song['dbg_extra']['version_penalty'] = applied_version_penalty
+                song['dbg_extra']['keyword_bonus'] = keyword_bonus
+                song['dbg_extra']['keyword_penalty'] = keyword_penalty
+                song['dbg_extra']['local_keywords'] = local_keywords
+                song['dbg_extra']['remote_keywords'] = remote_keywords
 
                 results_with_scores.append({'song': song, 'score': score, 'dbg': {
                     'title_sim': title_sim,
@@ -813,14 +1056,30 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                     s = r['song']
                     all_results_debug.append((s, r['score'], r.get('dbg')))
 
-                # If we already have a very confident match, pick it
-                if force_match or best_score >= 0.5:
+                # Update the best overall seen so far
+                if not best_overall or best_score > best_overall['score']:
+                    best_overall = best_result
+
+                # Early-stop logic:
+                # - If force_match is set, stop immediately.
+                # - For the first 3 variants: do NOT early-stop per-variant. After finishing the 3rd variant,
+                #   evaluate the best score among them and early-stop once if it meets threshold.
+                # - For subsequent variants (4th and later): evaluate per-variant early-stop using this variant's best_score.
+                EARLY_STOP_THRESHOLD = 0.6
+                if force_match:
+                    best_song = best_result['song']
+                    break
+
+                if variant_index == 3:
+                    # One-time check after the first 3 attempts using the best score among them
+                    if best_overall and best_overall['score'] >= EARLY_STOP_THRESHOLD:
+                        best_song = best_overall['song']
+                        break
+
+                if variant_index > 3 and best_score >= EARLY_STOP_THRESHOLD:
                     best_overall = best_result
                     best_song = best_result['song']
                     break
-                # otherwise keep the best seen so far across variants
-                if not best_overall or best_score > best_overall['score']:
-                    best_overall = best_result
 
         # If no variant produced results
         if not best_overall:
@@ -870,6 +1129,10 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                 dbg = result.get('dbg', {}) or {}
                 ve = song.get('dbg_extra', {}).get('version_penalty')
                 tie = dbg.get('tie_break')
+                kw_bonus = song.get('dbg_extra', {}).get('keyword_bonus', 0)
+                kw_penalty = song.get('dbg_extra', {}).get('keyword_penalty', 0)
+                local_kw = song.get('dbg_extra', {}).get('local_keywords', set())
+                remote_kw = song.get('dbg_extra', {}).get('remote_keywords', set())
 
                 def _sf(val, nd=3):
                     try:
@@ -893,6 +1156,17 @@ def try_netease_api(artist, title, album, bilingual=True, limit=5, force_match=F
                     f"ver_pen={ve if ve else 'None'} "
                     f"tie={tie if tie else 'None'}"
                 , file=sys.stderr)
+                # Show keyword matching info if present
+                if local_kw or remote_kw:
+                    kw_match = local_kw & remote_kw
+                    print(
+                        f"       keywords: "
+                        f"local={local_kw if local_kw else 'None'} "
+                        f"remote={remote_kw if remote_kw else 'None'} "
+                        f"matched={kw_match if kw_match else 'None'} "
+                        f"bonus={_sf(kw_bonus,3)} "
+                        f"penalty={_sf(kw_penalty,3)}"
+                    , file=sys.stderr)
             print("-----------------------------", file=sys.stderr)
 
         if not best_song:
@@ -1268,6 +1542,46 @@ def get_audio_metadata(file_path):
                     'album': tags.get('\xa9alb', [None])[0],
                     'albumartist': tags.get('aART', [None])[0]
                 }
+        elif file_ext == '.wav':
+            # Handle WAV files: try custom fallback parser first (handles RIFF/INFO chunks),
+            # then try ID3 tags, then try mutagen's generic tag reading
+            fallback_meta = _fallback_wav_metadata(file_path)
+            if fallback_meta:
+                # Successfully parsed with fallback, use these values
+                track_info = {
+                    'title': fallback_meta.get('title') or None,
+                    'artist': fallback_meta.get('artist') or None,
+                    'album': fallback_meta.get('album') or None,
+                    'albumartist': fallback_meta.get('artist') or None,
+                }
+            else:
+                # Try ID3 tags (some WAV files have ID3 appended)
+                try:
+                    easy_tags = EasyID3(file_path)
+                    track_info = {
+                        'title': easy_tags.get('title', [None])[0],
+                        'artist': easy_tags.get('artist', [None])[0],
+                        'album': easy_tags.get('album', [None])[0],
+                        'albumartist': easy_tags.get('albumartist', [None])[0],
+                    }
+                except Exception:
+                    # Final fallback to mutagen's generic tag reading
+                    if tags:
+                        def _get_tag(key, default=None):
+                            val = tags.get(key, default)
+                            if val is None:
+                                return None
+                            # mutagen may return a list or a single string
+                            if isinstance(val, (list, tuple)):
+                                return val[0]
+                            return val
+
+                        track_info = {
+                            'title': _get_tag('INAM') or _get_tag('TITLE') or _get_tag('\xa9nam') or None,
+                            'artist': _get_tag('IART') or _get_tag('ARTIST') or _get_tag('\xa9ART') or None,
+                            'album': _get_tag('IPRD') or _get_tag('ALBUM') or _get_tag('\xa9alb') or None,
+                            'albumartist': _get_tag('IART') or None,
+                        }
         
         elif file_ext == '.ogg':
              if tags:

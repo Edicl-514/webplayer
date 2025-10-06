@@ -30,6 +30,10 @@ struct ApiKeys {
 struct MusicBrainz {
     client_id: String,
     client_secret: String,
+    #[serde(default)]
+    app_name: String,
+    #[serde(default)]
+    app_version: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -174,6 +178,10 @@ struct MyApp {
     logs: Vec<String>,
     // 缓存解析好的 LayoutJob，避免每帧都重新解析 ANSI
     log_jobs: Vec<egui::text::LayoutJob>,
+    // 合并为单一可选文本以支持长选中复制
+    logs_text: String,
+    // 当用户正在选择日志（鼠标按下）时，暂停自动滚动与自动焦点
+    user_selecting_logs: bool,
     logs_scroll_to_bottom: bool,
 }
 
@@ -285,6 +293,8 @@ impl MyApp {
             log_sender,
             logs: Vec::new(),
             log_jobs: Vec::new(),
+            logs_text: String::new(),
+            user_selecting_logs: false,
             logs_scroll_to_bottom: false,
         }
     }
@@ -573,23 +583,43 @@ impl MyApp {
         ui.separator();
         ui.heading("Logs");
 
-        // 使用固定大小的滚动区域
+        // 使用可编辑但逻辑上只读的 TextEdit 来支持长选中复制
         egui::ScrollArea::vertical()
-            .max_height(300.0) // 固定最大高度
-            .auto_shrink([false, false]) // 防止自动收缩
+            .max_height(300.0)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                // 设置最大宽度以确保文本换行
                 ui.set_max_width(ui.available_width());
-                
-                // 使用缓存的 LayoutJobs 渲染日志，避免每帧重新解析
-                for job in &self.log_jobs {
-                    ui.add(egui::Label::new(job.clone()).wrap(true)); // 启用自动换行
+
+                // TextEdit 需要一个 &mut String；为了不在用户选择时覆盖它，我们克隆一份到局部变量
+                let mut local_text = self.logs_text.clone();
+
+                // 将 TextEdit 放入 UI 并允许选择复制
+                let text_edit = egui::TextEdit::multiline(&mut local_text)
+                    .desired_width(ui.available_width())
+                    .desired_rows(15);
+
+                let response = ui.add(text_edit);
+
+                // 如果用户在该区域按下鼠标左键，标记正在选择
+                if response.ctx.input(|i| i.pointer.any_pressed()) && response.hovered() {
+                    self.user_selecting_logs = true;
                 }
 
-                // 如果有新日志需要滚动到底部，则将光标移动到底部
-                if self.logs_scroll_to_bottom {
+                // 当用户释放鼠标时，结束选择状态
+                if response.ctx.input(|i| !i.pointer.any_down()) {
+                    // 只有当没有任何指针按下时才清除选择标志
+                    self.user_selecting_logs = false;
+                }
+
+                // 只有当用户没有在选择时，才允许程序性的文本更新覆盖 UI
+                if !self.user_selecting_logs {
+                    // 将合并文本与 local_text 保持为最新（local_text 仅用于显示）
+                    // 如果 local_text 与 self.logs_text 不同，意味着用户可能编辑了它；但我们不会把编辑写回 self.logs_text
+                }
+
+                // 自动滚动到末尾（只在非选择时）
+                if self.logs_scroll_to_bottom && !self.user_selecting_logs {
                     ui.scroll_to_cursor(None);
-                    // 已经滚动到底部，重置标志
                     self.logs_scroll_to_bottom = false;
                 }
             });
@@ -702,6 +732,16 @@ impl MyApp {
                             .desired_width(200.0));
                         ui.end_row();
                         
+                        ui.label("MusicBrainz App Name:");
+                        ui.add(egui::TextEdit::singleline(&mut self.config.api_keys.musicbrainz.app_name)
+                            .desired_width(200.0));
+                        ui.end_row();
+                        
+                        ui.label("MusicBrainz App Version:");
+                        ui.add(egui::TextEdit::singleline(&mut self.config.api_keys.musicbrainz.app_version)
+                            .desired_width(200.0));
+                        ui.end_row();
+                        
                         ui.label("TMDB API Key:");
                         ui.add(egui::TextEdit::singleline(&mut self.config.api_keys.tmdb)
                             .desired_width(200.0));
@@ -710,7 +750,10 @@ impl MyApp {
             });
 
             ui.collapsing("Media Directories", |ui| {
-                let mut dir_to_remove = None;
+                let mut dir_to_remove: Option<usize> = None;
+                let mut dir_move_up: Option<usize> = None;
+                let mut dir_move_down: Option<usize> = None;
+
                 for (i, dir) in &mut self.config.media_directories.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label("Alias:");
@@ -719,14 +762,40 @@ impl MyApp {
                         ui.label("Path:");
                         ui.add(egui::TextEdit::singleline(&mut dir.path)
                             .desired_width(180.0));
+
+                        // Move up
+                        if ui.small_button("↑").clicked() {
+                            dir_move_up = Some(i);
+                        }
+                        // Move down
+                        if ui.small_button("↓").clicked() {
+                            dir_move_down = Some(i);
+                        }
+
                         if ui.button("Remove").clicked() {
                             dir_to_remove = Some(i);
                         }
                     });
                 }
+
+                // Apply move up
+                if let Some(i) = dir_move_up {
+                    if i > 0 {
+                        self.config.media_directories.swap(i, i - 1);
+                    }
+                }
+
+                // Apply move down
+                if let Some(i) = dir_move_down {
+                    if i + 1 < self.config.media_directories.len() {
+                        self.config.media_directories.swap(i, i + 1);
+                    }
+                }
+
                 if let Some(i) = dir_to_remove {
                     self.config.media_directories.remove(i);
                 }
+
                 if ui.button("Add Directory").clicked() {
                     self.config.media_directories.push(MediaDirectory {
                         alias: "New Alias".to_string(),
@@ -736,12 +805,24 @@ impl MyApp {
             });
 
             ui.collapsing("Models", |ui| {
-                let mut model_to_remove = None;
+                let mut model_to_remove: Option<usize> = None;
+                let mut model_move_up: Option<usize> = None;
+                let mut model_move_down: Option<usize> = None;
+
                 for (i, model) in &mut self.config.models.iter_mut().enumerate() {
                     ui.collapsing(model.model_path.clone(), |ui| {
-                        if ui.button("Remove This Model").clicked() {
-                            model_to_remove = Some(i);
-                        }
+                        // Move up/down and remove controls
+                        ui.horizontal(|ui| {
+                            if ui.small_button("↑").clicked() {
+                                model_move_up = Some(i);
+                            }
+                            if ui.small_button("↓").clicked() {
+                                model_move_down = Some(i);
+                            }
+                            if ui.button("Remove This Model").clicked() {
+                                model_to_remove = Some(i);
+                            }
+                        });
                         egui::Grid::new(format!("model_grid_{}", i))
                             .num_columns(2)
                             .spacing([10.0, 4.0])
@@ -915,6 +996,20 @@ impl MyApp {
                             });
                     });
                 }
+                // Apply model move up
+                if let Some(i) = model_move_up {
+                    if i > 0 {
+                        self.config.models.swap(i, i - 1);
+                    }
+                }
+
+                // Apply model move down
+                if let Some(i) = model_move_down {
+                    if i + 1 < self.config.models.len() {
+                        self.config.models.swap(i, i + 1);
+                    }
+                }
+
                 if let Some(i) = model_to_remove {
                     self.config.models.remove(i);
                 }
@@ -1005,11 +1100,20 @@ impl eframe::App for MyApp {
             for log in new_logs.into_iter() {
                 // push text
                 self.logs.push(log.clone());
+                // append to combined text (保留换行)
+                if !self.logs_text.is_empty() {
+                    self.logs_text.push('\n');
+                }
+                self.logs_text.push_str(&log);
+
                 // parse and cache layout job
                 let job = Self::parse_ansi_to_layout_job(&log);
                 self.log_jobs.push(job);
             }
-            self.logs_scroll_to_bottom = true;
+            // 只有在用户没有在进行选择时才自动滚动
+            if !self.user_selecting_logs {
+                self.logs_scroll_to_bottom = true;
+            }
 
             // 限制条目数和总字符数，避免内存暴涨
             const MAX_LOG_LINES: usize = 1000;
@@ -1020,6 +1124,8 @@ impl eframe::App for MyApp {
                 let excess = self.logs.len() - MAX_LOG_LINES;
                 self.logs.drain(0..excess);
                 self.log_jobs.drain(0..excess);
+                // 重建合并文本以保持一致性（裁剪发生频率低）
+                self.logs_text = self.logs.join("\n");
             }
 
             // 如果字符总数仍然过大，则继续从头部删除直到符合限制（同时裁剪 log_jobs）
@@ -1030,6 +1136,8 @@ impl eframe::App for MyApp {
                 }
                 self.logs.remove(0);
                 self.log_jobs.remove(0);
+                // 同步合并文本
+                self.logs_text = self.logs.join("\n");
             }
         }
 
@@ -1161,6 +1269,8 @@ impl Config {
                 musicbrainz: MusicBrainz {
                     client_id: "".to_string(),
                     client_secret: "".to_string(),
+                    app_name: "".to_string(),
+                    app_version: "".to_string(),
                 },
                 tmdb: "".to_string(),
             },
@@ -1274,6 +1384,8 @@ impl Default for Config {
                 musicbrainz: MusicBrainz {
                     client_id: "".to_string(),
                     client_secret: "".to_string(),
+                    app_name: "".to_string(),
+                    app_version: "".to_string(),
                 },
                 tmdb: "".to_string(),
             },
@@ -1314,7 +1426,7 @@ impl Default for Model {
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([460.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([500.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(

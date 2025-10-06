@@ -361,7 +361,7 @@ body {
 
 /* Styles for scraped data display */
 .source-container {
-    background-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(45, 45, 45, 0.2);
     border-radius: 8px;
     padding: 15px;
     margin-bottom: 15px;
@@ -455,6 +455,23 @@ body {
 .info-list li span, .info-list li a {
    color: var(--primary-text);
    word-break: break-word;
+}
+
+/* Ensure scraped info values are always readable - force white text
+    Keys (strong) keep the accent color. Use !important to override any dark filters or theme changes. */
+.info-list li span {
+    color: #FFFFFF !important; /* 强制为白色，不使用变量 */
+}
+
+/* Links inside scraped info should also remain white and preserve hover behavior */
+.info-list li a {
+    color: #FFFFFF !important; /* 强制为白色，不使用变量 */
+    text-decoration: none;
+}
+
+.info-list li a:hover {
+    color: var(--accent-hover) !important;
+    background: transparent !important; /* prevent dark hover backgrounds from appearing */
 }
 
 .info-list li a {

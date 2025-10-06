@@ -42,7 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
    const lyricsTypeSelect = document.getElementById('lyrics-type');
    const searchResultsLimitInput = document.getElementById('search-results-limit');
    const forceMatchSelect = document.getElementById('force-match');
-   const queryKeywordsInput = document.getElementById('query-keywords');
     
     // --- 播放器状态和数据 ---
     let currentSongIndex = 0;
@@ -96,6 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const newSong = {
                     title: songTitle,
                     artist: artist,
+                    album: '', // Initialize album as empty string
+                    titleFromFilename: true, // This title is parsed from URL/filename, not from metadata
                     src: finalSrc,
                     cover: 'cover.jpg',
                     lrc: null
@@ -154,6 +155,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return {
                     title: title,
                     artist: artist,
+                    album: '', // Initialize album as empty string
+                    titleFromFilename: true, // This title is parsed from filename, not from metadata
                     src: `/music/${item.music}`,
                     cover: "./music/cover.jpg", // A default cover
                     lrc: item.lrc ? `/music/${item.lrc}` : null // Lyrics are also in the music dir
@@ -250,7 +253,28 @@ document.addEventListener('DOMContentLoaded', () => {
             sound.unload();
         }
         albumCover.classList.remove('playing');
+        
+        // 验证 index 是否有效
+        if (!playlist || playlist.length === 0) {
+            console.error('Playlist is empty');
+            showToast('播放列表为空', 'error');
+            return;
+        }
+        
+        if (index < 0 || index >= playlist.length) {
+            console.error(`Invalid index: ${index}, playlist length: ${playlist.length}`);
+            showToast('无效的歌曲索引', 'error');
+            return;
+        }
+        
         const song = playlist[index];
+        
+        // 验证 song 对象是否存在
+        if (!song) {
+            console.error(`Song at index ${index} is undefined`);
+            showToast('歌曲数据无效', 'error');
+            return;
+        }
     
         // If this is the first time a song is played (not from a folder load), fetch the folder playlist
         if (!fromFolderLoad) {
@@ -269,6 +293,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         const newPlaylist = result.playlist.map(item => ({
                             title: item.title,
                             artist: item.artist,
+                            album: item.album, // Add album field
+                            titleFromFilename: item.titleFromFilename, // Preserve titleFromFilename flag
                             src: item.src, // Use the src provided by the server
                             cover: 'cover.jpg', // Default cover
                             lrc: null // Lyrics will be fetched later
@@ -294,12 +320,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     
         // --- Continue with original loadSong logic ---
+        // 立即显示来自 playlist 的基本信息
         songTitle.textContent = song.title;
         songArtist.textContent = song.artist;
         songAlbum.textContent = song.album || ''; // Set album text
         checkMarquee(songTitle);
         checkMarquee(songArtist);
         checkMarquee(songAlbum); // Check marquee for album
+        
         // 设置默认封面,并等待加载完成后取色
         const defaultCoverUrl = getCacheBustedUrl(song.cover);
         albumCover.onload = () => {
@@ -315,7 +343,28 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         albumCover.src = defaultCoverUrl;
     
+        // 异步加载步骤:
+        // 1. 立即获取本地封面(应该很快)
+        fetchMusicCover(song);
+        
+        // 2. 获取详细信息(也应该很快,只读取本地标签)
         fetchMusicInfo(song);
+        
+        // 3. 获取歌词(可能需要联网,耗时较长)
+        // 清空旧歌词,显示加载提示
+        currentLyrics = [];
+        renderLyrics();
+        
+        // 如果歌曲已有歌词,先加载现有歌词
+        if (song.lrc) {
+            loadLyrics(song.lrc);
+        } else {
+            // 显示加载提示
+            lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">正在搜索歌词...</div>';
+        }
+        
+        // 异步获取更好的歌词
+        fetchMusicLyrics(song);
     
         // The song.src from the server now includes the full path and mediaDir query
         const finalSrcForHowler = song.src;
@@ -323,7 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sound = new Howl({
             src: [finalSrcForHowler],
             crossOrigin: 'anonymous', // 恢复此行以启用音频可视化
-            format: ['flac', 'mp3', 'm4a', 'ogg'],
+            format: ['flac', 'mp3', 'm4a', 'ogg', 'wav'],  // 添加 WAV 支持
             volume: volumeSlider.value,
             onplay: () => {
                 isPlaying = true;
@@ -361,35 +410,149 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     
-        loadLyrics(song.lrc);
+        // 不再在这里调用 loadLyrics,因为歌词加载已经集成到异步流程中
         updatePlaylistUI();
     }
 
-    async function fetchMusicInfo(song) {
+    /**
+     * 智能判断歌曲是否值得搜索歌词
+     * 判断依据：
+     * 1. 必须有标题（title）且标题不是从文件名生成的
+     * 2. 必须有艺术家（artist）或专辑（album）中的至少一个
+     * 3. 艺术家和专辑不能是占位符（如 "Unknown Artist"、"Unknown Album"）
+     * 4. 标题不能是纯文件名格式（如 "Track 01"、"未知"等）
+     */
+    function isSongWorthSearching(song) {
+        const title = (song.title || '').trim();
+        const artist = (song.artist || '').trim();
+        const album = (song.album || '').trim();
+        
+        // 没有标题，肯定不值得搜索
+        if (!title) {
+            console.log('[AUTO] Skip: No title');
+            return false;
+        }
+        
+        // 如果标题是从文件名生成的，不值得搜索
+        if (song.titleFromFilename === true) {
+            console.log('[AUTO] Skip: Title is generated from filename');
+            return false;
+        }
+        
+        // 检查艺术家和专辑是否是占位符
+        const isUnknownArtist = !artist || artist === 'Unknown Artist' || artist === '未知艺术家';
+        const isUnknownAlbum = !album || album === 'Unknown Album' || album === '未知专辑';
+        
+        // 如果艺术家和专辑都是未知的，搜索质量会很差
+        if (isUnknownArtist && isUnknownAlbum) {
+            console.log('[AUTO] Skip: No valid artist or album (both are unknown placeholders)');
+            return false;
+        }
+        
+        // 检查标题是否像是自动生成的
+        // const autoGeneratedPatterns = [
+        //     /^track\s*\d+$/i,           // Track 01, Track 1
+        //     /^未知/,                     // 未知、未知标题
+        //     /^unknown/i,                 // Unknown
+        //     /^\d{2,}\s*-/,              // 01-, 001-
+        //     /^audio\s*\d+$/i,           // Audio 01
+        //     /^recording\s*\d+$/i,       // Recording 01
+        // ];
+        
+        // for (const pattern of autoGeneratedPatterns) {
+        //     if (pattern.test(title)) {
+        //         console.log('[AUTO] Skip: Auto-generated title pattern:', title);
+        //         return false;
+        //     }
+        // }
+        
+        // 标题太短（少于2个字符），可能是无效数据
+        // if (title.length < 2) {
+        //     console.log('[AUTO] Skip: Title too short:', title);
+        //     return false;
+        // }
+        
+        console.log('[AUTO] Worth searching: title=' + title + ', artist=' + artist + ', album=' + album);
+        return true;
+    }
+
+    /**
+     * 获取音乐封面(异步,立即返回)
+     * 这是第一步,应该很快完成
+     */
+    async function fetchMusicCover(song) {
         try {
-            // 从 song.src 中提取路径和 mediaDir
             const url = new URL(song.src, window.location.origin);
             const mediaDir = url.searchParams.get('mediaDir');
-            let musicPath = decodeURIComponent(url.pathname); // 解码路径
+            let musicPath = decodeURIComponent(url.pathname);
             if (musicPath.startsWith('/music/')) {
                 musicPath = musicPath.substring('/music/'.length);
             }
             
-           const settings = getSettings();
-           const params = new URLSearchParams({
-               path: musicPath,
-               source: settings.infoPriority,
-               // 'no-write' is now handled by the server for safety.
-               // We add 'write-db' implicitly from the web UI.
-               'original-lyrics': settings.lyricsType === 'original',
-               'limit': settings.searchResultsLimit,
-               'force-match': settings.forceMatch,
-               'query': settings.queryKeywords
-           });
-           
-           if (mediaDir) {
-               params.append('mediaDir', mediaDir);
-           }
+            const settings = getSettings();
+            const params = new URLSearchParams({
+                path: musicPath,
+                source: settings.coverPriority || 'local',
+                'only': 'cover'  // 只获取封面
+            });
+            
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
+
+            const response = await fetch(`/api/music-info?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch music cover');
+            }
+            const result = await response.json();
+
+            if (result.success && result.data && result.data.cover_filename) {
+                const info = result.data;
+                const safeCoverFilename = info.cover_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                const coverUrl = `/cache/covers/${safeCoverFilename}`;
+                
+                albumCover.onload = () => {
+                    playerBg.style.backgroundImage = `url("${albumCover.src}")`;
+                    setThemeColor(albumCover);
+                    albumCover.onload = null;
+                    albumCover.onerror = null;
+                };
+                albumCover.onerror = () => {
+                    console.warn(`Cover image not found at ${coverUrl}, keeping default.`);
+                    albumCover.onload = null;
+                    albumCover.onerror = null;
+                };
+                
+                albumCover.src = getCacheBustedUrl(coverUrl);
+            }
+        } catch (error) {
+            console.error('Error fetching music cover:', error);
+        }
+    }
+
+    /**
+     * 获取音乐详细信息(异步,立即返回)
+     * 这是第二步,用于更新标题/艺术家/专辑等基本信息
+     */
+    async function fetchMusicInfo(song) {
+        try {
+            const url = new URL(song.src, window.location.origin);
+            const mediaDir = url.searchParams.get('mediaDir');
+            let musicPath = decodeURIComponent(url.pathname);
+            if (musicPath.startsWith('/music/')) {
+                musicPath = musicPath.substring('/music/'.length);
+            }
+            
+            const settings = getSettings();
+            const params = new URLSearchParams({
+                path: musicPath,
+                source: settings.infoPriority,
+                'only': 'info'  // 只获取基本信息
+            });
+            
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
 
             const response = await fetch(`/api/music-info?${params.toString()}`);
             if (!response.ok) {
@@ -399,8 +562,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (result.success && result.data) {
                 const info = result.data;
-                // 用获取到的信息更新UI
-                // If the user previously modified this song, prefer local cached values (do not overwrite)
+                
+                // 更新UI
                 if (song.userModified) {
                     songTitle.textContent = song.title || info.title || '';
                     songArtist.textContent = song.artist || info.artist || '';
@@ -408,23 +571,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     songTitle.textContent = info.title || song.title;
                     songArtist.textContent = info.artist || song.artist;
-                    songAlbum.textContent = info.album || ''; // Update album info
+                    songAlbum.textContent = info.album || song.album || '';
                 }
                 checkMarquee(songTitle);
                 checkMarquee(songArtist);
-                checkMarquee(songAlbum); // Check marquee for album
+                checkMarquee(songAlbum);
                 
-                // BUGFIX: 更新播放列表和localStorage中的元数据
-                // Only update stored song fields if they were previously empty or not userModified
+                // 更新播放列表和localStorage中的元数据
                 let updated = false;
                 if (!song.userModified) {
                     if (!song.title && songTitle.textContent) { song.title = songTitle.textContent; updated = true; }
                     if (!song.artist && songArtist.textContent) { song.artist = songArtist.textContent; updated = true; }
                     if (!song.album && songAlbum.textContent) { song.album = songAlbum.textContent; updated = true; }
-                } else {
-                    // If userModified, still ensure localStorage reflects current song object
-                    // (but do not overwrite user values with remote info)
-                    updated = false;
                 }
 
                 if (updated) {
@@ -432,70 +590,100 @@ document.addEventListener('DOMContentLoaded', () => {
                     updatePlaylistUI();
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                 }
+            }
+        } catch (error) {
+            console.error('Error fetching music info:', error);
+        }
+    }
 
-                // 检查后端是否返回了封面文件名
-                if (info.cover_filename) {
-                    const safeCoverFilename = info.cover_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
-                    const coverUrl = `/cache/covers/${safeCoverFilename}`;
-                    
-                    // 使用一个技巧来检查图片是否存在，如果404则不更新
-                   // The new cover URL is ready. We'll assign it to the main album cover
-                   // element and use its onload event to trigger background and theme updates.
-                   albumCover.onload = () => {
-                       playerBg.style.backgroundImage = `url("${albumCover.src}")`;
-                       setThemeColor(albumCover);
-                       albumCover.onload = null; // Clean up
-                       albumCover.onerror = null;
-                   };
-                   albumCover.onerror = () => {
-                       console.warn(`Cover image not found at ${coverUrl}, using default.`);
-                       // If the new cover fails, revert to the default one.
-                       albumCover.src = getCacheBustedUrl(song.cover);
-                       playerBg.style.backgroundImage = `url("${getCacheBustedUrl(song.cover)}")`;
-                       
-                       // We need to ensure the default cover is loaded before getting its color.
-                       // The simplest way is to attach a new onload for the default cover.
-                       albumCover.onload = () => {
-                           setThemeColor(albumCover);
-                           albumCover.onload = null; // Final cleanup
-                       };
-                       albumCover.onerror = null; // Final cleanup
-                   };
-
-                   // Trigger the load process
-                   albumCover.src = getCacheBustedUrl(coverUrl);
+    /**
+     * 获取音乐歌词(异步,可能需要较长时间)
+     * 这是第三步,可能需要联网搜索
+     */
+    async function fetchMusicLyrics(song) {
+        try {
+            const url = new URL(song.src, window.location.origin);
+            const mediaDir = url.searchParams.get('mediaDir');
+            let musicPath = decodeURIComponent(url.pathname);
+            if (musicPath.startsWith('/music/')) {
+                musicPath = musicPath.substring('/music/'.length);
+            }
+            
+            const settings = getSettings();
+            
+            // 智能判断是否应该获取歌词
+            let shouldFetchLyrics;
+            if (settings.lyricsFetch === 'auto') {
+                shouldFetchLyrics = isSongWorthSearching(song);
+            } else {
+                shouldFetchLyrics = settings.lyricsFetch === 'true';
+            }
+            
+            if (!shouldFetchLyrics) {
+                console.log('Skipping lyrics fetch based on settings');
+                // 如果不需要获取歌词,清空加载提示
+                if (!song.lrc) {
+                    lyricsWrapper.innerHTML = '';
                 }
-                // 如果后端没有返回封面,loadSong中已经设置了默认封面和onload事件
+                return;
+            }
+            
+            const params = new URLSearchParams({
+                path: musicPath,
+                source: settings.infoPriority,
+                'original-lyrics': settings.lyricsType === 'original',
+                'limit': settings.searchResultsLimit,
+                'force-match': settings.forceMatch,
+                'only': 'lyrics'  // 只获取歌词
+            });
+            
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
 
-                // 新增：检查并处理返回的歌词文件或内容
+            const response = await fetch(`/api/music-info?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch music lyrics');
+            }
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                const info = result.data;
+                
                 if (info.lyrics_filename) {
                     const safeLrcFilename = info.lyrics_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
                     const lrcUrl = `/cache/lyrics/${safeLrcFilename}`;
                     console.log(`Found lyrics file from API: ${lrcUrl}`);
                     
-                    // 更新当前歌曲对象的lrc路径
                     song.lrc = lrcUrl;
-                    // Mark user modification for lyrics when user accepted or fetched lyrics
                     song.userModified = true;
                     
-                    // 重新加载歌词
                     loadLyrics(lrcUrl);
-                    
-                    // 更新localStorage
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                     
-                    showToast('自动匹配歌词成功！', 'success');
+                    showToast('歌词加载成功', 'success');
                 } else if (info.lyrics) {
-                    console.log('Got lyrics content from fetchMusicInfo, parsing...');
-                    currentLyrics = []; // 清空旧歌词
+                    currentLyrics = [];
                     parseLrc(info.lyrics);
-                    // 注意：这里没有更新 song.lrc，因为内容是临时的
-                    // Do not mark userModified for transient lyric parsing
-                    showToast('自动匹配歌词成功！', 'success');
+                    showToast('歌词加载成功', 'success');
+                } else {
+                    // 没有找到歌词
+                    if (!song.lrc) {
+                        lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">未找到歌词</div>';
+                    }
+                }
+            } else {
+                // 请求失败
+                if (!song.lrc) {
+                    lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">未找到歌词</div>';
                 }
             }
         } catch (error) {
-            console.error('Error fetching music info:', error);
+            console.error('Error fetching music lyrics:', error);
+            // 出错时,如果没有现有歌词,显示错误提示
+            if (!song.lrc) {
+                lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">歌词加载失败</div>';
+            }
         }
     }
     
@@ -670,8 +858,39 @@ document.addEventListener('DOMContentLoaded', () => {
         items.forEach((item, index) => {
             if (index === currentSongIndex) {
                 item.classList.add('playing');
+                // 为播放项中的文本添加marquee效果
+                requestAnimationFrame(() => {
+                    const titleEl = item.querySelector('.title');
+                    const artistEl = item.querySelector('.artist');
+                    const albumEl = item.querySelector('.album');
+                    
+                    if (titleEl) checkPlaylistItemMarquee(titleEl);
+                    if (artistEl) checkPlaylistItemMarquee(artistEl);
+                    if (albumEl) checkPlaylistItemMarquee(albumEl);
+                });
             } else {
                 item.classList.remove('playing');
+                // 移除非播放项的marquee效果
+                const titleEl = item.querySelector('.title');
+                const artistEl = item.querySelector('.artist');
+                const albumEl = item.querySelector('.album');
+                
+                if (titleEl) titleEl.classList.remove('marquee');
+                if (artistEl) artistEl.classList.remove('marquee');
+                if (albumEl) albumEl.classList.remove('marquee');
+            }
+        });
+    }
+    
+    function checkPlaylistItemMarquee(element) {
+        // 移除marquee类以重置状态
+        element.classList.remove('marquee');
+        
+        // 等待浏览器重新计算布局
+        requestAnimationFrame(() => {
+            const isOverflowing = element.scrollWidth > element.clientWidth;
+            if (isOverflowing) {
+                element.classList.add('marquee');
             }
         });
     }
@@ -1477,8 +1696,7 @@ document.addEventListener('DOMContentLoaded', () => {
            lyricsFetch: lyricsFetchSelect.value,
            lyricsType: lyricsTypeSelect.value,
           searchResultsLimit: searchResultsLimitInput.value,
-          forceMatch: forceMatchSelect.value,
-          queryKeywords: queryKeywordsInput.value,
+          forceMatch: forceMatchSelect.value
        };
        localStorage.setItem('playerSettings', JSON.stringify(settings));
    }
@@ -1487,11 +1705,10 @@ document.addEventListener('DOMContentLoaded', () => {
        const settings = JSON.parse(localStorage.getItem('playerSettings')) || {};
        infoPrioritySelect.value = settings.infoPriority || 'local';
        coverPrioritySelect.value = settings.coverPriority || 'local';
-       lyricsFetchSelect.value = settings.lyricsFetch || 'true';
+       lyricsFetchSelect.value = settings.lyricsFetch || 'auto';  // 默认为"自动"
        lyricsTypeSelect.value = settings.lyricsType || 'bilingual';
       searchResultsLimitInput.value = settings.searchResultsLimit || '5';
       forceMatchSelect.value = settings.forceMatch || 'false';
-      queryKeywordsInput.value = settings.queryKeywords || '{artist} {title}';
    }
 
    function getSettings() {
@@ -1501,8 +1718,7 @@ document.addEventListener('DOMContentLoaded', () => {
            lyricsFetch: lyricsFetchSelect.value,
            lyricsType: lyricsTypeSelect.value,
           searchResultsLimit: searchResultsLimitInput.value,
-          forceMatch: forceMatchSelect.value,
-          queryKeywords: queryKeywordsInput.value,
+          forceMatch: forceMatchSelect.value
        };
    }
 
@@ -1512,7 +1728,6 @@ document.addEventListener('DOMContentLoaded', () => {
    lyricsTypeSelect.addEventListener('change', saveSettings);
   searchResultsLimitInput.addEventListener('change', saveSettings);
   forceMatchSelect.addEventListener('change', saveSettings);
-  queryKeywordsInput.addEventListener('change', saveSettings);
 
    // --- 歌词文件处理 ---
    function handleLrcFileSelect(event) {
@@ -1627,7 +1842,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 'no-write' is now handled by the server. We also want to write to DB.
                 'force-match': settings.forceMatch,
                 'limit': settings.searchResultsLimit,
-                'query': settings.queryKeywords,
                 'force-fetch': true
             });
 
