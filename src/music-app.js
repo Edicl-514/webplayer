@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
    const forceMatchSelect = document.getElementById('force-match');
    const subtitleBtn = document.getElementById('subtitle-btn');
    const localSubtitleList = document.querySelector('.local-subtitle-list');
-   const localTranscribeBtn = document.getElementById('local-transcribe-btn');
+   const transcribeModelList = document.querySelector('.transcribe-model-list');
    const chatToggleBtn = document.getElementById('chat-toggle-btn');
    const chatPanel = document.querySelector('.chat-panel');
    const chatCloseBtn = document.getElementById('chat-close-btn');
@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isVisualizerVisible = false;
     let currentChatMode = 'ai'; // 'ai' or 'semantic'
     let aiChatHistory = [];
+    let transcriberModels = []; // 存储从config.json加载的转录模型配置
 
     // --- 歌词滚动状态 ---
     let isLyricScrolling = false;
@@ -2026,14 +2027,181 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subtitleBtn) {
         subtitleBtn.addEventListener('mouseenter', () => {
             loadLocalSubtitles();
+            loadTranscriberModels();
         });
     }
 
-    // 本地转录功能（占位）
-    if (localTranscribeBtn) {
-        localTranscribeBtn.addEventListener('click', () => {
-            showToast('本地转录功能即将推出', 'info');
+    // 加载转录模型配置
+    async function loadTranscriberModels() {
+        if (transcriberModels.length > 0) {
+            // 已经加载过,直接生成菜单
+            generateTranscriberMenu();
+            return;
+        }
+
+        try {
+            const response = await fetch('/config.json');
+            const config = await response.json();
+            
+            if (config.transcriber_models && Array.isArray(config.transcriber_models)) {
+                transcriberModels = config.transcriber_models;
+                generateTranscriberMenu();
+            } else {
+                transcribeModelList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">未配置转录模型</div>';
+            }
+        } catch (error) {
+            console.error('Error loading transcriber models config:', error);
+            transcribeModelList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">加载失败</div>';
+        }
+    }
+
+    // 生成转录模型菜单
+    function generateTranscriberMenu() {
+        if (!transcribeModelList) return;
+
+        transcribeModelList.innerHTML = '';
+        
+        if (transcriberModels.length === 0) {
+            transcribeModelList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">未配置转录模型</div>';
+            return;
+        }
+
+        transcriberModels.forEach((modelConfig, index) => {
+            const div = document.createElement('div');
+            
+            // 生成模型显示名称
+            let displayName = '';
+            if (modelConfig['model-source'] === 'local') {
+                // 本地模型显示路径中的最后一部分
+                const modelPath = modelConfig.model || '';
+                const pathParts = modelPath.split(/[\\/]/);
+                displayName = pathParts[pathParts.length - 1] || `模型 ${index + 1}`;
+            } else {
+                // 预训练模型直接显示模型名
+                displayName = modelConfig.model || `模型 ${index + 1}`;
+            }
+            
+            // 添加任务类型标识
+            const task = modelConfig.task || 'transcribe';
+            const taskLabel = task === 'translate' ? '翻译' : '转录';
+            displayName = `${displayName} (${taskLabel})`;
+            
+            div.textContent = displayName;
+            div.dataset.modelIndex = index;
+            
+            div.addEventListener('click', async () => {
+                await handleTranscribe(modelConfig);
+            });
+            
+            transcribeModelList.appendChild(div);
         });
+    }
+
+    // 处理转录请求
+    async function handleTranscribe(modelConfig) {
+        if (!playlist[currentSongIndex]) {
+            showToast('没有正在播放的音乐', 'error');
+            addChatMessage('错误: 没有正在播放的音乐', 'bot');
+            return;
+        }
+
+        const song = playlist[currentSongIndex];
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        let musicPath = decodeURIComponent(url.pathname);
+        if (musicPath.startsWith('/music/')) {
+            musicPath = musicPath.substring('/music/'.length);
+        } else if (musicPath.startsWith('/')) {
+            musicPath = musicPath.substring(1);
+        }
+
+        if (!mediaDir) {
+            showToast('无法获取媒体目录信息', 'error');
+            addChatMessage('错误: 无法获取媒体目录信息', 'bot');
+            return;
+        }
+
+        // 构建转录参数
+        const transcribeParams = {
+            src: musicPath,
+            mediaDir: mediaDir,
+            modelSource: modelConfig['model-source'] || 'pretrained',
+            model: modelConfig.model || 'large-v3'
+        };
+
+        // 可选参数
+        if (modelConfig.task) {
+            transcribeParams.task = modelConfig.task;
+        }
+        if (modelConfig.language && modelConfig.language !== 'None') {
+            transcribeParams.language = modelConfig.language;
+        }
+        if (modelConfig.vad_filter !== undefined) {
+            transcribeParams.vadFilter = modelConfig.vad_filter;
+        }
+        if (modelConfig.condition_on_previous_text !== undefined) {
+            transcribeParams.conditionOnPreviousText = modelConfig.condition_on_previous_text;
+        }
+        // 额外可选参数支持
+        if (modelConfig['max-chars-per-line'] !== undefined) {
+            transcribeParams.maxCharsPerLine = modelConfig['max-chars-per-line'];
+        }
+        if (modelConfig['dense-subtitles'] !== undefined) {
+            transcribeParams.denseSubtitles = modelConfig['dense-subtitles'];
+        }
+        if (modelConfig['vad-threshold'] !== undefined) {
+            transcribeParams.vadThreshold = modelConfig['vad-threshold'];
+        }
+        if (modelConfig['transcribe-kwargs'] !== undefined) {
+            // allow passing object or JSON string
+            transcribeParams.transcribeKwargs = modelConfig['transcribe-kwargs'];
+        }
+        if (modelConfig['merge-threshold'] !== undefined) {
+            transcribeParams.mergeThreshold = modelConfig['merge-threshold'];
+        }
+        if (modelConfig['output-dir'] !== undefined) {
+            transcribeParams.outputDir = modelConfig['output-dir'];
+        }
+
+        // 显示开始消息
+        const taskLabel = modelConfig.task === 'translate' ? '翻译转录' : '转录';
+        const modelName = modelConfig.model.split(/[\\/]/).pop();
+        const startMessage = `开始使用 ${modelName} 进行${taskLabel}...`;
+        showToast(startMessage, 'info', 5000);
+        addChatMessage(startMessage, 'bot');
+
+        try {
+            const response = await fetch('/api/transcribe-video', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(transcribeParams)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                const successMessage = `${taskLabel}完成! 字幕文件: ${result.vtt_file}`;
+                showToast(successMessage, 'success', 5000);
+                addChatMessage(successMessage, 'bot');
+                
+                // 刷新本地字幕列表
+                await loadLocalSubtitles();
+            } else {
+                const errorMessage = `${taskLabel}失败: ${result.message || '未知错误'}`;
+                showToast(errorMessage, 'error', 5000);
+                addChatMessage(`错误: ${errorMessage}`, 'bot');
+                if (result.details) {
+                    console.error('Transcribe error details:', result.details);
+                }
+            }
+        } catch (error) {
+            const errorMessage = `${taskLabel}请求失败: ${error.message}`;
+            showToast(errorMessage, 'error', 5000);
+            addChatMessage(`错误: ${errorMessage}`, 'bot');
+            console.error('Transcribe error:', error);
+        }
     }
 
     // --- 命令面板功能 ---
@@ -2050,7 +2218,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addChatMessage(message, sender, isHtml = true) {
         const messageEl = document.createElement('div');
-        messageEl.classList.add('chat-message', sender);
+        // add both class naming conventions so both style.css and video-player-style.css apply
+        // e.g., 'chat-message bot' and 'chat-message bot-message'
+        const messageClass = typeof sender === 'string' ? sender : '';
+        messageEl.classList.add('chat-message');
+        if (messageClass) {
+            messageEl.classList.add(messageClass);
+            messageEl.classList.add(`${messageClass}-message`);
+        }
         if (isHtml) {
             messageEl.innerHTML = message;
         } else {
@@ -2170,17 +2345,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- command handlers that call backend APIs ---
     async function handleModelStatus() {
-        addChatMessage('正在查询模型状态...', 'bot');
+        const loadingMsg = addChatMessage('正在查询模型状态...', 'bot');
         try {
             const res = await fetch('/api/models');
             if (!res.ok) throw new Error(`status ${res.status}`);
             const data = await res.json();
-            addChatMessage(`<pre style="white-space:pre-wrap;">${JSON.stringify(data, null, 2)}</pre>`, 'bot');
+            // remove loading message
+            loadingMsg.remove();
+
+            let statusHtml = '<h4><i class="fas fa-brain"></i> 模型状态</h4>';
+
+            // 语义搜索模型
+            statusHtml += '<div class="model-status-category">';
+            statusHtml += `<h5>语义搜索模型 (当前: ${data.semantic_search_models?.active || 'N/A'})</h5>`;
+            statusHtml += '<ul class="chat-selection-list model-selection-list">';
+            (data.semantic_search_models?.available || []).forEach(model => {
+                const isActive = model === data.semantic_search_models.active;
+                statusHtml += `<li><button class="${isActive ? 'active' : ''}" onclick="switchModel('semantic', '${model}')" ${isActive ? 'disabled' : ''}>${model}</button></li>`;
+            });
+            statusHtml += '</ul></div>';
+
+            // 纠错/翻译模型
+            statusHtml += '<div class="model-status-category">';
+            statusHtml += `<h5>大语言模型 (当前: ${data.corrector_models?.active || 'N/A'})</h5>`;
+            if (data.corrector_models?.available && data.corrector_models.available.length > 0) {
+                statusHtml += '<ul class="chat-selection-list model-selection-list">';
+                data.corrector_models.available.forEach((model, index) => {
+                    const isActive = model === data.corrector_models.active;
+                    // for local/gguf models we send index; online names use name for semantic above
+                    statusHtml += `<li><button class="${isActive ? 'active' : ''}" onclick="switchModel('corrector', ${index})" ${isActive ? 'disabled' : ''}>${model}</button></li>`;
+                });
+                statusHtml += '</ul></div>';
+            } else {
+                statusHtml += '<p>无可用模型或配置错误。</p>';
+            }
+
+            addChatMessage(statusHtml, 'bot');
         } catch (err) {
             console.error('handleModelStatus error', err);
+            try { loadingMsg.remove(); } catch (e) {}
             addChatMessage('查询模型状态失败。', 'bot');
         }
     }
+
+    // 切换模型：type = 'semantic' | 'corrector'
+    async function switchModel(type, identifier) {
+        const loadingMsg = addChatMessage(`正在切换 ${type === 'semantic' ? '语义搜索' : '大语言'} 模型...`, 'bot');
+        const url = `/api/switch-model/${type}`;
+        const body = type === 'semantic'
+            ? JSON.stringify({ model_name: identifier })
+            : JSON.stringify({ model_index: identifier });
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: body
+            });
+            const result = await response.json();
+            loadingMsg.remove();
+
+            if (response.ok) {
+                addChatMessage(`✅ ${result.message}`, 'bot');
+                if (result.warning) addChatMessage(`⚠️ 警告: ${result.warning}`, 'bot');
+                // 刷新模型状态显示
+                await handleModelStatus();
+            } else {
+                throw new Error(result.error || '未知错误');
+            }
+        } catch (error) {
+            try { loadingMsg.remove(); } catch (e) {}
+            addChatMessage(`❌ 切换模型失败: ${error.message}`, 'error');
+        }
+    }
+    // Expose to global so inline onclick handlers in injected HTML can call it
+    window.switchModel = switchModel;
 
     async function handleProcessSubtitle(mode) {
         addChatMessage(`正在执行 ${mode} 操作，请稍候...`, 'bot');

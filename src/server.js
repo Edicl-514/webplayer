@@ -1289,7 +1289,22 @@ const server = http.createServer(async (req, res) => {
         });
         req.on('end', () => {
             try {
-                const { src, mediaDir } = JSON.parse(body);
+                const {
+                    src,
+                    mediaDir,
+                    modelSource,
+                    model,
+                    task,
+                    language,
+                    vadFilter,
+                    conditionOnPreviousText,
+                    maxCharsPerLine,
+                    denseSubtitles,
+                    vadThreshold,
+                    transcribeKwargs,
+                    mergeThreshold,
+                    outputDir
+                } = JSON.parse(body);
                 if (!src || !mediaDir) {
                     res.statusCode = 400;
                     res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
@@ -1297,7 +1312,53 @@ const server = http.createServer(async (req, res) => {
                 }
 
                 const fullVideoPath = path.join(mediaDir, src);
-                const pythonProcess = spawn('python', [path.join(__dirname, 'generate_subtitle.py'), fullVideoPath], {
+                
+                // 构建Python脚本参数
+                const args = [path.join(__dirname, 'generate_subtitle.py'), fullVideoPath];
+                
+                // 添加可选参数
+                if (modelSource) {
+                    args.push('--model-source', modelSource);
+                }
+                if (model) {
+                    args.push('--model', model);
+                }
+                if (task) {
+                    args.push('--task', task);
+                }
+                if (language && language !== 'None') {
+                    args.push('--language', language);
+                }
+                if (vadFilter === true) {
+                    args.push('--vad-filter');
+                }
+                if (conditionOnPreviousText === true) {
+                    args.push('--condition-on-previous-text');
+                }
+                // 新增可选参数映射
+                if (typeof maxCharsPerLine !== 'undefined' && maxCharsPerLine !== null) {
+                    args.push('--max-chars-per-line', String(maxCharsPerLine));
+                }
+                if (denseSubtitles === true) {
+                    args.push('--dense-subtitles');
+                }
+                if (typeof vadThreshold !== 'undefined' && vadThreshold !== null) {
+                    // 在命令行中以 --vad-threshold <value> 形式传递
+                    args.push('--vad-threshold', String(vadThreshold));
+                }
+                if (transcribeKwargs) {
+                    // 如果是对象，序列化为 JSON 字符串
+                    const payload = typeof transcribeKwargs === 'string' ? transcribeKwargs : JSON.stringify(transcribeKwargs);
+                    args.push('--transcribe-kwargs', payload);
+                }
+                if (typeof mergeThreshold !== 'undefined' && mergeThreshold !== null) {
+                    args.push('--merge-threshold', String(mergeThreshold));
+                }
+                if (outputDir) {
+                    args.push('--output-dir', outputDir);
+                }
+                
+                const pythonProcess = spawn('python', args, {
                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
                 });
 
@@ -1306,10 +1367,13 @@ const server = http.createServer(async (req, res) => {
 
                 pythonProcess.stdout.on('data', (data) => {
                     stdoutData += data.toString();
+                    // 实时输出到服务器控制台以便调试
+                    console.log(`[Transcribe] ${data.toString().trim()}`);
                 });
 
                 pythonProcess.stderr.on('data', (data) => {
                     stderrData += data.toString();
+                    console.error(`[Transcribe Error] ${data.toString().trim()}`);
                 });
 
                 pythonProcess.on('close', (code) => {

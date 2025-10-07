@@ -340,26 +340,26 @@ def switch_corrector_model():
     model_index = data['model_index']
 
     if CORRECTOR is None:
-        return jsonify({"error": "纠错模块未初始化"}), 503
+        return jsonify({"error": "翻译/纠错模块未初始化"}), 503
 
     if not isinstance(CORRECTOR.raw_config, list):
-        return jsonify({"message": "只有一个可用的纠错模型，无需切换"}), 200
+        return jsonify({"message": "只有一个可用的翻译/纠错模型，无需切换"}), 200
 
     if not (0 <= model_index < len(CORRECTOR.raw_config)):
         return jsonify({"error": f"无效的模型索引: {model_index}"}), 400
 
     try:
-        print(f"正在切换到纠错模型索引: {model_index}...")
+        print(f"正在切换到模型索引: {model_index}...")
         success = CORRECTOR.select_model(model_index)
         if success:
             new_model_path = CORRECTOR.model_config.get("model_path", "未知")
-            print(f"纠错模型切换成功: {os.path.basename(new_model_path)}")
-            return jsonify({"message": f"纠错模型已切换至: {os.path.basename(new_model_path)}"})
+            print(f"大语言模型切换成功: {os.path.basename(new_model_path)}")
+            return jsonify({"message": f"大语言模型已切换至: {os.path.basename(new_model_path)}"})
         else:
-            print("纠错模型切换失败。")
-            return jsonify({"error": "切换纠错模型失败"}), 500
+            print("大语言模型切换失败。")
+            return jsonify({"error": "切换大语言模型失败"}), 500
     except Exception as e:
-        print(f"切换纠错模型时发生错误: {e}")
+        print(f"切换大语言模型时发生错误: {e}")
         return jsonify({"error": f"服务器内部错误: {str(e)}"}), 500
 
 @app.route('/api/switch_model/semantic', methods=['POST'])
