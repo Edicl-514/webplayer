@@ -42,8 +42,20 @@ document.addEventListener('DOMContentLoaded', () => {
    const lyricsTypeSelect = document.getElementById('lyrics-type');
    const searchResultsLimitInput = document.getElementById('search-results-limit');
    const forceMatchSelect = document.getElementById('force-match');
+   const subtitleBtn = document.getElementById('subtitle-btn');
+   const localSubtitleList = document.querySelector('.local-subtitle-list');
+   const localTranscribeBtn = document.getElementById('local-transcribe-btn');
+   const chatToggleBtn = document.getElementById('chat-toggle-btn');
+   const chatPanel = document.querySelector('.chat-panel');
+   const chatCloseBtn = document.getElementById('chat-close-btn');
+   const chatMessages = document.getElementById('chat-messages');
+   const chatInput = document.getElementById('chat-input');
+   const sendChatBtn = document.getElementById('send-chat-btn');
+    // mode buttons removed from HTML; keep mode state but don't query DOM
+    let modeAiBtn = null;
+    let modeSemanticBtn = null;
     
-    // --- 播放器状态和数据 ---
+   // --- 播放器状态和数据 ---
     let currentSongIndex = 0;
     let isPlaying = false;
     let sound; // Howler.js实例
@@ -52,6 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let visualizerRAF;
     const colorThief = new ColorThief();
     let isVisualizerVisible = false;
+    let currentChatMode = 'ai'; // 'ai' or 'semantic'
+    let aiChatHistory = [];
 
     // --- 歌词滚动状态 ---
     let isLyricScrolling = false;
@@ -1080,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const text = lines[i + 1].trim();
                 if (text && !lines[i+1].includes('-->')) { // 确保下一行不是时间码
-                    currentLyrics.push({ time: startTime, text: text });
+                    currentLyrics.push({ time: startTime, texts: [text] }); // 修复：使用 texts 数组
                     i++; // 跳过歌词文本行
                 }
             }
@@ -1957,6 +1971,331 @@ document.addEventListener('DOMContentLoaded', () => {
             window.open(searchUrl, '_blank');
         }
     });
+
+    // --- 字幕/歌词功能 ---
+    async function loadLocalSubtitles() {
+        if (!playlist[currentSongIndex]) {
+            return;
+        }
+
+        const song = playlist[currentSongIndex];
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        let musicPath = decodeURIComponent(url.pathname);
+        if (musicPath.startsWith('/music/')) {
+            musicPath = musicPath.substring('/music/'.length);
+        } else if (musicPath.startsWith('/')) {
+            musicPath = musicPath.substring(1);
+        }
+
+        try {
+            const params = new URLSearchParams({
+                src: musicPath,
+                all: 'true'
+            });
+
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
+
+            const response = await fetch(`/api/find-music-subtitles?${params.toString()}`);
+            const result = await response.json();
+
+            if (result.success && result.subtitles && result.subtitles.length > 0) {
+                localSubtitleList.innerHTML = '';
+                result.subtitles.forEach(subtitle => {
+                    const div = document.createElement('div');
+                    div.textContent = subtitle.name;
+                    div.dataset.url = subtitle.url;
+                    div.addEventListener('click', () => {
+                        loadLyrics(subtitle.url);
+                        showToast(`加载: ${subtitle.name}`, 'success');
+                    });
+                    localSubtitleList.appendChild(div);
+                });
+            } else {
+                localSubtitleList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">未找到字幕文件</div>';
+            }
+        } catch (error) {
+            console.error('Error loading local subtitles:', error);
+            localSubtitleList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">加载失败</div>';
+        }
+    }
+
+    // 当鼠标悬停在字幕按钮上时加载本地字幕列表
+    if (subtitleBtn) {
+        subtitleBtn.addEventListener('mouseenter', () => {
+            loadLocalSubtitles();
+        });
+    }
+
+    // 本地转录功能（占位）
+    if (localTranscribeBtn) {
+        localTranscribeBtn.addEventListener('click', () => {
+            showToast('本地转录功能即将推出', 'info');
+        });
+    }
+
+    // --- 命令面板功能 ---
+    function toggleChatPanel(show) {
+        if (show) {
+            playerContainer.classList.add('chat-mode');
+        } else {
+            playerContainer.classList.remove('chat-mode');
+        }
+    }
+
+    chatToggleBtn.addEventListener('click', () => toggleChatPanel(true));
+    chatCloseBtn.addEventListener('click', () => toggleChatPanel(false));
+
+    function addChatMessage(message, sender, isHtml = true) {
+        const messageEl = document.createElement('div');
+        messageEl.classList.add('chat-message', sender);
+        if (isHtml) {
+            messageEl.innerHTML = message;
+        } else {
+            messageEl.textContent = message;
+        }
+        chatMessages.appendChild(messageEl);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return messageEl;
+    }
+
+    function clearChat() {
+        while (chatMessages.children.length > 1) {
+            chatMessages.removeChild(chatMessages.lastChild);
+        }
+        chatInput.value = '';
+        if (currentChatMode === 'ai') {
+            aiChatHistory = [];
+        }
+    }
+
+    async function handleChatInput() {
+        const inputText = chatInput.value.trim();
+        if (!inputText) return;
+        const parts = inputText.split(' ');
+        const cmd = parts[0].toLowerCase();
+        const rest = inputText.substring(cmd.length).trim();
+
+        // Help
+        if (cmd === '/h') {
+            const helpText = `
+                <ul style="margin:0 0 0 1em;padding:0;">
+                    <li><b>/h</b>：显示此帮助</li>
+                    <li><b>/clc</b>：清空聊天</li>
+                    <li><b>/a [问题]</b>：与AI助手对话</li>
+                    <li><b>/m</b>：查询模型状态</li>
+                    <li><b>/t</b>：翻译当前字幕/歌词</li>
+                    <li><b>/c</b>：校正当前字幕/歌词</li>
+                    <li><b>/u</b>：卸载所有模型</li>
+                    <li><b>/d</b>：生成术语表</li>
+                    <li><b>/s [内容] -参数</b>：语义搜索（支持参数：score、rerank、top、rebuild、gap、len）</li>
+                </ul>`;
+            addChatMessage(helpText, 'bot');
+            chatInput.value = '';
+            return;
+        }
+
+        // Clear chat
+        if (cmd === '/clc') {
+            clearChat();
+            return;
+        }
+
+        // AI chat
+        if (cmd === '/a') {
+            const query = rest;
+            if (query) {
+                await handleAIChat(query);
+            } else {
+                addChatMessage('请在 /a 后输入问题内容，例如：/a 当前歌曲是谁演唱？', 'bot');
+            }
+            chatInput.value = '';
+            return;
+        }
+
+        // Model status
+        if (cmd === '/m') {
+            await handleModelStatus();
+            chatInput.value = '';
+            return;
+        }
+
+        // Translate subtitle/lyrics
+        if (cmd === '/t') {
+            await handleProcessSubtitle('translate');
+            chatInput.value = '';
+            return;
+        }
+
+        // Correct subtitle/lyrics
+        if (cmd === '/c') {
+            await handleProcessSubtitle('correct');
+            chatInput.value = '';
+            return;
+        }
+
+        // Unload models
+        if (cmd === '/u') {
+            await handleUnloadModels();
+            chatInput.value = '';
+            return;
+        }
+
+        // Generate glossary
+        if (cmd === '/d') {
+            await handleGenerateGlossary();
+            chatInput.value = '';
+            return;
+        }
+
+        // Semantic search. Accept parameters after a space. We'll forward the whole rest to backend as 'query'
+        if (cmd === '/s') {
+            const query = rest;
+            if (!query) {
+                addChatMessage('请在 /s 后输入要搜索的内容，例如：/s love -top=5', 'bot');
+                chatInput.value = '';
+                return;
+            }
+            await handleSemanticSearchCommand(query);
+            chatInput.value = '';
+            return;
+        }
+
+        // Fallback: treat as AI question
+        await handleAIChat(inputText);
+        chatInput.value = '';
+    }
+
+    // --- command handlers that call backend APIs ---
+    async function handleModelStatus() {
+        addChatMessage('正在查询模型状态...', 'bot');
+        try {
+            const res = await fetch('/api/models');
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            const data = await res.json();
+            addChatMessage(`<pre style="white-space:pre-wrap;">${JSON.stringify(data, null, 2)}</pre>`, 'bot');
+        } catch (err) {
+            console.error('handleModelStatus error', err);
+            addChatMessage('查询模型状态失败。', 'bot');
+        }
+    }
+
+    async function handleProcessSubtitle(mode) {
+        addChatMessage(`正在执行 ${mode} 操作，请稍候...`, 'bot');
+        try {
+            const body = { mode };
+            const res = await fetch('/api/translate-subtitle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            const data = await res.json();
+            addChatMessage(data.message || '操作已提交，请查看任务面板。', 'bot');
+        } catch (err) {
+            console.error('handleProcessSubtitle error', err);
+            addChatMessage('字幕处理请求失败。', 'bot');
+        }
+    }
+
+    async function handleUnloadModels() {
+        addChatMessage('正在卸载模型...', 'bot');
+        try {
+            const res = await fetch('/api/unload-models', { method: 'POST' });
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            const data = await res.json();
+            addChatMessage(data.message || '已卸载模型。', 'bot');
+        } catch (err) {
+            console.error('handleUnloadModels error', err);
+            addChatMessage('卸载模型失败。', 'bot');
+        }
+    }
+
+    async function handleGenerateGlossary() {
+        addChatMessage('正在生成术语表...', 'bot');
+        try {
+            const res = await fetch('/api/generate-glossary', { method: 'POST' });
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            const data = await res.json();
+            addChatMessage(data.message || '术语表生成已提交。', 'bot');
+        } catch (err) {
+            console.error('handleGenerateGlossary error', err);
+            addChatMessage('生成术语表失败。', 'bot');
+        }
+    }
+
+    async function handleSemanticSearchCommand(queryWithParams) {
+        addChatMessage(`正在进行语义搜索：${queryWithParams}`, 'bot');
+        try {
+            // Build query params - backend can parse anything we send as query
+            const q = encodeURIComponent(queryWithParams);
+            const res = await fetch(`/api/semantic-search?query=${q}`);
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            const data = await res.json();
+            addChatMessage(`<pre style="white-space:pre-wrap;">${JSON.stringify(data, null, 2)}</pre>`, 'bot');
+        } catch (err) {
+            console.error('handleSemanticSearchCommand error', err);
+            addChatMessage('语义搜索失败。', 'bot');
+        }
+    }
+
+    async function handleAIChat(query) {
+        addChatMessage(query, 'user', false);
+        chatInput.value = '';
+        const thinkingMessage = addChatMessage('正在思考中...', 'bot');
+
+        try {
+            const song = playlist[currentSongIndex];
+            const metadata = {
+                title: song.title,
+                artist: song.artist,
+                album: song.album,
+                duration: sound ? sound.duration() : 0,
+            };
+
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: query,
+                    history: aiChatHistory,
+                    metadata: metadata,
+                    context_type: 'music'
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            thinkingMessage.remove();
+            addChatMessage(result.response, 'bot');
+
+            // 更新历史记录
+            aiChatHistory.push({ role: 'user', content: query });
+            aiChatHistory.push({ role: 'assistant', content: result.response });
+            // 限制历史记录长度
+            if (aiChatHistory.length > 10) {
+                aiChatHistory.splice(0, 2);
+            }
+
+        } catch (error) {
+            console.error('AI chat error:', error);
+            thinkingMessage.remove();
+            addChatMessage('抱歉，与AI助手通信时发生错误。', 'bot');
+        }
+    }
+
+    sendChatBtn.addEventListener('click', handleChatInput);
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleChatInput();
+        }
+    });
+
+    // Mode buttons were removed from the HTML; command panel now uses unified commands.
+    // Keep placeholders in case of future UI changes, but do not attach listeners to missing elements.
+
 
     initializePlayer(); // 初始化播放器
     // 设置默认激活的倍速选项

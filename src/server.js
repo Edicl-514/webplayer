@@ -1113,6 +1113,35 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 新增：处理音乐字幕查找请求
+    if (pathname === '/api/find-music-subtitles' && req.method === 'GET') {
+        const musicSrc = parsedUrl.query.src;
+        const findAll = parsedUrl.query.all === 'true';
+
+        if (!musicSrc) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, message: 'Missing music source parameter.' }));
+            return;
+        }
+
+        const requestedMediaDir = parsedUrl.query.mediaDir || currentMediaDir;
+        const decodedMusicSrc = decodeURIComponent(musicSrc);
+        const fullMusicPath = path.join(requestedMediaDir, decodedMusicSrc);
+
+        findSubtitles(fullMusicPath, requestedMediaDir, findAll)
+            .then(result => {
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(result));
+            })
+            .catch(error => {
+                console.error(`[Music Subtitles] Error finding subtitles for ${fullMusicPath}:`, error);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Failed to find subtitles.', error: error.message }));
+            });
+        return;
+    }
+
     // 新增：处理删除字幕文件的请求
     if (pathname === '/api/delete-subtitle' && req.method === 'POST') {
         let body = '';
@@ -1121,45 +1150,75 @@ const server = http.createServer(async (req, res) => {
         });
         req.on('end', async () => {
             try {
-                const { path: subtitlePath, mediaDir } = JSON.parse(body);
-                if (!subtitlePath || !mediaDir) {
+                const parsed = JSON.parse(body || '{}');
+                let subtitlePath = parsed.path || parsed.subtitle || parsed.file || '';
+                const mediaDir = parsed.mediaDir || currentMediaDir;
+
+                if (!subtitlePath) {
                     res.statusCode = 400;
-                    res.end(JSON.stringify({ success: false, message: '缺少字幕路径或媒体目录参数。' }));
+                    res.end(JSON.stringify({ success: false, message: '缺少字幕路径参数。' }));
                     return;
                 }
 
-                let pathToDelete = null;
-                const subtitleFilename = path.basename(subtitlePath);
-                
-                // 路径1: 检查全局缓存目录
-                const cachePath = path.join(CACHE_DIR, 'subtitles', subtitleFilename);
-                
-                // 路径2: 检查视频所在媒体目录
-                const mediaPath = path.join(mediaDir, subtitlePath);
-
+                // 解码可能被 URL 编码的路径
                 try {
-                    // 优先检查缓存路径是否存在
-                    await fs.promises.access(cachePath, fs.constants.F_OK);
-                    pathToDelete = cachePath;
-                    //console.log(`找到要删除的字幕于缓存目录: ${pathToDelete}`);
+                    subtitlePath = decodeURIComponent(subtitlePath);
                 } catch (e) {
-                    // 如果缓存中不存在，则检查媒体目录
+                    // 忽略解码错误，保留原值
+                }
+
+                // 准备候选路径列表：
+                // 1) 缓存目录直接的文件名（最常见）
+                // 2) 如果客户端传了以 /cache/ 开头或 cache\ 开头的路径，解析为 CACHE_DIR 下的相对路径
+                // 3) 媒体目录下的相对路径
+                // 4) 直接传入的绝对路径
+                const candidates = [];
+                const subtitleFilename = path.basename(subtitlePath);
+
+                // candidate A: cache/subtitles/<filename>
+                candidates.push(path.join(CACHE_DIR, 'subtitles', subtitleFilename));
+
+                // candidate B: if subtitlePath contains 'cache/subtitles' or starts with '/cache' treat as relative to CACHE_DIR
+                const normalized = subtitlePath.replace(/^[\\/]+/, ''); // remove leading slashes
+                if (normalized.startsWith('cache' + path.sep) || normalized.startsWith('cache/')) {
+                    // strip leading 'cache/' and join
+                    const rel = normalized.split(/[\\/]/).slice(1).join(path.sep);
+                    candidates.push(path.join(CACHE_DIR, rel));
+                }
+
+                // candidate C: mediaDir + provided path (handles relative paths from mediaDir)
+                candidates.push(path.join(mediaDir, normalized));
+
+                // candidate D: if provided path is absolute, include it as-is
+                if (path.isAbsolute(subtitlePath)) {
+                    candidates.push(subtitlePath);
+                }
+
+                // Deduplicate candidates while preserving order
+                const uniqueCandidates = [...new Set(candidates)];
+
+                let pathToDelete = null;
+                for (const cand of uniqueCandidates) {
                     try {
-                        await fs.promises.access(mediaPath, fs.constants.F_OK);
-                        pathToDelete = mediaPath;
-                        //console.log(`找到要删除的字幕于媒体目录: ${pathToDelete}`);
-                    } catch (e2) {
-                        // 两个地方都找不到
-                        console.log(`请求删除的字幕文件在缓存和媒体目录中均未找到: ${subtitlePath}`);
-                        res.statusCode = 200;
-                        res.end(JSON.stringify({ success: true, message: '文件未找到，可能已被删除。' }));
-                        return;
+                        await fs.promises.access(cand, fs.constants.F_OK);
+                        pathToDelete = cand;
+                        break;
+                    } catch (e) {
+                        // not found, continue
                     }
                 }
 
+                if (!pathToDelete) {
+                    console.log(`请求删除的字幕文件在缓存和媒体目录中均未找到: ${subtitlePath}`);
+                    res.statusCode = 200;
+                    res.end(JSON.stringify({ success: true, message: '文件未找到，可能已被删除。' }));
+                    return;
+                }
+
                 // 对最终确定的路径执行安全检查
-                const isCachePathSafe = path.resolve(pathToDelete).startsWith(path.resolve(CACHE_DIR));
-                const isMediaPathSafe = MEDIA_DIRS.some(dir => path.resolve(pathToDelete).startsWith(dir.path));
+                const resolved = path.resolve(pathToDelete);
+                const isCachePathSafe = resolved.startsWith(path.resolve(CACHE_DIR) + path.sep) || resolved === path.resolve(CACHE_DIR);
+                const isMediaPathSafe = MEDIA_DIRS.some(dir => resolved.startsWith(path.resolve(dir.path) + path.sep) || resolved === path.resolve(dir.path));
 
                 if (!isCachePathSafe && !isMediaPathSafe) {
                     console.warn(`检测到删除不安全路径的尝试: ${pathToDelete}`);
@@ -1170,9 +1229,9 @@ const server = http.createServer(async (req, res) => {
 
                 // 执行删除
                 await fs.promises.unlink(pathToDelete);
-                //console.log(`成功删除字幕文件: ${pathToDelete}`);
+                console.log(`成功删除字幕文件: ${pathToDelete}`);
                 res.statusCode = 200;
-                res.end(JSON.stringify({ success: true, message: '字幕文件已成功删除。' }));
+                res.end(JSON.stringify({ success: true, message: '字幕文件已成功删除。', deleted: pathToDelete }));
 
             } catch (error) {
                 console.error('删除字幕文件时出错:', error);
