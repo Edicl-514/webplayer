@@ -67,6 +67,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentChatMode = 'ai'; // 'ai' or 'semantic'
     let aiChatHistory = [];
     let transcriberModels = []; // 存储从config.json加载的转录模型配置
+    let activeTasks = {}; // 跟踪活动任务
+    let ws = null; // WebSocket连接
 
     // --- 歌词滚动状态 ---
     let isLyricScrolling = false;
@@ -84,6 +86,277 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     
     let playlist = [];
+
+    // --- WebSocket 初始化和任务进度处理 ---
+    function initializeWebSocket() {
+        ws = new WebSocket(`ws://${window.location.host}`);
+        
+        ws.onopen = () => {
+            console.log('[WebSocket] Connected');
+        };
+        
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log('[WebSocket] Message received:', data);
+            
+            handleTaskProgress(data);
+        };
+        
+        ws.onerror = (error) => {
+            console.error('[WebSocket] Error:', error);
+        };
+        
+        ws.onclose = () => {
+            console.log('[WebSocket] Connection closed, reconnecting in 3s...');
+            setTimeout(initializeWebSocket, 3000);
+        };
+    }
+
+    function handleTaskProgress(data) {
+        console.log('[Task Progress] Received data:', data);
+        
+        // 尝试多种方式匹配任务ID
+        let taskMessageEl = null;
+        let matchedTaskId = null;
+        
+        // 方法1: 使用消息中的vtt_file和task构建ID
+        if (data.vtt_file && data.task) {
+            const normalizedVttFile = normalizePathForTaskId(data.vtt_file);
+            const taskName = data.task === 'translate' ? '翻译' :
+                           data.task === 'correct' ? '校正' :
+                           data.task === 'glossary' ? '术语表' : data.task;
+            const taskId = `task-${taskName}-${normalizedVttFile}`;
+            console.log('[Task Progress] Looking for taskId:', taskId);
+            console.log('[Task Progress] Normalized vtt_file:', normalizedVttFile);
+            taskMessageEl = document.getElementById(taskId);
+            if (taskMessageEl) {
+                matchedTaskId = taskId;
+                console.log('[Task Progress] Matched by method 1:', taskId);
+            } else {
+                console.log('[Task Progress] Method 1 failed, element not found');
+            }
+        }
+        
+        // 方法2: 遍历所有活动任务，查找匹配的
+        if (!taskMessageEl) {
+            const activeTaskElements = document.querySelectorAll('[data-task-active="true"]');
+            for (const el of activeTaskElements) {
+                const elId = el.id;
+                // 检查任务名称是否匹配
+                if (data.task && elId.includes(data.task.replace(/\s/g, '-'))) {
+                    taskMessageEl = el;
+                    matchedTaskId = elId;
+                    console.log('[Task Progress] Matched by method 2:', elId);
+                    break;
+                }
+            }
+        }
+        
+        if (!taskMessageEl) {
+            console.warn('[Task Progress] No matching task element found for:', data);
+            return;
+        }
+        
+        console.log('[Task Progress] Processing for task:', matchedTaskId);
+        
+        // 更新任务状态
+        if (data.type === 'progress') {
+            if (activeTasks[matchedTaskId]) {
+                activeTasks[matchedTaskId].current = typeof data.current === 'number' ? data.current : 0;
+                activeTasks[matchedTaskId].total = typeof data.total === 'number' ? data.total : 0;
+            }
+            
+            const progressBarEl = taskMessageEl.querySelector('.chat-progress-bar-inner');
+            const progressTextEl = taskMessageEl.querySelector('.chat-progress-text');
+            
+            const safeTotal = (typeof data.total === 'number' && data.total > 0) ? data.total : null;
+            const safeCurrent = typeof data.current === 'number' ? data.current : 0;
+            const percentage = safeTotal ? (safeCurrent / safeTotal) * 100 : 0;
+            
+            // 构建轮次信息
+            let roundInfo = '';
+            if (data.current_round && data.total_rounds) {
+                roundInfo = ` [第 ${data.current_round}/${data.total_rounds} 轮]`;
+            }
+            
+            console.log(`[Task Progress] Updating: ${safeCurrent}/${safeTotal} (${percentage.toFixed(1)}%)${roundInfo}`);
+            
+            if (progressBarEl) {
+                progressBarEl.style.width = `${percentage}%`;
+            }
+            if (progressTextEl) {
+                progressTextEl.textContent = safeTotal 
+                    ? `${data.task}中... (${safeCurrent}/${safeTotal})${roundInfo}`
+                    : `${data.task}中... (${safeCurrent}/?)${roundInfo}`;
+            }
+        } else if (data.type === 'complete') {
+            delete activeTasks[matchedTaskId];
+            
+            let finalMessage = `✅ 任务 '${data.task}' 完成！`;
+            if (data.processed_file) {
+                const fileName = data.processed_file.split(/[\\/]/).pop();
+                finalMessage += `<br>新文件: ${fileName}`;
+                
+                // 刷新字幕列表
+                loadLocalSubtitles();
+                
+                // 自动加载完成的字幕（如果是翻译或纠错任务）
+                if (data.task === '翻译' || data.task === '纠错' || data.task === 'translate' || data.task === 'correct') {
+                    // 构建字幕URL
+                    const song = playlist[currentSongIndex];
+                    if (song) {
+                        const url = new URL(song.src, window.location.origin);
+                        const mediaDir = url.searchParams.get('mediaDir');
+                        
+                        // 处理文件路径
+                        let subtitlePath = data.processed_file;
+                        
+                        // 如果是缓存目录中的文件
+                        if (subtitlePath.includes('cache/subtitles') || subtitlePath.includes('cache\\subtitles')) {
+                            // 提取相对于项目根目录的路径
+                            const cachePart = subtitlePath.match(/(cache[\\/]subtitles[\\/].+)/);
+                            if (cachePart) {
+                                subtitlePath = '/' + cachePart[1].replace(/\\/g, '/');
+                            }
+                        } else if (mediaDir) {
+                            // 如果是媒体目录中的文件，构建相对路径
+                            subtitlePath = subtitlePath.replace(/\\/g, '/');
+                            if (subtitlePath.startsWith(mediaDir.replace(/\\/g, '/'))) {
+                                subtitlePath = subtitlePath.substring(mediaDir.length);
+                            }
+                            subtitlePath = '/' + subtitlePath.replace(/^\/+/, '');
+                            if (mediaDir) {
+                                subtitlePath += `?mediaDir=${encodeURIComponent(mediaDir)}`;
+                            }
+                        }
+                        
+                        console.log('[Auto Load] Loading processed subtitle:', subtitlePath);
+                        
+                        // 加载新字幕
+                        loadLyrics(subtitlePath);
+                        
+                        // 更新歌曲的lrc属性
+                        song.lrc = subtitlePath;
+                        song.userModified = true;
+                        localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                        
+                        finalMessage += `<br>✨ 已自动加载新字幕`;
+                    }
+                }
+            }
+            if (data.glossary_file) {
+                finalMessage += `<br>文件已保存: ${data.glossary_file.split(/[\\/]/).pop()}`;
+            }
+            taskMessageEl.className = 'chat-message bot';
+            taskMessageEl.innerHTML = finalMessage;
+            taskMessageEl.removeAttribute('data-task-active');
+        } else if (data.type === 'cancelled') {
+            delete activeTasks[matchedTaskId];
+            
+            taskMessageEl.className = 'chat-message bot';
+            taskMessageEl.innerHTML = `🚫 任务 '${data.task}' 已取消。`;
+            taskMessageEl.removeAttribute('data-task-active');
+        } else if (data.type === 'error') {
+            delete activeTasks[matchedTaskId];
+            
+            taskMessageEl.className = 'chat-message bot';
+            taskMessageEl.innerHTML = `❌ 任务 '${data.task || '未知'}' 失败: ${data.message}`;
+            taskMessageEl.removeAttribute('data-task-active');
+        }
+    }
+
+    function normalizePathForTaskId(path) {
+        if (!path) return '';
+        // 移除 URL 编码并规范化路径分隔符
+        try {
+            let normalized = decodeURIComponent(path);
+            normalized = normalized.replace(/\\/g, '/');
+            // 移除查询参数
+            normalized = normalized.split('?')[0];
+            
+            // 如果是绝对路径，提取相对于项目根目录或cache目录的部分
+            // 例如: D:\temp\webplayer\src\cache\subtitles\xxx.vtt -> cache/subtitles/xxx.vtt
+            const cacheMatch = normalized.match(/(cache\/(?:subtitles|lyrics)\/[^/]+)$/i);
+            if (cacheMatch) {
+                return cacheMatch[1];
+            }
+            
+            // 移除前导斜杠
+            if (normalized.startsWith('/')) {
+                normalized = normalized.substring(1);
+            }
+            
+            return normalized;
+        } catch (e) {
+            let fallback = path.replace(/\\/g, '/').split('?')[0];
+            // 尝试从fallback中提取cache路径
+            const cacheMatch = fallback.match(/(cache\/(?:subtitles|lyrics)\/[^/]+)$/i);
+            if (cacheMatch) {
+                return cacheMatch[1];
+            }
+            if (fallback.startsWith('/')) {
+                fallback = fallback.substring(1);
+            }
+            return fallback;
+        }
+    }
+
+    async function cancelSubtitleTask(mode, vttFileOriginal, taskName) {
+        console.log('[Cancel Task] Request:', { mode, vttFileOriginal, taskName });
+        
+        const song = playlist[currentSongIndex];
+        if (!song) return;
+        
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        
+        // 解析字幕文件路径，与handleProcessSubtitle保持一致
+        let vttFile = vttFileOriginal;
+        
+        // 如果是URL格式，解析出路径
+        if (vttFile.startsWith('http://') || vttFile.startsWith('https://')) {
+            try {
+                const vttUrl = new URL(vttFile);
+                vttFile = decodeURIComponent(vttUrl.pathname);
+            } catch (e) {
+                console.error('Failed to parse VTT URL:', e);
+            }
+        }
+        
+        // 处理路径格式，移除前导斜杠
+        if (vttFile.startsWith('/')) {
+            vttFile = vttFile.substring(1);
+        }
+        
+        console.log('[Cancel Task] Sending:', { task: mode, vtt_file: vttFile, mediaDir });
+        
+        try {
+            const response = await fetch('/api/cancel-subtitle-task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    task: mode, 
+                    vtt_file: vttFile,
+                    mediaDir: mediaDir
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                console.log(`[Cancel Task] Success:`, result);
+                addChatMessage(`✅ ${result.message || '取消任务请求已发送'}`, 'bot');
+            } else {
+                console.error(`[Cancel Task] Failed:`, result);
+                addChatMessage(`❌ 取消失败: ${result.message}`, 'bot');
+            }
+        } catch (error) {
+            console.error('[Cancel Task] Error:', error);
+            addChatMessage(`❌ 取消请求失败: ${error.message}`, 'bot');
+        }
+    }
+    // 将函数暴露到全局作用域，以便HTML中的onclick能调用
+    window.cancelSubtitleTask = cancelSubtitleTask;
 
     function initializePlayer() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -612,6 +885,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * 尝试加载本地字幕(用于非音乐文件)
+     * 当判断为"非音乐"时自动查找并加载合适的本地字幕
+     */
+    async function tryLoadLocalSubtitle(musicPath, mediaDir) {
+        try {
+            const params = new URLSearchParams({
+                src: musicPath,
+                all: 'false'  // 只获取第一个匹配的字幕
+            });
+
+            if (mediaDir) {
+                params.append('mediaDir', mediaDir);
+            }
+
+            const response = await fetch(`/api/find-music-subtitles?${params.toString()}`);
+            const result = await response.json();
+
+            if (result.success && result.subtitles && result.subtitles.length > 0) {
+                // 找到本地字幕，加载第一个
+                const subtitle = result.subtitles[0];
+                console.log(`[AUTO] Found local subtitle: ${subtitle.name}`);
+                
+                const song = playlist[currentSongIndex];
+                song.lrc = subtitle.url;
+                song.userModified = true;
+                
+                loadLyrics(subtitle.url);
+                localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                
+                showToast(`已加载本地字幕: ${subtitle.name}`, 'info');
+            } else {
+                // 没有找到本地字幕
+                console.log('[AUTO] No local subtitle found');
+                lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">未找到字幕文件</div>';
+            }
+        } catch (error) {
+            console.error('Error loading local subtitle:', error);
+            lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">加载字幕失败</div>';
+        }
+    }
+
+    /**
      * 获取音乐歌词(异步,可能需要较长时间)
      * 这是第三步,可能需要联网搜索
      */
@@ -636,9 +951,9 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (!shouldFetchLyrics) {
                 console.log('Skipping lyrics fetch based on settings');
-                // 如果不需要获取歌词,清空加载提示
+                // 如果不需要获取歌词,尝试查找本地字幕
                 if (!song.lrc) {
-                    lyricsWrapper.innerHTML = '';
+                    await tryLoadLocalSubtitle(musicPath, mediaDir);
                 }
                 return;
             }
@@ -2005,14 +2320,85 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.subtitles && result.subtitles.length > 0) {
                 localSubtitleList.innerHTML = '';
                 result.subtitles.forEach(subtitle => {
-                    const div = document.createElement('div');
-                    div.textContent = subtitle.name;
-                    div.dataset.url = subtitle.url;
-                    div.addEventListener('click', () => {
+                    // container with link + delete button to match video player behavior
+                    const container = document.createElement('div');
+                    container.className = 'subtitle-menu-item-container';
+
+                    const link = document.createElement('div');
+                    link.textContent = subtitle.name;
+                    link.title = subtitle.name; // 悬停时显示完整文件名
+                    // store both url and path (if available) on dataset
+                    link.dataset.url = subtitle.url || '';
+                    if (subtitle.path) link.dataset.path = subtitle.path;
+                    link.addEventListener('click', () => {
                         loadLyrics(subtitle.url);
                         showToast(`加载: ${subtitle.name}`, 'success');
                     });
-                    localSubtitleList.appendChild(div);
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-subtitle-btn';
+                    deleteBtn.innerHTML = '&times;';
+                    deleteBtn.title = '删除此字幕';
+                    deleteBtn.onclick = async (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+
+                        const subtitleRelativePath = subtitle.path || subtitle.url;
+                        if (!subtitleRelativePath) {
+                            showToast('无法确定字幕文件的路径。', 'error');
+                            return;
+                        }
+
+                        deleteBtn.disabled = true;
+                        deleteBtn.style.cursor = 'wait';
+
+                        try {
+                            const body = { path: subtitleRelativePath };
+                            if (mediaDir) body.mediaDir = mediaDir;
+
+                            const response = await fetch('/api/delete-subtitle', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body)
+                            });
+                            const res = await response.json();
+
+                            if (!res.success) {
+                                throw new Error(res.message || '服务器未能删除文件。');
+                            }
+
+                            // 如果当前加载的是该字幕，清除显示
+                            try {
+                                if (typeof currentSubtitleUrl !== 'undefined' && currentSubtitleUrl) {
+                                    const fullSubtitleUrl = new URL(subtitle.url, window.location.origin).href;
+                                    if (currentSubtitleUrl === fullSubtitleUrl) {
+                                        // hide lyrics if they match
+                                        currentLyrics = [];
+                                        renderLyrics();
+                                    }
+                                }
+                            } catch (e) {
+                                // ignore
+                            }
+
+                            container.remove();
+
+                            if (localSubtitleList.childElementCount === 0) {
+                                localSubtitleList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">未找到字幕文件</div>';
+                            }
+
+                        } catch (error) {
+                            console.error('删除字幕时出错:', error);
+                            showToast(`删除字幕失败: ${error.message || error}`, 'error');
+                        } finally {
+                            deleteBtn.disabled = false;
+                            deleteBtn.style.cursor = 'pointer';
+                        }
+                    };
+
+                    container.appendChild(link);
+                    container.appendChild(deleteBtn);
+                    localSubtitleList.appendChild(container);
                 });
             } else {
                 localSubtitleList.innerHTML = '<div style="padding: 10px 18px; cursor: default; opacity: 0.6;">未找到字幕文件</div>';
@@ -2186,14 +2572,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(successMessage, 'success', 5000);
                 addChatMessage(successMessage, 'bot');
                 
+                // 如果有note字段，显示警告信息
+                if (result.note) {
+                    console.warn('Transcribe note:', result.note);
+                    addChatMessage(`⚠️ 注意: ${result.note}`, 'bot');
+                }
+                
                 // 刷新本地字幕列表
                 await loadLocalSubtitles();
             } else {
                 const errorMessage = `${taskLabel}失败: ${result.message || '未知错误'}`;
                 showToast(errorMessage, 'error', 5000);
                 addChatMessage(`错误: ${errorMessage}`, 'bot');
+                
+                // 显示详细错误信息
                 if (result.details) {
                     console.error('Transcribe error details:', result.details);
+                    addChatMessage(`详细信息: ${result.details}`, 'bot');
+                }
+                if (result.stdout) {
+                    console.log('Python stdout:', result.stdout);
+                }
+                if (result.stderr) {
+                    console.error('Python stderr:', result.stderr);
                 }
             }
         } catch (error) {
@@ -2216,7 +2617,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chatToggleBtn.addEventListener('click', () => toggleChatPanel(true));
     chatCloseBtn.addEventListener('click', () => toggleChatPanel(false));
 
-    function addChatMessage(message, sender, isHtml = true) {
+    function addChatMessage(message, sender, isHtml = true, customId = null) {
         const messageEl = document.createElement('div');
         // add both class naming conventions so both style.css and video-player-style.css apply
         // e.g., 'chat-message bot' and 'chat-message bot-message'
@@ -2225,6 +2626,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (messageClass) {
             messageEl.classList.add(messageClass);
             messageEl.classList.add(`${messageClass}-message`);
+        }
+        if (customId) {
+            messageEl.id = customId;
         }
         if (isHtml) {
             messageEl.innerHTML = message;
@@ -2422,16 +2826,116 @@ document.addEventListener('DOMContentLoaded', () => {
     window.switchModel = switchModel;
 
     async function handleProcessSubtitle(mode) {
-        addChatMessage(`正在执行 ${mode} 操作，请稍候...`, 'bot');
+        // 检查是否有正在播放的歌曲
+        if (!playlist[currentSongIndex]) {
+            addChatMessage('❌ 没有正在播放的音乐', 'bot');
+            return;
+        }
+
+        const song = playlist[currentSongIndex];
+        
+        // 检查是否有加载的字幕文件
+        if (!song.lrc) {
+            addChatMessage('❌ 当前没有加载字幕文件，请先加载或生成字幕。', 'bot');
+            return;
+        }
+
+        // 获取字幕文件路径和媒体目录
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        
+        if (!mediaDir) {
+            addChatMessage('❌ 无法获取媒体目录信息', 'bot');
+            return;
+        }
+
+        // 解析字幕文件路径
+        let vttFile = song.lrc;
+        
+        // 如果是URL格式，解析出路径
+        if (vttFile.startsWith('http://') || vttFile.startsWith('https://')) {
+            try {
+                // 如果是完整URL，提取路径部分
+                const vttUrl = new URL(vttFile);
+                vttFile = decodeURIComponent(vttUrl.pathname);
+            } catch (e) {
+                console.error('Failed to parse VTT URL:', e);
+            }
+        }
+        
+        // 处理路径格式，移除前导斜杠
+        // 将 /cache/lyrics/xxx.vtt 转换为 cache/lyrics/xxx.vtt
+        // 或将 /cache/subtitles/xxx.vtt 转换为 cache/subtitles/xxx.vtt
+        if (vttFile.startsWith('/')) {
+            vttFile = vttFile.substring(1);
+        }
+
+        const taskName = mode === 'translate' ? '翻译' : mode === 'correct' ? '校正' : mode;
+        const normalizedVttFile = normalizePathForTaskId(song.lrc);
+        const taskId = `task-${taskName}-${normalizedVttFile}`;
+        
+        console.log(`[Task] Starting: ${taskName}`);
+        console.log(`[Task] ID: ${taskId}`);
+        console.log(`[Task] VTT File: ${vttFile}`);
+        console.log(`[Task] Media Dir: ${mediaDir}`);
+        
+        // 检查并移除同ID的旧任务元素（可能是之前取消的任务）
+        const existingTaskEl = document.getElementById(taskId);
+        if (existingTaskEl) {
+            console.log(`[Task] Removing old task element with same ID: ${taskId}`);
+            existingTaskEl.removeAttribute('id'); // 移除旧元素的ID，避免冲突
+        }
+        
+        // 添加带进度条的占位符消息
+        const progressPlaceholder = `
+            <div class="chat-progress-container">
+                <div class="chat-progress-text">${taskName}中... (0/0)</div>
+                <div class="chat-progress-bar-container">
+                    <div class="chat-progress-bar-inner" style="width: 0%;"></div>
+                </div>
+                <button class="chat-cancel-btn" onclick="cancelSubtitleTask('${mode}', '${song.lrc.replace(/'/g, "\\'")}', '${taskName}')">取消</button>
+            </div>`;
+        const messageEl = addChatMessage(progressPlaceholder, 'bot', true, taskId);
+        messageEl.setAttribute('data-task-active', 'true');
+        messageEl.classList.add('task-progress'); // 添加特定类名以应用全宽样式
+        
+        // 开始跟踪任务
+        activeTasks[taskId] = {
+            task: taskName,
+            current: 0,
+            total: 0,
+            startTime: Date.now()
+        };
+        
         try {
-            const body = { mode };
-            const res = await fetch('/api/translate-subtitle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-            if (!res.ok) throw new Error(`status ${res.status}`);
-            const data = await res.json();
-            addChatMessage(data.message || '操作已提交，请查看任务面板。', 'bot');
+            const body = { vtt_file: vttFile, mediaDir: mediaDir };
+            console.log(`[Task] Sending request:`, body);
+            
+            const endpoint = mode === 'translate' ? '/api/translate-subtitle' : '/api/correct-subtitle';
+            const res = await fetch(endpoint, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(body) 
+            });
+            
+            if (!res.ok && res.status !== 202) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${res.status}`);
+            }
+            
+            // 202 表示任务已接受，进度将通过WebSocket发送
+            const data = await res.json().catch(() => ({}));
+            console.log(`[Task] Server response:`, data);
+            
         } catch (err) {
-            console.error('handleProcessSubtitle error', err);
-            addChatMessage('字幕处理请求失败。', 'bot');
+            console.error('[Task] Error:', err);
+            const taskMessageEl = document.getElementById(taskId);
+            if (taskMessageEl) {
+                taskMessageEl.className = 'chat-message bot';
+                taskMessageEl.innerHTML = `❌ 字幕${taskName}请求失败: ${err.message}`;
+                taskMessageEl.removeAttribute('data-task-active');
+                delete activeTasks[taskId];
+            }
         }
     }
 
@@ -2449,15 +2953,85 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function handleGenerateGlossary() {
-        addChatMessage('正在生成术语表...', 'bot');
+        if (!playlist[currentSongIndex]) {
+            addChatMessage('❌ 没有正在播放的音乐', 'bot');
+            return;
+        }
+
+        const song = playlist[currentSongIndex];
+        
+        if (!song.lrc) {
+            addChatMessage('❌ 当前没有加载字幕文件，无法生成术语表。', 'bot');
+            return;
+        }
+
+        const url = new URL(song.src, window.location.origin);
+        const mediaDir = url.searchParams.get('mediaDir');
+        
+        if (!mediaDir) {
+            addChatMessage('❌ 无法获取媒体目录信息', 'bot');
+            return;
+        }
+
+        let vttFile = song.lrc;
+        if (vttFile.startsWith('http://') || vttFile.startsWith('https://')) {
+            const vttUrl = new URL(vttFile);
+            vttFile = decodeURIComponent(vttUrl.pathname);
+        }
+        if (vttFile.startsWith('/')) {
+            vttFile = vttFile.substring(1);
+        }
+
+        const normalizedVttFile = normalizePathForTaskId(song.lrc);
+        const taskId = `task-术语表-${normalizedVttFile}`;
+        
+        // 检查并移除同ID的旧任务元素（可能是之前取消的任务）
+        const existingTaskEl = document.getElementById(taskId);
+        if (existingTaskEl) {
+            console.log(`[Task] Removing old task element with same ID: ${taskId}`);
+            existingTaskEl.removeAttribute('id'); // 移除旧元素的ID，避免冲突
+        }
+        
+        const progressPlaceholder = `
+            <div class="chat-progress-container">
+                <div class="chat-progress-text">术语表生成中... (0/0)</div>
+                <div class="chat-progress-bar-container">
+                    <div class="chat-progress-bar-inner" style="width: 0%;"></div>
+                </div>
+                <button class="chat-cancel-btn" onclick="cancelSubtitleTask('glossary', '${song.lrc.replace(/'/g, "\\'")}', '术语表')">取消</button>
+            </div>`;
+        const messageEl = addChatMessage(progressPlaceholder, 'bot', true, taskId);
+        messageEl.setAttribute('data-task-active', 'true');
+        messageEl.classList.add('task-progress'); // 添加特定类名以应用全宽样式
+        
+        activeTasks[taskId] = {
+            task: '术语表',
+            current: 0,
+            total: 0,
+            startTime: Date.now()
+        };
+
         try {
-            const res = await fetch('/api/generate-glossary', { method: 'POST' });
-            if (!res.ok) throw new Error(`status ${res.status}`);
-            const data = await res.json();
-            addChatMessage(data.message || '术语表生成已提交。', 'bot');
+            const res = await fetch('/api/generate-glossary', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vtt_file: vttFile, mediaDir: mediaDir })
+            });
+            
+            if (!res.ok && res.status !== 202) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${res.status}`);
+            }
+            
         } catch (err) {
-            console.error('handleGenerateGlossary error', err);
-            addChatMessage('生成术语表失败。', 'bot');
+            console.error('[Task] Generate glossary error:', err);
+            const taskMessageEl = document.getElementById(taskId);
+            if (taskMessageEl) {
+                taskMessageEl.className = 'chat-message bot';
+                taskMessageEl.innerHTML = `❌ 生成术语表失败: ${err.message}`;
+                taskMessageEl.removeAttribute('data-task-active');
+                delete activeTasks[taskId];
+            }
         }
     }
 
@@ -2535,7 +3109,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mode buttons were removed from the HTML; command panel now uses unified commands.
     // Keep placeholders in case of future UI changes, but do not attach listeners to missing elements.
 
-
+    // --- 初始化 ---
+    initializeWebSocket(); // 初始化WebSocket连接
     initializePlayer(); // 初始化播放器
     // 设置默认激活的倍速选项
     document.querySelector('.speed-options div[data-speed="1.0"]').classList.add('active');

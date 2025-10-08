@@ -1377,23 +1377,64 @@ const server = http.createServer(async (req, res) => {
                 });
 
                 pythonProcess.on('close', (code) => {
-                    if (code !== 0) {
-                        console.error(`generate_subtitle.py stderr: ${stderrData}`);
-                        res.statusCode = 500;
-                        res.end(JSON.stringify({ success: false, message: `转录脚本执行失败，退出码: ${code}`, details: stderrData }));
+                    // 首先尝试从输出中提取VTT文件路径
+                    const vttPathMatch = stdoutData.match(/字幕已保存为\s*VTT\s*格式:\s*(.+?)(?:\r?\n|$)/);
+                    let vttFilePath = null;
+                    
+                    if (vttPathMatch && vttPathMatch[1]) {
+                        vttFilePath = vttPathMatch[1].trim().replace(/\\/g, '/');
+                        console.log(`[Transcribe] Successfully extracted VTT path from output: ${vttFilePath}`);
+                    } else {
+                        // 尝试通过文件系统查找
+                        const baseName = path.basename(fullVideoPath, path.extname(fullVideoPath));
+                        const outputDirPath = outputDir || path.join(__dirname, 'cache', 'subtitles');
+                        const expectedVttPath = path.join(outputDirPath, `${baseName}_transcribe.vtt`);
+                        
+                        if (fs.existsSync(expectedVttPath)) {
+                            vttFilePath = expectedVttPath.replace(/\\/g, '/');
+                            console.log(`[Transcribe] Found VTT file by path: ${vttFilePath}`);
+                        }
+                    }
+                    
+                    // 如果找到了VTT文件，认为是成功的，即使退出码非0
+                    if (vttFilePath && fs.existsSync(vttFilePath)) {
+                        console.log(`[Transcribe] Task completed successfully (exit code: ${code})`);
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(JSON.stringify({ 
+                            success: true, 
+                            vtt_file: vttFilePath,
+                            note: code !== 0 ? `转录成功，但进程退出码为 ${code}（可能是清理过程中的非关键错误）` : undefined
+                        }));
                         return;
                     }
                     
-                    // 从Python脚本的输出中提取VTT文件路径
-                    const vttPathMatch = stdoutData.match(/字幕已保存为 VTT 格式: (.*)/);
-                    if (vttPathMatch && vttPathMatch[1]) {
-                        const vttFilePath = vttPathMatch[1].trim().replace(/\\/g, '/');
-                        res.setHeader('Content-Type', 'application/json');
-                        res.end(JSON.stringify({ success: true, vtt_file: vttFilePath }));
-                    } else {
+                    // 如果没有找到VTT文件且退出码非0，才报告错误
+                    if (code !== 0) {
+                        console.error(`generate_subtitle.py stderr: ${stderrData}`);
+                        console.error(`generate_subtitle.py stdout: ${stdoutData}`);
                         res.statusCode = 500;
-                        res.end(JSON.stringify({ success: false, message: '无法从脚本输出中解析VTT文件路径。', details: stdoutData }));
+                        res.end(JSON.stringify({ 
+                            success: false, 
+                            message: `转录脚本执行失败，退出码: ${code}`, 
+                            details: stderrData || stdoutData,
+                            stdout: stdoutData,
+                            stderr: stderrData
+                        }));
+                        return;
                     }
+                    
+                    // 退出码为0但没找到VTT文件
+                    console.error('Failed to find VTT file despite successful exit');
+                    console.error('Expected VTT path from output:', stdoutData);
+                    console.error('stderr:', stderrData);
+                    res.statusCode = 500;
+                    res.end(JSON.stringify({ 
+                        success: false, 
+                        message: '无法从脚本输出中解析VTT文件路径且未找到预期的VTT文件。', 
+                        details: '脚本执行完成但输出格式不匹配且未找到预期的VTT文件',
+                        stdout: stdoutData,
+                        stderr: stderrData
+                    }));
                 });
 
             } catch (e) {
@@ -2035,15 +2076,15 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // 代理 /api/translate-subtitle
+    // 代理 /api/translate-subtitle - 转发到 Python 后端并处理流式响应
     if (pathname === '/api/translate-subtitle' && req.method === 'POST') {
-        runSubtitleProcess(req, res, 'translate');
+        proxySubtitleTaskToPython(req, res, '/api/process_subtitle', 'translate');
         return;
     }
 
-    // 代理 /api/correct-subtitle
+    // 代理 /api/correct-subtitle - 转发到 Python 后端并处理流式响应
     if (pathname === '/api/correct-subtitle' && req.method === 'POST') {
-        runSubtitleProcess(req, res, 'correct');
+        proxySubtitleTaskToPython(req, res, '/api/process_subtitle', 'correct');
         return;
     }
 
@@ -2076,42 +2117,9 @@ const server = http.createServer(async (req, res) => {
         runSubtitleProcess(req, res, 'glossary');
         return;
     }
-    // 新增：代理 /api/cancel-subtitle-task
+    // 代理 /api/cancel-subtitle-task 到 Python 后端
     if (pathname === '/api/cancel-subtitle-task' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        req.on('end', () => {
-            try {
-                const { task, vtt_file, mediaDir } = JSON.parse(body);
-                if (!task || !vtt_file || !mediaDir) {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ success: false, message: "Missing required parameters." }));
-                    return;
-                }
-
-                // Normalize paths to match keys used when starting tasks
-                const normVtt = path.normalize(vtt_file);
-                const normMedia = path.normalize(mediaDir);
-                const taskId = `${task}::${normVtt}::${normMedia}`;
-                const processToKill = runningSubtitleTasks.get(taskId);
-
-                if (processToKill) {
-                    console.log(`[Subtitle Process] Attempting to cancel task ${taskId} with PID ${processToKill.pid}`);
-                    // 使用 SIGTERM 优雅地终止进程
-                    processToKill.kill('SIGTERM');
-                    // runningSubtitleTasks.delete(taskId); // Let the 'close' event handle removal.
-                    res.statusCode = 200;
-                    res.end(JSON.stringify({ success: true, message: "Task cancellation requested." }));
-                } else {
-                    console.warn(`[Subtitle Process] Could not find running task to cancel with ID: ${taskId}`);
-                    res.statusCode = 404;
-                    res.end(JSON.stringify({ success: false, message: "Task not found or already completed." }));
-                }
-            } catch (e) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ success: false, message: 'Invalid JSON request body.' }));
-            }
-        });
+        proxyRequestToPython(req, res, 5000, '/api/cancel_subtitle_task');
         return;
     }
 
@@ -3124,6 +3132,85 @@ function runSubtitleProcess(req, res, task) {
     });
 }
 
+
+// --- 新增：字幕处理任务代理函数（支持流式进度推送）---
+function proxySubtitleTaskToPython(req, res, targetPath, taskType) {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+        try {
+            const data = JSON.parse(body);
+            data.task = taskType; // 添加任务类型
+            
+            const options = {
+                hostname: '127.0.0.1',
+                port: 5000,
+                path: targetPath,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(JSON.stringify(data))
+                }
+            };
+
+            const proxyReq = http.request(options, (proxyRes) => {
+                // 如果是 202 Accepted，说明任务已启动
+                if (proxyRes.statusCode === 202) {
+                    res.statusCode = 202;
+                    res.setHeader('Content-Type', 'application/json');
+                }
+                
+                let responseData = '';
+                proxyRes.on('data', (chunk) => {
+                    responseData += chunk.toString();
+                    // 尝试解析进度信息并通过 WebSocket 广播
+                    try {
+                        const lines = responseData.split('\n');
+                        for (let i = 0; i < lines.length - 1; i++) {
+                            const line = lines[i].trim();
+                            if (line.startsWith('data: ')) {
+                                const jsonData = JSON.parse(line.substring(6));
+                                broadcast(jsonData);
+                            }
+                        }
+                        responseData = lines[lines.length - 1];
+                    } catch (e) {
+                        // 还没有完整的 JSON，继续累积
+                    }
+                });
+                
+                proxyRes.on('end', () => {
+                    // 处理最后的响应
+                    try {
+                        if (responseData.trim()) {
+                            const finalData = JSON.parse(responseData);
+                            res.end(JSON.stringify(finalData));
+                        } else {
+                            res.end(JSON.stringify({ success: true }));
+                        }
+                    } catch (e) {
+                        res.end(responseData);
+                    }
+                });
+            });
+
+            proxyReq.on('error', (err) => {
+                console.error(`代理到 Python 服务失败 (${targetPath}):`, err);
+                if (!res.headersSent) {
+                    res.statusCode = 502;
+                    res.end(JSON.stringify({ error: `无法连接到后端服务: ${err.message}` }));
+                }
+            });
+
+            proxyReq.write(JSON.stringify(data));
+            proxyReq.end();
+        } catch (e) {
+            console.error('Error parsing request body:', e);
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid request body' }));
+        }
+    });
+}
 
 // --- 新增：通用 Python 服务代理函数 ---
 function proxyRequestToPython(req, res, port, targetPath) {

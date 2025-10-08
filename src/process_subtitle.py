@@ -31,9 +31,10 @@ import sys
 from urllib.parse import unquote
 
 # --- 进度报告 ---
-# 全局变量用于存储当前处理的文件路径
+# 全局变量用于存储当前处理的文件路径和进度回调
 _current_vtt_file = None
 _current_media_dir = None
+_progress_callback = None
 
 def _set_current_file_info(vtt_file: str, media_dir: str):
     """设置当前处理的文件信息"""
@@ -42,8 +43,13 @@ def _set_current_file_info(vtt_file: str, media_dir: str):
     _current_vtt_file = vtt_file.replace('\\', '/') if vtt_file else vtt_file
     _current_media_dir = media_dir
 
-def _report_progress(task: str, current: int, total: int):
-    """向标准输出打印JSON格式的进度信息"""
+def _set_progress_callback(callback):
+    """设置进度回调函数"""
+    global _progress_callback
+    _progress_callback = callback
+
+def _report_progress(task: str, current: int, total: int, current_round: int = None, total_rounds: int = None):
+    """报告进度信息"""
     progress_data = {
         "type": "progress",
         "task": task,
@@ -52,9 +58,24 @@ def _report_progress(task: str, current: int, total: int):
         "vtt_file": _current_vtt_file,
         "media_dir": _current_media_dir
     }
-    # 使用 sys.stdout.flush() 确保实时输出
+    
+    # 添加轮次信息（如果提供）
+    if current_round is not None and total_rounds is not None:
+        progress_data["current_round"] = current_round
+        progress_data["total_rounds"] = total_rounds
+    
+    # 如果有回调函数，调用它（用于 Flask SSE）
+    if _progress_callback:
+        try:
+            _progress_callback(progress_data)
+        except Exception as e:
+            sys.stderr.write(f"[Progress Callback Error] {e}\n")
+            sys.stderr.flush()
+    
+    # 同时打印到 stdout（用于命令行模式）
     print(json.dumps(progress_data, ensure_ascii=False), flush=True)
-    # 添加调试日志到 stderr（可通过环境变量开启，默认关闭以减少噪音）
+    
+    # 添加调试日志到 stderr
     if os.environ.get('DEBUG_SUBTITLE') == '1':
         sys.stderr.write(f"[Progress Report] task={task}, current={current}, total={total}, vtt_file={_current_vtt_file}\n")
         sys.stderr.flush()
@@ -115,6 +136,9 @@ class VTTCorrector:
         self.online_model_name = None
         self.current_vtt_path = None
         self.glossary_content = None
+        
+        # 取消标志
+        self.cancel_flag = None
 
         # 设置生成参数
         self.generation_config = {
@@ -1463,6 +1487,11 @@ class VTTCorrector:
         caption_lock = threading.Lock()
 
         for round_num in range(1, max_rounds + 1):
+            # 检查取消标志
+            if self.cancel_flag and self.cancel_flag.is_set():
+                logger.info(f"{task_name} 任务已被取消（第 {round_num} 轮开始前）")
+                return False
+            
             if not groups_to_process:
                 break
 
@@ -1477,7 +1506,7 @@ class VTTCorrector:
                 if total_groups > 0:
                     sys.stderr.write(f"[MultiRound] Sending initial progress: 0/{total_groups} for {task_name}\n")
                     sys.stderr.flush()
-                    _report_progress(task_name, 0, total_groups)
+                    _report_progress(task_name, 0, total_groups, round_num, max_rounds)
             except Exception as e:
                 # 不要因为发送进度失败而中断处理
                 logger.debug(f'发送初始进度信息失败: {e}，继续处理。')
@@ -1491,6 +1520,14 @@ class VTTCorrector:
                 total_groups = len(groups_to_process)
                 with tqdm(total=total_groups, desc=f"第 {round_num} 轮 {task_name}") as pbar:
                     for future in as_completed(future_to_group):
+                        # 在每个批次处理后检查取消标志
+                        if self.cancel_flag and self.cancel_flag.is_set():
+                            logger.info(f"{task_name} 任务已被取消（第 {round_num} 轮处理中）")
+                            # 取消所有未完成的future
+                            for f in future_to_group:
+                                f.cancel()
+                            return False
+                        
                         group = future_to_group[future]
                         try:
                             is_successful = future.result()
@@ -1501,7 +1538,7 @@ class VTTCorrector:
                             failed_groups.append(group)
                         
                         processed_count += 1
-                        _report_progress(task_name, processed_count, total_groups)
+                        _report_progress(task_name, processed_count, total_groups, round_num, max_rounds)
                         pbar.update(1)
 
             if not failed_groups:
@@ -1533,6 +1570,11 @@ class VTTCorrector:
         Processes a single group of captions. Designed to be run in a thread.
         Returns True if successful, False otherwise.
         """
+        # 在处理前检查取消标志
+        if self.cancel_flag and self.cancel_flag.is_set():
+            logger.info(f"{task_name} 批次处理已跳过（任务已取消）")
+            return False
+        
         text_segments = [caption.text.strip() for caption in group]
         original_text_joined = "\n".join(text_segments)
         

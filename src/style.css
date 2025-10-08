@@ -953,8 +953,9 @@ body {
 .subtitle-options {
     position: absolute;
     bottom: calc(100% + 15px);
-    left: 50%;
-    transform: translateX(-50%);
+    right: 0;
+    left: auto;
+    transform: none;
     background: rgba(20, 20, 25, 0.6);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
@@ -1030,7 +1031,8 @@ body {
     visibility: hidden;
     pointer-events: none;
     transition: opacity 0.4s cubic-bezier(0.175, 0.885, 0.32, 2.2), visibility 0s linear 0.4s;
-    left: 100%;
+    right: 100%;
+    left: auto;
     bottom: 0;
     background: rgba(20, 20, 25, 0.6);
     backdrop-filter: blur(3px);
@@ -1045,6 +1047,7 @@ body {
     max-height: 300px;
     overflow-y: auto;
     min-width: 150px;
+    max-width: 300px; /* 限制最大宽度，防止超长文件名 */
 }
 
 .local-subtitle-list::before {
@@ -1066,6 +1069,9 @@ body {
 .local-subtitle-list div {
     padding: 10px 18px;
     white-space: nowrap;
+    overflow: hidden; /* 隐藏溢出内容 */
+    text-overflow: ellipsis; /* 超长文本显示省略号 */
+    font-size: 14px;
     transition: all 0.2s;
     position: relative;
     z-index: 1;
@@ -1091,6 +1097,72 @@ body {
     border-bottom-right-radius: 8px;
 }
 
+/* 本地字幕菜单项容器与删除按钮：与 video player 保持一致 */
+.subtitle-menu-item-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background-color 0.2s;
+    padding: 10px 18px;
+}
+
+.subtitle-menu-item-container:hover {
+    background-color: var(--accent-color);
+}
+
+.subtitle-menu-item-container a,
+.subtitle-menu-item-container > div {
+    flex-grow: 1; /* 占据尽可能多的空间 */
+    padding: 0; /* 移除内部 padding，由容器统一控制 */
+    padding-right: 10px; /* 与删除按钮保持间距 */
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden; /* 隐藏溢出内容 */
+    text-overflow: ellipsis; /* 超长文本显示省略号 */
+    color: var(--primary-text);
+    cursor: pointer;
+    transition: none !important; /* 移除过渡效果，让容器统一控制 */
+    background-color: transparent !important; /* 确保背景透明 */
+    box-shadow: none !important; /* 移除 box-shadow */
+    backdrop-filter: none !important; /* 移除模糊效果 */
+    -webkit-backdrop-filter: none !important;
+}
+
+.subtitle-menu-item-container:hover a,
+.subtitle-menu-item-container:hover > div {
+    color: var(--accent-text-color);
+    background-color: transparent !important; /* 避免双重背景色 */
+    box-shadow: none !important; /* 确保悬停时也没有 box-shadow */
+}
+
+/* 删除按钮样式 */
+.delete-subtitle-btn {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text);
+    font-size: 22px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 12px;
+    border-radius: 50%;
+    line-height: 1;
+    opacity: 0; /* 默认隐藏 */
+    transition: opacity 0.2s, color 0.2s, transform 0.2s;
+    flex-shrink: 0; /* 防止按钮被压缩 */
+}
+
+/* 容器悬停时显示删除按钮 */
+.subtitle-menu-item-container:hover .delete-subtitle-btn {
+    opacity: 0.8;
+    color: var(--accent-text-color);
+}
+
+.delete-subtitle-btn:hover {
+    opacity: 1;
+    color: #ff4b2b; /* 红色以示危险操作 */
+    transform: scale(1.1);
+}
+
 /* 转录选项样式 - 与本地字幕选项样式相同 */
 .transcribe-option {
     position: relative;
@@ -1107,7 +1179,8 @@ body {
     visibility: hidden;
     pointer-events: none;
     transition: opacity 0.4s cubic-bezier(0.175, 0.885, 0.32, 2.2), visibility 0s linear 0.4s;
-    left: 100%;
+    right: 100%;
+    left: auto;
     bottom: 0;
     background: rgba(20, 20, 25, 0.6);
     backdrop-filter: blur(3px);

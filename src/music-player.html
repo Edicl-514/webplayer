@@ -9,6 +9,51 @@
     <title>WebPlayer - Music</title>
     <link rel="stylesheet" href="vendor/all.min.css">
     <link rel="stylesheet" href="style.css?v=1">
+    <style>
+        .chat-progress-container {
+            padding: 5px 0;
+            width: 100%;
+            box-sizing: border-box; /* 确保padding不会增加宽度 */
+        }
+        .chat-progress-text {
+            font-size: 0.9em;
+            margin-bottom: 4px;
+            color: var(--primary-text);
+        }
+        .chat-progress-bar-container {
+            width: 100%;
+            background-color: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            box-sizing: border-box; /* 确保padding不会增加宽度 */
+        }
+        .chat-progress-bar-inner {
+            width: 0%;
+            height: 8px;
+            background-color: var(--accent-color, #00bcd4);
+            border-radius: 4px;
+            transition: width 0.3s ease-in-out;
+        }
+        .chat-cancel-btn {
+            padding: 4px 12px;
+            background-color: rgba(255, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+        .chat-cancel-btn:hover {
+            background-color: rgba(255, 0, 0, 0.9);
+        }
+        /* 确保包含进度条的消息占满可用宽度但不超出 */
+        .chat-message.task-progress {
+            width: auto !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+        }
+    </style>
 </head>
 <body>
     <!-- SVG 液态玻璃滤镜 -->

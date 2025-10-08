@@ -143,65 +143,85 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
     if os.path.isdir(cache_dir):
         search_dirs.append(cache_dir)
 
-    subtitle_files = []
+    # Collect candidates first so we can sort by custom priority rules
+    subtitle_items = []
     found_sub_names = set()  # To avoid duplicates
 
     for directory in search_dirs:
         try:
             # List files in the directory
             for filename in os.listdir(directory):
-                original_filename = filename # Keep original filename for display
+                original_filename = filename  # Keep original filename for display
                 if original_filename in found_sub_names:
-                    continue # Skip if already found
+                    continue  # Skip if already found
 
                 basename, ext = os.path.splitext(filename)
                 # Check if it's a supported subtitle format
                 if ext.lower() in ['.vtt', '.ass', '.srt']:
-                    # If not find_all, we need a name match, otherwise we take all subs
-                    # For cache dir, we always check all files if find_all is true
                     is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
-                    
-                    # Match同名 or 匹配文件名(忽略后缀) or find_all
-                    if find_all or basename == video_basename or video_basename in basename:
-                        # For non-VTT formats, convert to VTT
-                        if ext.lower() != '.vtt':
-                            # Generate path for converted VTT file
-                            original_path = os.path.join(directory, filename)
-                            vtt_path = get_converted_vtt_path(original_path)
-                            
-                            # Convert subtitle to VTT format
-                            if convert_to_vtt(original_path, vtt_path):
-                                # Use converted VTT file
-                                filepath = vtt_path
-                            else:
-                                # If conversion fails, skip this subtitle file
-                                print(f"Warning: Failed to convert {filename} to VTT format", file=sys.stderr)
-                                continue
+
+                    # Determine whether this file should be considered (respect find_all)
+                    consider = False
+                    if find_all:
+                        consider = True
+                    else:
+                        if basename == video_basename or video_basename in basename:
+                            consider = True
+
+                    if not consider:
+                        continue
+
+                    # Resolve file path and convert non-VTT formats to VTT when possible
+                    original_path = os.path.join(directory, filename)
+                    if ext.lower() != '.vtt':
+                        vtt_path = get_converted_vtt_path(original_path)
+                        if convert_to_vtt(original_path, vtt_path):
+                            filepath = vtt_path
                         else:
-                            # For VTT files, use as is
-                            filepath = os.path.join(directory, filename)
-                        
-                        # Construct the URL for the subtitle file
-                        if is_cache_dir:
-                            vtt_filename = os.path.basename(filepath)
-                            subtitle_url = f"/cache/subtitles/{urllib.parse.quote(vtt_filename)}"
-                        elif media_dir:
-                            # Calculate relative path from media directory
-                            relative_path = os.path.relpath(filepath, media_dir)
-                            # URL encode the path, keeping slashes intact
-                            encoded_path = urllib.parse.quote(relative_path.replace('\\', '/'), safe='/')
-                            # Prepend a slash to make it an absolute path from the server root
-                            subtitle_url = f"/{encoded_path}"
-                        else:
-                            # This case is unlikely to be hit with current server.js implementation
-                            subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
-                        
-                        subtitle_files.append({
-                            'url': subtitle_url,
-                            'lang': 'webvtt',
-                            'name': original_filename
-                        })
-                        found_sub_names.add(original_filename)
+                            # If conversion fails, skip this subtitle file
+                            print(f"Warning: Failed to convert {filename} to VTT format", file=sys.stderr)
+                            continue
+                    else:
+                        filepath = os.path.join(directory, filename)
+
+                    # Construct the URL for the subtitle file
+                    if is_cache_dir:
+                        vtt_filename = os.path.basename(filepath)
+                        subtitle_url = f"/cache/subtitles/{urllib.parse.quote(vtt_filename)}"
+                    elif media_dir:
+                        # Calculate relative path from media directory
+                        relative_path = os.path.relpath(filepath, media_dir)
+                        # URL encode the path, keeping slashes intact
+                        encoded_path = urllib.parse.quote(relative_path.replace('\\', '/'), safe='/')
+                        # Prepend a slash to make it an absolute path from the server root
+                        subtitle_url = f"/{encoded_path}"
+                    else:
+                        # Fallback to basename URL
+                        subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
+
+                    # Compute priority according to new rules:
+                    # 0 = contains base name AND contains 'translated' (case-insensitive)
+                    # 1 = exact same basename
+                    # 2 = contains base name
+                    # 3 = other (lowest)
+                    low_basename = basename.lower()
+                    video_base_low = video_basename.lower()
+                    if (video_base_low in low_basename) and ('translated' in low_basename):
+                        priority = 0
+                    elif basename == video_basename:
+                        priority = 1
+                    elif video_basename in basename:
+                        priority = 2
+                    else:
+                        priority = 3
+
+                    subtitle_items.append({
+                        'url': subtitle_url,
+                        'lang': 'webvtt',
+                        'name': original_filename,
+                        'priority': priority
+                    })
+                    found_sub_names.add(original_filename)
         except FileNotFoundError:
             # If the directory doesn't exist, continue to the next one
             print(f"Warning: Directory not found: {directory}", file=sys.stderr)
@@ -215,6 +235,11 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
             print(f"Error while searching for subtitles in {directory}: {str(e)}", file=sys.stderr)
             continue
     
+    # Sort collected items by priority (lower is better) then by name to stabilize order
+    subtitle_items.sort(key=lambda x: (x.get('priority', 99), x.get('name', '')))
+
+    # Return only the public fields expected by the caller
+    subtitle_files = [{'url': i['url'], 'lang': i['lang'], 'name': i['name']} for i in subtitle_items]
     return subtitle_files
 
 def main():

@@ -244,6 +244,7 @@
            let decodedVideoSrc; // 提升作用域以便全局访问
            let dpOptions; // 提升作用域以便全局访问
            let currentSubtitleUrl = null; // 用于存储当前字幕的URL
+           let transcriberModels = []; // 存储从config.json加载的转录模型配置
    
            // 规范化路径，用于生成一致的 taskId
            function normalizePathForTaskId(path) {
@@ -826,21 +827,29 @@
                    actionsHeader.className = 'subtitle-section-header';
                    //actionsHeader.textContent = '操作';
                    //subtitleDropdownContent.appendChild(actionsHeader);
-   
-                   const actions = [
-                       { name: '本地转录', action: 'local-transcribe' },
-                       {
-                           name: '联网下载',
-                           action: 'download-online',
-                           submenu: [
-                               { name: 'Subtitlecat', action: 'download-subtitlecat' },
-                               { name: 'Subliminal', action: 'download-subliminal' }
-                           ]
-                       },
-                       { name: '上传', action: 'upload-subtitle' }
-                   ];
-   
-                   actions.forEach(a => {
+
+                   // 加载转录模型配置
+                   await loadTranscriberModels();
+
+               const actions = [
+                   {
+                       name: '本地转录',
+                       action: 'local-transcribe',
+                       submenu: [] // 将在loadTranscriberModels中动态填充
+                   },
+                   {
+                       name: '联网下载',
+                       action: 'download-online',
+                       submenu: [
+                           { name: 'Subtitlecat', action: 'download-subtitlecat' },
+                           { name: 'Subliminal', action: 'download-subliminal' }
+                       ]
+                   },
+                   { name: '上传', action: 'upload-subtitle' }
+               ];
+
+                   // 为本地转录生成子菜单
+                   generateTranscriberSubmenu(actions[0]);                   actions.forEach(a => {
                        if (a.submenu) {
                            const toggle = document.createElement('div');
                            toggle.className = 'subtitle-local-toggle'; // Re-use style
@@ -855,12 +864,22 @@
                                const subLink = document.createElement('a');
                                subLink.textContent = subItem.name;
                                subLink.href = '#';
-                               subLink.onclick = (ev) => {
-                                   ev.preventDefault();
-                                   subtitleDropdownContent.classList.remove('show');
-                                   submenu.style.display = 'none';
-                                   handleSubtitleAction(subItem.action);
-                               };
+                               
+                               // 如果子菜单项没有action，禁用它
+                               if (!subItem.action) {
+                                   subLink.className = 'disabled';
+                                   subLink.style.opacity = '0.6';
+                                   subLink.style.cursor = 'default';
+                                   subLink.onclick = (ev) => ev.preventDefault();
+                               } else {
+                                   subLink.onclick = (ev) => {
+                                       ev.preventDefault();
+                                       subtitleDropdownContent.classList.remove('show');
+                                       submenu.style.display = 'none';
+                                       // 传递modelConfig到handleSubtitleAction
+                                       handleSubtitleAction(subItem.action, subItem.modelConfig);
+                                   };
+                               }
                                submenu.appendChild(subLink);
                            });
    
@@ -940,6 +959,69 @@
                    subtitleDropdownContent.appendChild(disabled);
                }
            }
+
+           // 加载转录模型配置
+           async function loadTranscriberModels() {
+               if (transcriberModels.length > 0) {
+                   // 已经加载过，直接生成菜单
+                   return;
+               }
+
+               try {
+                   const response = await fetch('/config.json');
+                   const config = await response.json();
+                   
+                   if (config.transcriber_models && Array.isArray(config.transcriber_models)) {
+                       transcriberModels = config.transcriber_models;
+                       console.log('Loaded transcriber models:', transcriberModels);
+                   } else {
+                       console.warn('No transcriber_models found in config.json');
+                   }
+               } catch (error) {
+                   console.error('Error loading transcriber models config:', error);
+               }
+           }
+
+           // 生成转录模型子菜单
+           function generateTranscriberSubmenu(parentAction) {
+               if (!parentAction.submenu) {
+                   parentAction.submenu = [];
+               }
+               
+               parentAction.submenu.length = 0; // 清空现有子菜单
+               
+               if (transcriberModels.length === 0) {
+                   parentAction.submenu.push({ name: '未配置转录模型', action: null });
+                   return;
+               }
+
+               transcriberModels.forEach((modelConfig, index) => {
+                   // 生成模型显示名称
+                   let displayName = '';
+                   if (modelConfig['model-source'] === 'local') {
+                       // 本地模型显示路径中的最后一部分
+                       const modelPath = modelConfig.model || '';
+                       const pathParts = modelPath.split(/[\\/]/);
+                       displayName = pathParts[pathParts.length - 1] || `模型 ${index + 1}`;
+                   } else {
+                       // 预训练模型直接显示模型名
+                       displayName = modelConfig.model || `模型 ${index + 1}`;
+                   }
+                   
+                   // 添加任务类型标识
+                   const task = modelConfig.task || 'transcribe';
+                   const taskLabel = task === 'translate' ? '翻译' : '转录';
+                   displayName = `${displayName} (${taskLabel})`;
+                   
+                   parentAction.submenu.push({
+                       name: displayName,
+                       action: 'local-transcribe',
+                       modelConfig: modelConfig,
+                       modelIndex: index
+                   });
+               });
+           }
+
    
            // --- Conversion Modal Logic ---
            const conversionModal = document.getElementById('conversionModal');
@@ -1016,8 +1098,15 @@
                        // 防止 total 为 0 导致除以零
                        const safeTotal = (typeof data.total === 'number' && data.total > 0) ? data.total : null;
                        const percentage = safeTotal ? (data.current / safeTotal) * 100 : 0;
+                       
+                       // 构建轮次信息
+                       let roundInfo = '';
+                       if (data.current_round && data.total_rounds) {
+                           roundInfo = ` [第 ${data.current_round}/${data.total_rounds} 轮]`;
+                       }
+                       
                        progressBarEl.style.width = `${percentage}%`;
-                       progressTextEl.textContent = safeTotal ? `${data.task}中... (${data.current}/${safeTotal})` : `${data.task}中... (${data.current}/?)`;
+                       progressTextEl.textContent = safeTotal ? `${data.task}中... (${data.current}/${safeTotal})${roundInfo}` : `${data.task}中... (${data.current}/?)${roundInfo}`;
                    } else if (data.type === 'complete') {
                        let finalMessage = `✅ 任务 '${data.task}' 完成！`;
                        if (data.processed_file) {
@@ -1621,37 +1710,83 @@
                return result;
            }
    
-           function handleSubtitleAction(action) {
+           function handleSubtitleAction(action, modelConfig = null) {
                 if (action === 'local-transcribe') {
                     setupChatPanel('subtitle', { method: 'local-transcribe' });
                     playerContainer.classList.add('chat-mode');
                     chatTitle.textContent = '本地转录';
                     chatInput.style.display = 'none';
                     sendChatBtn.style.display = 'none';
-                    const transcribeMessage = addChatMessage('正在转录视频，这可能需要一些时间... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>', 'bot');
+                    
+                    // 构建转录参数
+                    const transcribeParams = {
+                        src: decodedVideoSrc,
+                        mediaDir: mediaDir
+                    };
+
+                    // 如果提供了modelConfig，添加模型相关参数
+                    if (modelConfig) {
+                        transcribeParams.modelSource = modelConfig['model-source'] || 'pretrained';
+                        transcribeParams.model = modelConfig.model || 'large-v3';
+                        
+                        // 可选参数
+                        if (modelConfig.task) {
+                            transcribeParams.task = modelConfig.task;
+                        }
+                        if (modelConfig.language && modelConfig.language !== 'None') {
+                            transcribeParams.language = modelConfig.language;
+                        }
+                        if (modelConfig.vad_filter !== undefined) {
+                            transcribeParams.vadFilter = modelConfig.vad_filter;
+                        }
+                        if (modelConfig.condition_on_previous_text !== undefined) {
+                            transcribeParams.conditionOnPreviousText = modelConfig.condition_on_previous_text;
+                        }
+                        if (modelConfig['max-chars-per-line'] !== undefined) {
+                            transcribeParams.maxCharsPerLine = modelConfig['max-chars-per-line'];
+                        }
+                        if (modelConfig['dense-subtitles'] !== undefined) {
+                            transcribeParams.denseSubtitles = modelConfig['dense-subtitles'];
+                        }
+                        if (modelConfig['vad-threshold'] !== undefined) {
+                            transcribeParams.vadThreshold = modelConfig['vad-threshold'];
+                        }
+                        if (modelConfig['transcribe-kwargs'] !== undefined) {
+                            transcribeParams.transcribeKwargs = modelConfig['transcribe-kwargs'];
+                        }
+                        if (modelConfig['merge-threshold'] !== undefined) {
+                            transcribeParams.mergeThreshold = modelConfig['merge-threshold'];
+                        }
+                        if (modelConfig['output-dir'] !== undefined) {
+                            transcribeParams.outputDir = modelConfig['output-dir'];
+                        }
+                    }
+
+                    // 显示开始消息
+                    const taskLabel = (modelConfig && modelConfig.task === 'translate') ? '翻译转录' : '转录';
+                    const modelName = modelConfig ? modelConfig.model.split(/[\\/]/).pop() : '默认模型';
+                    const startMessage = `正在使用 ${modelName} 进行${taskLabel}，这可能需要一些时间... <button class="chat-cancel-btn" onclick="cancelAndExitChat()">取消</button>`;
+                    const transcribeMessage = addChatMessage(startMessage, 'bot');
 
                     currentFetchController = new AbortController();
                     fetch('/api/transcribe-video', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            src: decodedVideoSrc,
-                            mediaDir: mediaDir
-                        }),
+                        body: JSON.stringify(transcribeParams),
                         signal: currentFetchController.signal
                     })
                     .then(response => response.json())
                     .then(result => {
                         transcribeMessage.remove();
                         if (result.success) {
-                            addChatMessage(`转录成功！字幕已保存: ${result.vtt_file}<br>列表已刷新。此面板将在2秒后关闭。`, 'bot');
+                            addChatMessage(`${taskLabel}成功！字幕已保存: ${result.vtt_file}<br>列表已刷新。此面板将在2秒后关闭。`, 'bot');
                             loadAllSubtitles(); // Refresh the subtitle list
                             setTimeout(() => {
                                 resetSubtitleChat(false);
                                 playerContainer.classList.remove('chat-mode');
                             }, 2000);
                         } else {
-                            throw new Error(result.message || '转录失败。');
+                            throw new Error(result.message || `${taskLabel}失败。`);
                         }
                     })
                     .catch(error => {
@@ -1662,7 +1797,7 @@
                              resetSubtitleChat(false);
                         } else {
                             transcribeMessage.remove();
-                            addChatMessage(`转录失败: ${error.message}<br><button class="chat-cancel-btn" onclick="cancelAndExitChat()">关闭</button>`, 'error');
+                            addChatMessage(`${taskLabel}失败: ${error.message}<br><button class="chat-cancel-btn" onclick="cancelAndExitChat()">关闭</button>`, 'error');
                             console.error('Error transcribing video:', error);
                         }
                     })
@@ -2716,6 +2851,13 @@
                console.log(`VTT File (normalized): ${normalizedSubtitleUrl}`);
                console.log(`Media Dir: ${mediaDir}`);
                
+               // 检查并移除同ID的旧任务元素（可能是之前取消的任务）
+               const existingTaskEl = document.getElementById(taskId);
+               if (existingTaskEl) {
+                   console.log(`[Task] Removing old task element with same ID: ${taskId}`);
+                   existingTaskEl.removeAttribute('id'); // 移除旧元素的ID，避免冲突
+               }
+               
                // 添加带进度条的占位符消息
                const progressPlaceholder = `
                    <div class="chat-progress-container">
@@ -2803,6 +2945,14 @@
 
                const normalizedSubtitleUrl = normalizePathForTaskId(currentSubtitleUrl);
                const taskId = `task-术语表-${normalizedSubtitleUrl}`;
+               
+               // 检查并移除同ID的旧任务元素（可能是之前取消的任务）
+               const existingTaskEl = document.getElementById(taskId);
+               if (existingTaskEl) {
+                   console.log(`[Task] Removing old task element with same ID: ${taskId}`);
+                   existingTaskEl.removeAttribute('id'); // 移除旧元素的ID，避免冲突
+               }
+               
                const progressPlaceholder = `
                    <div class="chat-progress-container">
                        <div class="chat-progress-text">术语表生成中... (0/0)</div>
@@ -2846,6 +2996,14 @@
                Object.keys(activeTasks).forEach(taskId => {
                    const task = activeTasks[taskId];
                    const percentage = task.total > 0 ? (task.current / task.total) * 100 : 0;
+                   
+                   // 检查并移除同ID的旧任务元素
+                   const existingTaskEl = document.getElementById(taskId);
+                   if (existingTaskEl) {
+                       console.log(`[Task] Removing old task element with same ID: ${taskId}`);
+                       existingTaskEl.removeAttribute('id'); // 移除旧元素的ID，避免冲突
+                   }
+                   
                    const progressHtml = `
                        <div class="chat-progress-container">
                            <div class="chat-progress-text">${task.task}中... (${task.current}/${task.total || '?'})</div>
