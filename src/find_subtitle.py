@@ -6,9 +6,9 @@
 
 功能特性：
 ---------
-1. 自动查找与视频同名的字幕文件（支持.vtt, .ass, .srt格式）
+1. 自动查找与视频同名的字幕文件（支持.vtt, .ass, .srt, .lrc格式）
 2. 可选择查找目录中所有字幕文件
-3. 自动将.srt和.ass格式转换为WebVTT格式
+3. 自动将.srt、.ass和.lrc格式转换为WebVTT格式
 4. 生成可在Web播放器中使用的字幕URL
 5. 使用FFmpeg进行格式转换
 
@@ -54,9 +54,102 @@ import re
 import hashlib
 import subprocess
 
+def convert_lrc_to_vtt(lrc_path, vtt_path):
+    """
+    Convert LRC (lyrics) file to VTT format.
+    
+    LRC format example:
+    [00:12.00]Line of lyrics
+    [00:17.20]Another line
+    
+    Args:
+        lrc_path (str): Path to input LRC file
+        vtt_path (str): Path to output VTT file
+        
+    Returns:
+        bool: True if conversion successful, False otherwise
+    """
+    try:
+        # Try multiple encodings to read the file
+        encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'latin-1']
+        lrc_content = None
+        
+        for encoding in encodings:
+            try:
+                with open(lrc_path, 'r', encoding=encoding) as f:
+                    lrc_content = f.read()
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        
+        if lrc_content is None:
+            print(f"Error: Could not decode LRC file with any supported encoding", file=sys.stderr)
+            return False
+        
+        # Parse LRC lines
+        lines = []
+        for line in lrc_content.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Match LRC timestamp format: [mm:ss.xx] or [mm:ss.xxx]
+            match = re.match(r'\[(\d+):(\d+)\.(\d+)\](.*)', line)
+            if match:
+                minutes = int(match.group(1))
+                seconds = int(match.group(2))
+                centiseconds = match.group(3).ljust(2, '0')[:2]  # Normalize to 2 digits
+                text = match.group(4).strip()
+                
+                # Convert to total seconds
+                total_seconds = minutes * 60 + seconds
+                
+                # Store timestamp and text
+                lines.append({
+                    'time': total_seconds + int(centiseconds) / 100.0,
+                    'text': text
+                })
+        
+        # Sort by time
+        lines.sort(key=lambda x: x['time'])
+        
+        # Generate VTT content
+        vtt_lines = ['WEBVTT\n']
+        
+        for i, line in enumerate(lines):
+            # Calculate end time (use next line's start time or add 3 seconds)
+            start_time = line['time']
+            if i + 1 < len(lines):
+                end_time = lines[i + 1]['time']
+            else:
+                end_time = start_time + 3.0
+            
+            # Format timestamps
+            start_h = int(start_time // 3600)
+            start_m = int((start_time % 3600) // 60)
+            start_s = start_time % 60
+            
+            end_h = int(end_time // 3600)
+            end_m = int((end_time % 3600) // 60)
+            end_s = end_time % 60
+            
+            # Add cue
+            vtt_lines.append(f'\n{i + 1}')
+            vtt_lines.append(f'{start_h:02d}:{start_m:02d}:{start_s:06.3f} --> {end_h:02d}:{end_m:02d}:{end_s:06.3f}')
+            vtt_lines.append(line['text'])
+        
+        # Write VTT file
+        with open(vtt_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(vtt_lines))
+        
+        return True
+    except Exception as e:
+        print(f"Error converting LRC to VTT: {str(e)}", file=sys.stderr)
+        return False
+
 def convert_to_vtt(input_path, output_path):
     """
-    Convert subtitle file to VTT format using ffmpeg.
+    Convert subtitle file to VTT format using ffmpeg or custom converter.
     
     Args:
         input_path (str): Path to input subtitle file
@@ -65,10 +158,14 @@ def convert_to_vtt(input_path, output_path):
     Returns:
         bool: True if conversion successful, False otherwise
     """
+    # Check if it's an LRC file
+    if input_path.lower().endswith('.lrc'):
+        return convert_lrc_to_vtt(input_path, output_path)
+    
     try:
         # Use ffmpeg to convert subtitle to VTT format
         result = subprocess.run([
-            'ffmpeg', '-i', input_path, 
+            'ffmpeg', '-i', input_path,
             '-y',  # Overwrite output file
             output_path
         ], capture_output=True, text=True)
@@ -114,7 +211,7 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
     Finds subtitle files. If find_all is False, it looks for subtitles with the
     same base name as the video file. If find_all is True, it finds all subtitles
     in the video's directory.
-    Supported extensions: .vtt, .ass, .srt
+    Supported extensions: .vtt, .ass, .srt, .lrc
     
     Args:
         video_path (str): Path to the video file
@@ -157,7 +254,7 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
 
                 basename, ext = os.path.splitext(filename)
                 # Check if it's a supported subtitle format
-                if ext.lower() in ['.vtt', '.ass', '.srt']:
+                if ext.lower() in ['.vtt', '.ass', '.srt', '.lrc']:
                     is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
 
                     # Determine whether this file should be considered (respect find_all)

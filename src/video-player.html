@@ -248,9 +248,39 @@
    
            // 规范化路径，用于生成一致的 taskId
            function normalizePathForTaskId(path) {
-               if (!path) return path;
-               // 将反斜杠转换为正斜杠，保持 URL 编码
-               return path.replace(/\\/g, '/');
+               if (!path) return '';
+               // 移除 URL 编码并规范化路径分隔符
+               try {
+                   let normalized = decodeURIComponent(path);
+                   normalized = normalized.replace(/\\/g, '/');
+                   // 移除查询参数
+                   normalized = normalized.split('?')[0];
+                   
+                   // 如果是绝对路径，提取相对于项目根目录或cache目录的部分
+                   // 例如: D:\temp\webplayer\src\cache\subtitles\xxx.vtt -> cache/subtitles/xxx.vtt
+                   const cacheMatch = normalized.match(/(cache\/(?:subtitles|lyrics)\/[^/]+)$/i);
+                   if (cacheMatch) {
+                       return cacheMatch[1];
+                   }
+                   
+                   // 移除前导斜杠
+                   if (normalized.startsWith('/')) {
+                       normalized = normalized.substring(1);
+                   }
+                   
+                   return normalized;
+               } catch (e) {
+                   let fallback = path.replace(/\\/g, '/').split('?')[0];
+                   // 尝试从fallback中提取cache路径
+                   const cacheMatch = fallback.match(/(cache\/(?:subtitles|lyrics)\/[^/]+)$/i);
+                   if (cacheMatch) {
+                       return cacheMatch[1];
+                   }
+                   if (fallback.startsWith('/')) {
+                       fallback = fallback.substring(1);
+                   }
+                   return fallback;
+               }
            }
 
            // 在播放视频前，先向服务器发送请求，临时设置 mediaDir
@@ -1039,6 +1069,7 @@
    
            ws.onmessage = function(event) {
                const data = JSON.parse(event.data);
+               console.log('[WebSocket] Message received:', data);
                
                // --- 旧的转码进度处理 ---
                if (data.type === 'progress' && 'speed' in data) {
@@ -1066,70 +1097,106 @@
                }
 
                // --- 新的字幕任务进度处理 ---
-               // 使用消息中的 vtt_file 来构建 taskId（如果有的话），否则使用 currentSubtitleUrl
-               const vttFileForTask = data.vtt_file || currentSubtitleUrl;
-               const normalizedVttFile = normalizePathForTaskId(vttFileForTask);
-               const taskId = `task-${data.task ? data.task.replace(/\s/g, '-') : 'general'}-${normalizedVttFile}`;
+               // 尝试多种方式匹配任务ID
+               let taskMessageEl = null;
+               let matchedTaskId = null;
                
-               console.log(`WebSocket message received:`, data);
-               console.log(`VTT file from message: ${data.vtt_file}`);
-               console.log(`Current subtitle URL: ${currentSubtitleUrl}`);
-               console.log(`Normalized VTT file: ${normalizedVttFile}`);
-               console.log(`Generated taskId: ${taskId}`);
-               
-               // 更新或创建任务状态
-               if (activeTasks[taskId]) {
-                   if (data.type === 'progress') {
-                       // Guard against zero/undefined total to avoid NaN
-                       activeTasks[taskId].current = typeof data.current === 'number' ? data.current : (activeTasks[taskId].current || 0);
-                       activeTasks[taskId].total = typeof data.total === 'number' ? data.total : (activeTasks[taskId].total || 0);
-                   } else if (data.type === 'cancelled') {
-                       delete activeTasks[taskId];
-                   } else if (data.type === 'complete' || data.type === 'error') {
-                       delete activeTasks[taskId]; // 任务结束，移除跟踪
+               // 方法1: 使用消息中的vtt_file和task构建ID
+               if (data.vtt_file && data.task) {
+                   const normalizedVttFile = normalizePathForTaskId(data.vtt_file);
+                   const taskName = data.task === 'translate' ? '翻译' :
+                                  data.task === 'correct' ? '校正' :
+                                  data.task === 'glossary' ? '术语表' : data.task;
+                   const taskId = `task-${taskName}-${normalizedVttFile}`;
+                   console.log('[Task Progress] Looking for taskId:', taskId);
+                   console.log('[Task Progress] Normalized vtt_file:', normalizedVttFile);
+                   taskMessageEl = document.getElementById(taskId);
+                   if (taskMessageEl) {
+                       matchedTaskId = taskId;
+                       console.log('[Task Progress] Matched by method 1:', taskId);
+                   } else {
+                       console.log('[Task Progress] Method 1 failed, element not found');
                    }
                }
-
-               let taskMessageEl = document.getElementById(taskId);
-               if (taskMessageEl) {
-                   if (data.type === 'progress') {
-                       const progressBarEl = taskMessageEl.querySelector('.chat-progress-bar-inner');
-                       const progressTextEl = taskMessageEl.querySelector('.chat-progress-text');
-                       // 防止 total 为 0 导致除以零
-                       const safeTotal = (typeof data.total === 'number' && data.total > 0) ? data.total : null;
-                       const percentage = safeTotal ? (data.current / safeTotal) * 100 : 0;
-                       
-                       // 构建轮次信息
-                       let roundInfo = '';
-                       if (data.current_round && data.total_rounds) {
-                           roundInfo = ` [第 ${data.current_round}/${data.total_rounds} 轮]`;
+               
+               // 方法2: 遍历所有活动任务，查找匹配的
+               if (!taskMessageEl) {
+                   const activeTaskElements = document.querySelectorAll('[data-task-active="true"]');
+                   for (const el of activeTaskElements) {
+                       const elId = el.id;
+                       // 检查任务名称是否匹配
+                       if (data.task && elId.includes(data.task.replace(/\s/g, '-'))) {
+                           taskMessageEl = el;
+                           matchedTaskId = elId;
+                           console.log('[Task Progress] Matched by method 2:', elId);
+                           break;
                        }
-                       
-                       progressBarEl.style.width = `${percentage}%`;
-                       progressTextEl.textContent = safeTotal ? `${data.task}中... (${data.current}/${safeTotal})${roundInfo}` : `${data.task}中... (${data.current}/?)${roundInfo}`;
-                   } else if (data.type === 'complete') {
-                       let finalMessage = `✅ 任务 '${data.task}' 完成！`;
-                       if (data.processed_file) {
-                           finalMessage += `<br>新文件: ${data.processed_file.split(/[\\/]/).pop()}`;
-                           loadAllSubtitles();
-                       }
-                       if (data.glossary_file) {
-                           finalMessage += `<br>文件已保存: ${data.glossary_file.split(/[\\/]/).pop()}`;
-                       }
-                       taskMessageEl.className = 'chat-message bot-message';
-                       taskMessageEl.innerHTML = finalMessage;
-                       taskMessageEl.removeAttribute('data-task-active');
-                   } else if (data.type === 'cancelled') {
-                       taskMessageEl.className = 'chat-message bot-message';
-                       taskMessageEl.innerHTML = `🚫 任务 '${data.task}' 已取消。`;
-                       taskMessageEl.removeAttribute('data-task-active');
-                   } else if (data.type === 'error') {
-                       taskMessageEl.className = 'chat-message error-message';
-                       taskMessageEl.innerHTML = `❌ 任务 '${data.task || '未知'}' 失败: ${data.message}`;
-                       taskMessageEl.removeAttribute('data-task-active');
                    }
-               } else {
-                   console.warn(`No task message element found for taskId: ${taskId}`);
+               }
+               
+               if (!taskMessageEl) {
+                   console.warn('[Task Progress] No matching task element found for:', data);
+                   return;
+               }
+               
+               console.log('[Task Progress] Processing for task:', matchedTaskId);
+               
+               // 更新任务状态
+               if (data.type === 'progress') {
+                   if (activeTasks[matchedTaskId]) {
+                       activeTasks[matchedTaskId].current = typeof data.current === 'number' ? data.current : 0;
+                       activeTasks[matchedTaskId].total = typeof data.total === 'number' ? data.total : 0;
+                   }
+                   
+                   const progressBarEl = taskMessageEl.querySelector('.chat-progress-bar-inner');
+                   const progressTextEl = taskMessageEl.querySelector('.chat-progress-text');
+                   
+                   const safeTotal = (typeof data.total === 'number' && data.total > 0) ? data.total : null;
+                   const safeCurrent = typeof data.current === 'number' ? data.current : 0;
+                   const percentage = safeTotal ? (safeCurrent / safeTotal) * 100 : 0;
+                   
+                   // 构建轮次信息
+                   let roundInfo = '';
+                   if (data.current_round && data.total_rounds) {
+                       roundInfo = ` [第 ${data.current_round}/${data.total_rounds} 轮]`;
+                   }
+                   
+                   console.log(`[Task Progress] Updating: ${safeCurrent}/${safeTotal} (${percentage.toFixed(1)}%)${roundInfo}`);
+                   
+                   if (progressBarEl) {
+                       progressBarEl.style.width = `${percentage}%`;
+                   }
+                   if (progressTextEl) {
+                       progressTextEl.textContent = safeTotal
+                           ? `${data.task}中... (${safeCurrent}/${safeTotal})${roundInfo}`
+                           : `${data.task}中... (${safeCurrent}/?)${roundInfo}`;
+                   }
+               } else if (data.type === 'complete') {
+                   delete activeTasks[matchedTaskId];
+                   
+                   let finalMessage = `✅ 任务 '${data.task}' 完成！`;
+                   if (data.processed_file) {
+                       finalMessage += `<br>新文件: ${data.processed_file.split(/[\\/]/).pop()}`;
+                       loadAllSubtitles();
+                   }
+                   if (data.glossary_file) {
+                       finalMessage += `<br>文件已保存: ${data.glossary_file.split(/[\\/]/).pop()}`;
+                   }
+                   taskMessageEl.className = 'chat-message bot-message';
+                   taskMessageEl.innerHTML = finalMessage;
+                   taskMessageEl.removeAttribute('data-task-active');
+               } else if (data.type === 'cancelled') {
+                   delete activeTasks[matchedTaskId];
+                   
+                   taskMessageEl.className = 'chat-message bot-message';
+                   taskMessageEl.innerHTML = `🚫 任务 '${data.task}' 已取消。`;
+                   taskMessageEl.removeAttribute('data-task-active');
+               } else if (data.type === 'error') {
+                   delete activeTasks[matchedTaskId];
+                   
+                   taskMessageEl.className = 'chat-message bot-message';
+                   taskMessageEl.innerHTML = `❌ 任务 '${data.task || '未知'}' 失败: ${data.message}`;
+                   taskMessageEl.removeAttribute('data-task-active');
                }
            };
    

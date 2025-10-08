@@ -1473,6 +1473,10 @@ class VTTCorrector:
         """
         Helper function to process groups of captions in multiple rounds, splitting failed groups.
         Now with concurrent processing.
+        
+        Returns:
+            True: 任务成功完成（所有组都处理成功）或达到最大轮次（部分失败但应保存）
+            False: 任务被取消（不应保存文件）
         """
         groups_to_process = initial_groups
         max_rounds = 5
@@ -1549,8 +1553,9 @@ class VTTCorrector:
             logger.info(f"第 {round_num} 轮 {task_name} 完成，有 {len(failed_groups)} 组失败。")
             
             if round_num == max_rounds:
-                logger.error(f"达到最大 {task_name} 轮次，仍有失败的组。处理可能不完整。")
-                break
+                logger.warning(f"达到最大 {task_name} 轮次，仍有 {len(failed_groups)} 组失败。将保存已处理的部分。")
+                # 达到最大轮次，即使有失败也返回True，保存已处理的部分
+                return True
 
             new_groups_to_process = []
             for failed_group in failed_groups:
@@ -1563,7 +1568,8 @@ class VTTCorrector:
             
             groups_to_process = new_groups_to_process
             
-        return not groups_to_process
+        # 正常完成（所有组都成功处理）
+        return True
 
     def _process_single_group(self, group: List, process_func, task_name: str, lock: threading.Lock) -> bool:
         """
@@ -1697,6 +1703,11 @@ class VTTCorrector:
             # 立即发送初始进度，让前端知道任务已开始
             _report_progress("翻译", 0, 1)
             
+            # 检查取消标志
+            if self.cancel_flag and self.cancel_flag.is_set():
+                logger.info("任务在开始前已被取消")
+                return False
+            
             # 1. 读取VTT文件
             vtt = webvtt.read(input_file)
             captions = list(vtt)
@@ -1736,15 +1747,25 @@ class VTTCorrector:
                 sys.stderr.write(f"[Translate] Created {len(caption_groups_for_translation)} caption groups\n")
                 sys.stderr.flush()
                 
-                self._process_groups_multi_round(
+                success = self._process_groups_multi_round(
                     initial_groups=caption_groups_for_translation,
                     process_func=self._translate_text_batch,
                     task_name="翻译"
                 )
+                
+                # 如果处理被取消，返回 False
+                if not success:
+                    logger.info("翻译任务被取消，不保存文件")
+                    return False
             else:
                 logger.info("字幕为中文，无需翻译。")
                 sys.stderr.write(f"[Translate] Subtitles are in Chinese, skipping translation\n")
                 sys.stderr.flush()
+
+            # 最后检查一次取消标志
+            if self.cancel_flag and self.cancel_flag.is_set():
+                logger.info("任务在保存前被取消，不保存文件")
+                return False
 
             # 5. 保存翻译后的VTT文件
             final_vtt = webvtt.WebVTT()
@@ -1776,6 +1797,11 @@ class VTTCorrector:
             # 立即发送初始进度，让前端知道任务已开始
             _report_progress("纠错", 0, 1)
             
+            # 检查取消标志
+            if self.cancel_flag and self.cancel_flag.is_set():
+                logger.info("任务在开始前已被取消")
+                return False
+            
             # 1. 读取VTT文件
             vtt = webvtt.read(input_file)
             captions = list(vtt)
@@ -1805,11 +1831,21 @@ class VTTCorrector:
             sys.stderr.write(f"[Correct] Created {len(caption_groups_for_correction)} caption groups\n")
             sys.stderr.flush()
             
-            self._process_groups_multi_round(
+            success = self._process_groups_multi_round(
                 initial_groups=caption_groups_for_correction,
                 process_func=self._correct_text_batch,
                 task_name="纠错"
             )
+            
+            # 如果处理被取消，返回 False
+            if not success:
+                logger.info("纠错任务被取消，不保存文件")
+                return False
+    
+            # 最后检查一次取消标志
+            if self.cancel_flag and self.cancel_flag.is_set():
+                logger.info("任务在保存前被取消，不保存文件")
+                return False
     
             # 4. 保存纠正后的VTT文件
             final_vtt = webvtt.WebVTT()

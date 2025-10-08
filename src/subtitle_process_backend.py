@@ -301,6 +301,16 @@ def process_subtitle_task():
                         processing_success[0] = CORRECTOR.translate_vtt_file(vtt_file_decoded, output_file)
                     else:  # correct
                         processing_success[0] = CORRECTOR.correct_vtt_file_only(vtt_file_decoded, output_file)
+                    
+                    # 如果任务被取消，删除已生成的输出文件
+                    if cancel_flag.is_set():
+                        if os.path.exists(output_file):
+                            try:
+                                os.remove(output_file)
+                                print(f"[Flask Backend] 已删除取消任务生成的文件: {output_file}")
+                            except Exception as e:
+                                print(f"[Flask Backend] 删除文件失败: {e}")
+                        processing_success[0] = False
                 except Exception as e:
                     print(f"[Flask Backend] 处理过程中出错: {e}")
                     processing_success[0] = False
