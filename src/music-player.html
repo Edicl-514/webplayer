@@ -244,5 +244,33 @@
     <script src="vendor/cptable.full.js"></script>
     <script src="vendor/Sortable.min.js"></script>
     <script src="music-app.js?v=1"></script>
+    <script>
+        // 清理字幕缓存：在页面卸载或播放器关闭时发送请求到后端
+        (function() {
+            function cleanupSubtitlesCache() {
+                try {
+                    if (navigator && typeof navigator.sendBeacon === 'function') {
+                        navigator.sendBeacon('/api/cleanup-subtitles-cache');
+                        return;
+                    }
+                } catch (e) {
+                    // ignore and fallback
+                }
+
+                try {
+                    fetch('/api/cleanup-subtitles-cache', { method: 'POST', keepalive: true }).catch(() => {});
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            window.addEventListener('beforeunload', cleanupSubtitlesCache);
+            window.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'hidden') {
+                    cleanupSubtitlesCache();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>

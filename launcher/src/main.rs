@@ -131,6 +131,40 @@ struct Config {
     api_keys: ApiKeys,
     media_directories: Vec<MediaDirectory>,
     models: Vec<Model>,
+    #[serde(default)]
+    transcriber_models: Vec<TranscriberModel>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct TranscriberModel {
+    #[serde(rename = "model-source")]
+    model_source: String,
+    model: String,
+    language: String,
+    task: String,
+    #[serde(rename = "vad_filter", default)]
+    vad_filter: bool,
+    #[serde(rename = "condition_on_previous_text", default)]
+    condition_on_previous_text: bool,
+    #[serde(rename = "max-chars-per-line", default)]
+    max_chars_per_line: u32,
+    #[serde(rename = "dense-subtitles", default)]
+    dense_subtitles: bool,
+}
+
+impl Default for TranscriberModel {
+    fn default() -> Self {
+        Self {
+            model_source: "local".to_string(),
+            model: "".to_string(),
+            language: "None".to_string(),
+            task: "transcribe".to_string(),
+            vad_filter: false,
+            condition_on_previous_text: false,
+            max_chars_per_line: 0,
+            dense_subtitles: false,
+        }
+    }
 }
 
 // --- App State and Logic ---
@@ -154,6 +188,8 @@ struct EnvironmentCheckItem {
 struct NetworkCheckResult {
     url: String,
     status: CheckStatus,
+    // 延迟（毫秒）
+    latency_ms: Option<u128>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -257,6 +293,7 @@ impl MyApp {
             .map(|url| NetworkCheckResult {
                 url: url.to_string(),
                 status: CheckStatus::Pending,
+                latency_ms: None,
             })
             .collect();
 
@@ -582,8 +619,26 @@ impl MyApp {
         ui.add_space(10.0);
         ui.separator();
         ui.heading("Logs");
-
         // 使用可编辑但逻辑上只读的 TextEdit 来支持长选中复制
+        ui.horizontal(|ui| {
+            // Clear button
+            if ui.button("Clear Logs").clicked() {
+                // 清空本地缓存
+                self.logs.clear();
+                self.log_jobs.clear();
+                self.logs_text.clear();
+                self.logs_scroll_to_bottom = false;
+                // 尝试清空接收队列（非阻塞）
+                while let Ok(_) = self.log_receiver.try_recv() {
+                    // discard
+                }
+                self.status_message = "Logs cleared".to_string();
+            }
+
+            // 显示当前日志条数
+            ui.label(format!("Lines: {}", self.logs.len()));
+        });
+
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .auto_shrink([false, false])
@@ -1017,6 +1072,65 @@ impl MyApp {
                     self.config.models.push(Model::default());
                 }
             });
+
+            ui.collapsing("Transcriber Models", |ui| {
+                let mut t_remove: Option<usize> = None;
+                let mut t_move_up: Option<usize> = None;
+                let mut t_move_down: Option<usize> = None;
+
+                for (i, tmodel) in &mut self.config.transcriber_models.iter_mut().enumerate() {
+                    ui.collapsing(format!("{}: {}", tmodel.model_source, tmodel.model), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Source:");
+                            ui.add(egui::TextEdit::singleline(&mut tmodel.model_source).desired_width(120.0));
+                            ui.label("Model:");
+                            ui.add(egui::TextEdit::singleline(&mut tmodel.model).desired_width(220.0));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Language:");
+                            ui.add(egui::TextEdit::singleline(&mut tmodel.language).desired_width(80.0));
+                            ui.label("Task:");
+                            ui.add(egui::TextEdit::singleline(&mut tmodel.task).desired_width(120.0));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut tmodel.vad_filter, "VAD Filter");
+                            ui.checkbox(&mut tmodel.condition_on_previous_text, "Condition on Previous");
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Max Chars/Line:");
+                            ui.add(egui::DragValue::new(&mut tmodel.max_chars_per_line).speed(1));
+                            ui.checkbox(&mut tmodel.dense_subtitles, "Dense Subtitles");
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui.small_button("↑").clicked() { t_move_up = Some(i); }
+                            if ui.small_button("↓").clicked() { t_move_down = Some(i); }
+                            if ui.button("Remove").clicked() { t_remove = Some(i); }
+                        });
+                    });
+                }
+
+                if let Some(i) = t_move_up {
+                    if i > 0 {
+                        self.config.transcriber_models.swap(i, i - 1);
+                    }
+                }
+                if let Some(i) = t_move_down {
+                    if i + 1 < self.config.transcriber_models.len() {
+                        self.config.transcriber_models.swap(i, i + 1);
+                    }
+                }
+                if let Some(i) = t_remove {
+                    self.config.transcriber_models.remove(i);
+                }
+
+                if ui.button("Add Transcriber Model").clicked() {
+                    self.config.transcriber_models.push(TranscriberModel::default());
+                }
+            });
         });
     }
 
@@ -1078,7 +1192,12 @@ impl MyApp {
                         CheckStatus::Failure => ("❌ Inaccessible", egui::Color32::RED),
                     };
                     ui.label(&result.url);
-                    ui.label(egui::RichText::new(label).color(color));
+                    // 如果有延迟信息则显示为 "label (123ms)"
+                    let mut label_with_latency = label.to_string();
+                    if let Some(lat) = result.latency_ms {
+                        label_with_latency = format!("{} ({} ms)", label_with_latency, lat);
+                    }
+                    ui.label(egui::RichText::new(label_with_latency).color(color));
                     ui.end_row();
                 }
             });
@@ -1209,23 +1328,27 @@ impl MyApp {
                 let url = url.clone();
                 let agent = agent.clone();
                 thread::spawn(move || {
+                    let start = std::time::Instant::now();
                     let status = match agent.get(&url).call() {
                         Ok(response) if response.status() >= 200 && response.status() < 300 => {
                             CheckStatus::Success
                         }
                         _ => CheckStatus::Failure,
                     };
-                    let _ = tx.send((i, status));
+                    let elapsed = start.elapsed().as_millis();
+                    let _ = tx.send((i, status, Some(elapsed)));
                 });
             }
 
             drop(tx);
 
-            for (i, status) in rx {
+            for msg in rx {
+                let (i, status, latency_opt) = msg;
                 {
                     let mut results = results_arc_clone.lock().unwrap();
                     if let Some(item) = results.get_mut(i) {
                         item.status = status;
+                        item.latency_ms = latency_opt;
                     }
                 }
                 ctx_clone.request_repaint();
@@ -1277,15 +1400,15 @@ impl Config {
             media_directories: vec
 ![
                 MediaDirectory {
-                    alias: "J".to_string()
-,
-                    path: "J:\\e".to_string(),
+                    alias: "My Media Directory".to_string(),
+
+                    path: "C:\\My Media Directory".to_string(),
                 }
             ],
             models: vec
 ![
                 Model {
-                    model_path: "Deepseek V3".to_string(),
+                    model_path: "your online model name".to_string(),
                     model_format: "online".to_string(),
                     online_config: Some(OnlineConfig {
                         api_key: "your_api_key".to_string(),
@@ -1307,9 +1430,9 @@ impl Config {
                         glossary_prompt: "## 任务\n\n从输入的日文轻小说片段中构建用于日译中的术语表，术语表主要包括与这部小说相关的足够独特的专有名词，例如只在这部小说中出现的人名/地名/建筑/招牌/特殊物品/招式技能/奖项/菜肴……等，\n* 不包括任何生活常见、翻译已经约定俗成的专有名词，例如渋谷、沖縄等。\n\n## 输出要求\n你的输出包括日文、对应中文、备注\n其中日文为对应原文\n中文为你对这个词的翻译\n备注为这个专有名词的类型，如果是人名的话，还要推测性别\n\n1. 你的输出使用TSV格式，且总是先输出以下表头：\n```tsv\n日文原词\t中文翻译\t备注\n\n2. 开始输出词表\n+ 如果有专有名词，则开始输出词表，每个元素之间使用Tab分隔，例如\n张三\t张三\t人名，男性\n\n+ 如果输入的文本中没有任何专有名词，那么输出一行\nNULL\tNULL\tNULL\n\n3. 然后直接停止输出，不需要任何其他解释或说明。\n\n## 输入\n{input}\n\n## 提示\n{hint}\n\n## 输出\n```tsv\n日文原词\t中文翻译\t备注\n".to_string(),
                     },
                     gguf_config: None,
-                    batch_max_lines: 20,
+                    batch_max_lines: 30,
                     concurrent_threads: 5,
-                    batch_max_chars: 0,
+                    batch_max_chars: 600,
                     prompt_template: "".to_string(),
                 },
                 Model {
@@ -1337,9 +1460,9 @@ impl Config {
                         chat_format: "qwen-3".to_string(),
                         use_raw_prompt_for_translation: false,
                     }),
-                    batch_max_lines: 1,
-                    concurrent_threads: 8,
-                    batch_max_chars: 200,
+                    batch_max_lines: 15,
+                    concurrent_threads: 4,
+                    batch_max_chars: 300,
                     prompt_template: "default".to_string(),
                 },
                 Model {
@@ -1367,10 +1490,32 @@ impl Config {
                         chat_format: "chatml".to_string(),
                         use_raw_prompt_for_translation: true,
                     }),
-                    batch_max_lines: 5,
-                    concurrent_threads: 1,
+                    batch_max_lines: 30,
+                    concurrent_threads: 4,
                     batch_max_chars: 300,
                     prompt_template: "".to_string(),
+                },
+            ],
+            transcriber_models: vec![
+                TranscriberModel {
+                    model_source: "local".to_string(),
+                    model: "path\\to\\your\\whisper\\model".to_string(),
+                    language: "ja".to_string(),
+                    task: "translate".to_string(),
+                    vad_filter: true,
+                    condition_on_previous_text: true,
+                    max_chars_per_line: 25,
+                    dense_subtitles: true,
+                },
+                TranscriberModel {
+                    model_source: "pretrained".to_string(),
+                    model: "large-v3".to_string(),
+                    language: "None".to_string(),
+                    task: "transcribe".to_string(),
+                    vad_filter: false,
+                    condition_on_previous_text: false,
+                    max_chars_per_line: 25,
+                    dense_subtitles: true,
                 },
             ],
         }
@@ -1391,6 +1536,7 @@ impl Default for Config {
             },
             media_directories: vec![],
             models: vec![],
+            transcriber_models: vec![],
         }
     }
 }
@@ -1426,7 +1572,7 @@ impl Default for Model {
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([500.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([500.0, 550.0]),
         ..Default::default()
     };
     eframe::run_native(

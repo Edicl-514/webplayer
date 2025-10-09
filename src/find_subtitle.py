@@ -163,13 +163,17 @@ def convert_to_vtt(input_path, output_path):
         return convert_lrc_to_vtt(input_path, output_path)
     
     try:
+        # If output already exists, assume conversion already done
+        if os.path.exists(output_path):
+            return True
+
         # Use ffmpeg to convert subtitle to VTT format
         result = subprocess.run([
             'ffmpeg', '-i', input_path,
             '-y',  # Overwrite output file
             output_path
         ], capture_output=True, text=True)
-        
+
         # Return success status
         return result.returncode == 0
     except Exception as e:
@@ -188,23 +192,35 @@ def get_converted_vtt_path(original_path, cache_dir=None):
     Returns:
         str: Path to converted VTT file
     """
-    # The output directory is the same as the original file's directory
-    output_dir = os.path.dirname(original_path)
-    
+    # Determine default cache dir if not provided
+    if not cache_dir:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        cache_dir = os.path.join(script_dir, 'cache', 'subtitles')
+
+    # Ensure cache directory exists
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception:
+        # If we can't create cache dir, fall back to original file dir
+        cache_dir = os.path.dirname(os.path.abspath(original_path))
+
     # Generate unique filename based on original path and modification time
     abs_path = os.path.abspath(original_path)
-    stat = os.stat(abs_path)
-    mtime = stat.st_mtime
-    
+    try:
+        stat = os.stat(abs_path)
+        mtime = stat.st_mtime
+    except Exception:
+        mtime = ''
+
     # Create hash of file path and modification time for unique naming
     hash_input = f"{abs_path}{mtime}".encode('utf-8')
     file_hash = hashlib.md5(hash_input).hexdigest()
-    
+
     # Get original filename without extension
     basename = os.path.splitext(os.path.basename(original_path))[0]
-    
-    # Return path to the converted VTT file in the same directory
-    return os.path.join(output_dir, f"{basename}_{file_hash}.vtt")
+
+    # Return path to the converted VTT file in the cache directory
+    return os.path.join(cache_dir, f"{basename}_{file_hash}.vtt")
 
 def find_subtitles(video_path, media_dir=None, find_all=False):
     """
@@ -232,11 +248,20 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
     video_filename = os.path.basename(video_path)
     video_basename = os.path.splitext(video_filename)[0]
     
-    # Define and add the cache directory to the search paths
+    # Define cache directory (where converted VTTs will be stored)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cache_dir = os.path.join(script_dir, 'cache', 'subtitles')
-    
+
+    # Ensure cache directory exists so converted files can be stored/served
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except Exception:
+        # If creation fails, we'll still try to use it where possible
+        pass
+
     search_dirs = [video_dir]
+    # If cache dir exists, include it in search directories so existing converted
+    # files are discovered without re-converting
     if os.path.isdir(cache_dir):
         search_dirs.append(cache_dir)
 
@@ -253,6 +278,19 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
                     continue  # Skip if already found
 
                 basename, ext = os.path.splitext(filename)
+                # If we're scanning the cache_dir, skip hashed converted vtt files
+                # These files are in the form <name>_<32hex>.vtt and should be hidden
+                # so that the original source files (e.g. .srt/.ass/.lrc) are shown instead.
+                try:
+                    is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
+                except Exception:
+                    is_cache_dir = False
+
+                if is_cache_dir and ext.lower() == '.vtt':
+                    # basename is the filename without extension; check if it ends with _<32hex>
+                    if re.search(r'_[0-9a-fA-F]{32}$', basename):
+                        # Skip hashed cache VTT files
+                        continue
                 # Check if it's a supported subtitle format
                 if ext.lower() in ['.vtt', '.ass', '.srt', '.lrc']:
                     is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
@@ -271,7 +309,8 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
                     # Resolve file path and convert non-VTT formats to VTT when possible
                     original_path = os.path.join(directory, filename)
                     if ext.lower() != '.vtt':
-                        vtt_path = get_converted_vtt_path(original_path)
+                        # Put converted vtt into the cache directory
+                        vtt_path = get_converted_vtt_path(original_path, cache_dir=cache_dir)
                         if convert_to_vtt(original_path, vtt_path):
                             filepath = vtt_path
                         else:
@@ -281,8 +320,13 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
                     else:
                         filepath = os.path.join(directory, filename)
 
-                    # Construct the URL for the subtitle file
-                    if is_cache_dir:
+                    # Construct the URL for the subtitle file. Prefer cache URL
+                    # if the file is inside the cache_dir; otherwise, if media_dir
+                    # is provided, create a relative path under media_dir; fallback
+                    # to using the basename.
+                    abs_filepath = os.path.abspath(filepath)
+                    abs_cache_dir = os.path.abspath(cache_dir)
+                    if abs_filepath.startswith(abs_cache_dir + os.sep) or abs_filepath == abs_cache_dir:
                         vtt_filename = os.path.basename(filepath)
                         subtitle_url = f"/cache/subtitles/{urllib.parse.quote(vtt_filename)}"
                     elif media_dir:

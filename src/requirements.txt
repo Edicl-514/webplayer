@@ -4,7 +4,7 @@ subliminal
 babelfish
 webvtt-py
 tqdm
-openai-whisper
+faster-whisper
 mutagen
 musicbrainzngs
 Pillow
@@ -23,6 +23,7 @@ tmdbv3api
 numpy
 jaconv
 Unidecode
-opencc
+opencc-python-reimplemented
 cloudscraper
 zhconv
+pydub

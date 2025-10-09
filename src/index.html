@@ -2020,7 +2020,18 @@
                 const li = document.createElement('li');
                 li.innerHTML = `<strong>所有音乐刮削任务已完成!</strong>`;
                 musicScraperTaskList.appendChild(li);
+            } else if (data.type === 'music_scrape_error') {
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '&quot;')}">错误: ${data.message}</span></li>`;
             }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket connection closed.');
         };
 
         // 音乐刮削

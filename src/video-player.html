@@ -3087,6 +3087,37 @@
         <script src="vendor/jquery-3.5.1.min.js"></script>
         <script src="vendor/jquery.fancybox.min.js"></script>
         <script>
+            // 清理字幕缓存：在页面卸载或播放器关闭时发送请求到后端
+            (function() {
+                function cleanupSubtitlesCache() {
+                    try {
+                        // 优先使用 sendBeacon（在卸载时更可靠）
+                        if (navigator && typeof navigator.sendBeacon === 'function') {
+                            navigator.sendBeacon('/api/cleanup-subtitles-cache');
+                            return;
+                        }
+                    } catch (e) {
+                        // ignore and fallback to fetch
+                    }
+
+                    // fetch fallback (尽量为同步但在某些场景下会被中断)
+                    try {
+                        fetch('/api/cleanup-subtitles-cache', { method: 'POST', keepalive: true }).catch(() => {});
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+
+                // 页面卸载时触发
+                window.addEventListener('beforeunload', cleanupSubtitlesCache);
+                window.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'hidden') {
+                        cleanupSubtitlesCache();
+                    }
+                });
+            })();
+        </script>
+        <script>
             // --- Sticky Chat Panel Logic ---
             const playerContainerForScroll = document.querySelector('.player-container');
             const chatPanelForScroll = document.querySelector('.chat-panel');

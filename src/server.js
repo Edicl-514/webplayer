@@ -839,6 +839,45 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 清理字幕缓存文件（仅删除 cache/subtitles 中由转换器生成、带 hash 后缀的 vtt 文件）
+    if (pathname === '/api/cleanup-subtitles-cache' && req.method === 'POST') {
+        (async () => {
+            try {
+                const subtitlesCacheDir = path.join(CACHE_DIR, 'subtitles');
+                if (!fs.existsSync(subtitlesCacheDir)) {
+                    res.statusCode = 200;
+                    res.end(JSON.stringify({ success: true, deleted: 0, message: 'No subtitles cache directory.' }));
+                    return;
+                }
+
+                const files = await fs.promises.readdir(subtitlesCacheDir);
+                const hashedVttRegex = /_[0-9a-fA-F]{32}\.vtt$/;
+                const deletedFiles = [];
+
+                for (const f of files) {
+                    try {
+                        if (hashedVttRegex.test(f)) {
+                            const full = path.join(subtitlesCacheDir, f);
+                            await fs.promises.unlink(full);
+                            deletedFiles.push(f);
+                        }
+                    } catch (e) {
+                        // ignore individual file errors but log
+                        console.warn('Failed to delete cached subtitle:', f, e && e.message);
+                    }
+                }
+
+                res.statusCode = 200;
+                res.end(JSON.stringify({ success: true, deleted: deletedFiles.length, files: deletedFiles }));
+            } catch (err) {
+                console.error('Error cleaning subtitle cache:', err && err.stack || err);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: String(err) }));
+            }
+        })();
+        return;
+    }
+
     // 处理搜索请求
     if (pathname === '/api/search' && req.method === 'GET') {
         //console.log('Received search request:', parsedUrl.query);
@@ -2131,60 +2170,74 @@ const server = http.createServer(async (req, res) => {
                 const { path: relativePath, mediaDir, type: videoType } = JSON.parse(body);
                 const fullPath = path.join(mediaDir, relativePath);
 
+                console.log(`[VideoScraper] Starting scrape for path: ${fullPath}`);
+                console.log(`[VideoScraper] Relative path: ${relativePath}, Media dir: ${mediaDir}, Type: ${videoType}`);
+
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({ success: true, message: 'Scraping process started.' }));
 
                 // Run scraping in the background
                 (async () => {
-                    const videoFiles = await findVideoFilesRecursively(fullPath);
-                    const fileTasks = videoFiles.map((filePath, index) => ({
-                        id: `file_${index}_${Date.now()}`,
-                        path: filePath,
-                        name: path.relative(fullPath, filePath) || path.basename(filePath)
-                    }));
-                    
-                    broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+                    try {
+                        const videoFiles = await findVideoFilesRecursively(fullPath);
+                        console.log(`[VideoScraper] Found ${videoFiles.length} video files`);
+                        
+                        const fileTasks = videoFiles.map((filePath, index) => ({
+                            id: `file_${index}_${Date.now()}`,
+                            path: filePath,
+                            name: path.relative(fullPath, filePath) || path.basename(filePath)
+                        }));
+                        
+                        broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
-                    for (const fileTask of fileTasks) {
-                        broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
-                        
-                        const result = await new Promise((resolve) => {
-                            const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType];
-                            const pythonProcess = spawn('python', args, {
-                                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
-                            });
-                            let stdoutData = '';
-                            let stderrData = '';
-                            pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
-                            pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
-                            pythonProcess.on('close', (code) => {
-                                if (stderrData) { console.error(`[Scraper] Stderr for ${fileTask.name}: ${stderrData}`); }
-                                if (code !== 0) {
-                                    resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
-                                } else {
-                                    try {
-                                        const jsonMatch = stdoutData.match(/({[\s\S]*})/);
-                                        if (jsonMatch && jsonMatch[1]) {
-                                            const scrapedData = JSON.parse(jsonMatch[1]);
-                                            if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
-                                                resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
+                        for (const fileTask of fileTasks) {
+                            broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                            
+                            const result = await new Promise((resolve) => {
+                                const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType];
+                                const pythonProcess = spawn('python', args, {
+                                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                                });
+                                let stdoutData = '';
+                                let stderrData = '';
+                                pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                                pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                                pythonProcess.on('close', (code) => {
+                                    if (stderrData) { console.error(`[Scraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                                    if (code !== 0) {
+                                        resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                                    } else {
+                                        try {
+                                            const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                            if (jsonMatch && jsonMatch[1]) {
+                                                const scrapedData = JSON.parse(jsonMatch[1]);
+                                                if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
+                                                    resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
+                                                } else {
+                                                    resolve({ success: true, data: scrapedData });
+                                                }
                                             } else {
-                                                resolve({ success: true, data: scrapedData });
+                                                resolve({ success: false, error: '无法解析输出', details: stdoutData });
                                             }
-                                        } else {
-                                            resolve({ success: false, error: '无法解析输出', details: stdoutData });
+                                        } catch (e) {
+                                            resolve({ success: false, error: '解析JSON失败', details: stdoutData });
                                         }
-                                    } catch (e) {
-                                        resolve({ success: false, error: '解析JSON失败', details: stdoutData });
                                     }
-                                }
+                                });
                             });
+                            
+                            broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                        }
+                        broadcast({ type: 'scrape_finished_all' });
+                    } catch (bgError) {
+                        console.error('[VideoScraper] Background task error:', bgError);
+                        broadcast({ 
+                            type: 'scrape_error', 
+                            message: '刮削过程出错', 
+                            details: bgError.message 
                         });
-                        
-                        broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
                     }
-                    broadcast({ type: 'scrape_finished_all' });
                 })();
             } catch (e) {
                  // This catch is for the initial request parsing.
@@ -2209,65 +2262,79 @@ const server = http.createServer(async (req, res) => {
                const { path: relativePath, mediaDir, source } = JSON.parse(body);
                const fullPath = path.join(mediaDir, relativePath);
 
+               console.log(`[MusicScraper] Starting scrape for path: ${fullPath}`);
+               console.log(`[MusicScraper] Relative path: ${relativePath}, Media dir: ${mediaDir}, Source: ${source}`);
+
                res.statusCode = 200;
                res.setHeader('Content-Type', 'application/json');
                res.end(JSON.stringify({ success: true, message: 'Music scraping process started.' }));
 
                // Run scraping in the background
                (async () => {
-                   const musicFiles = await findMusicFilesRecursively(fullPath);
-                   const fileTasks = musicFiles.map((filePath, index) => ({
-                       id: `music_${index}_${Date.now()}`,
-                       path: filePath,
-                       name: path.relative(fullPath, filePath) || path.basename(filePath)
-                   }));
-                   
-                   broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+                   try {
+                       const musicFiles = await findMusicFilesRecursively(fullPath);
+                       console.log(`[MusicScraper] Found ${musicFiles.length} music files`);
+                       
+                       const fileTasks = musicFiles.map((filePath, index) => ({
+                           id: `music_${index}_${Date.now()}`,
+                           path: filePath,
+                           name: path.relative(fullPath, filePath) || path.basename(filePath)
+                       }));
+                       
+                       broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
-                   for (const fileTask of fileTasks) {
-                       broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
-                       
-                       const result = await new Promise((resolve) => {
-                           const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
-                           // Optionally forward 'type' in scraping requests (defaults to all)
-                           const scrapeType = 'all';
-                           if (scrapeType && ['lyrics','cover','info','all'].includes(scrapeType)) {
-                                args.push('--only', scrapeType);
-                           }
-                           const pythonProcess = spawn('python', args, {
-                                 env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
-                           });
-                           let stdoutData = '';
-                           let stderrData = '';
-                           pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
-                           pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
-                           pythonProcess.on('close', (code) => {
-                               if (stderrData) { console.error(`[MusicScraper] Stderr for ${fileTask.name}: ${stderrData}`); }
-                               if (code !== 0) {
-                                   resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
-                               } else {
-                                   try {
-                                       const jsonMatch = stdoutData.match(/({[\s\S]*})/);
-                                       if (jsonMatch && jsonMatch[1]) {
-                                           const parsedData = JSON.parse(jsonMatch[1]);
-                                           if(parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
-                                               resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
-                                           } else {
-                                               resolve({ success: true, data: parsedData });
-                                           }
-                                       } else {
-                                           resolve({ success: false, error: '未找到匹配', details: stdoutData });
-                                       }
-                                   } catch (e) {
-                                       resolve({ success: false, error: '解析JSON失败', details: stdoutData });
-                                   }
+                       for (const fileTask of fileTasks) {
+                           broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
+                           
+                           const result = await new Promise((resolve) => {
+                               const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
+                               // Optionally forward 'type' in scraping requests (defaults to all)
+                               const scrapeType = 'all';
+                               if (scrapeType && ['lyrics','cover','info','all'].includes(scrapeType)) {
+                                    args.push('--only', scrapeType);
                                }
+                               const pythonProcess = spawn('python', args, {
+                                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                               });
+                               let stdoutData = '';
+                               let stderrData = '';
+                               pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+                               pythonProcess.stderr.on('data', (data) => { stderrData += data.toString(); });
+                               pythonProcess.on('close', (code) => {
+                                   if (stderrData) { console.error(`[MusicScraper] Stderr for ${fileTask.name}: ${stderrData}`); }
+                                   if (code !== 0) {
+                                       resolve({ success: false, error: `脚本错误 (code ${code})`, details: stderrData });
+                                   } else {
+                                       try {
+                                           const jsonMatch = stdoutData.match(/({[\s\S]*})/);
+                                           if (jsonMatch && jsonMatch[1]) {
+                                               const parsedData = JSON.parse(jsonMatch[1]);
+                                               if(parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
+                                                   resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
+                                               } else {
+                                                   resolve({ success: true, data: parsedData });
+                                               }
+                                           } else {
+                                               resolve({ success: false, error: '未找到匹配', details: stdoutData });
+                                           }
+                                       } catch (e) {
+                                           resolve({ success: false, error: '解析JSON失败', details: stdoutData });
+                                       }
+                                   }
+                               });
                            });
+                           
+                           broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                       }
+                       broadcast({ type: 'music_scrape_finished_all' });
+                   } catch (bgError) {
+                       console.error('[MusicScraper] Background task error:', bgError);
+                       broadcast({ 
+                           type: 'music_scrape_error', 
+                           message: '刮削过程出错', 
+                           details: bgError.message 
                        });
-                       
-                       broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
                    }
-                   broadcast({ type: 'music_scrape_finished_all' });
                })();
            } catch (e) {
                if (!res.headersSent) {
@@ -2970,12 +3037,18 @@ async function findVideoFilesRecursively(dir) {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {
             const resolvedPath = path.resolve(dir, dirent.name);
-            if (dirent.isDirectory()) {
-                videoFiles = videoFiles.concat(await findVideoFilesRecursively(resolvedPath));
-            } else {
-                if (videoExtensions.includes(path.extname(dirent.name).toLowerCase())) {
-                    videoFiles.push(resolvedPath);
+            try {
+                // 对于 OneDrive 等云存储，需要用 stat 来获取真实的文件/目录状态
+                const stats = await fs.promises.stat(resolvedPath);
+                if (stats.isDirectory()) {
+                    videoFiles = videoFiles.concat(await findVideoFilesRecursively(resolvedPath));
+                } else if (stats.isFile()) {
+                    if (videoExtensions.includes(path.extname(dirent.name).toLowerCase())) {
+                        videoFiles.push(resolvedPath);
+                    }
                 }
+            } catch (statError) {
+                console.error(`Error accessing ${resolvedPath}:`, statError.message);
             }
         }
     } catch (error) {
@@ -2999,12 +3072,18 @@ async function findMusicFilesRecursively(dir) {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {
             const resolvedPath = path.resolve(dir, dirent.name);
-            if (dirent.isDirectory()) {
-                musicFiles = musicFiles.concat(await findMusicFilesRecursively(resolvedPath));
-            } else {
-                if (musicExtensions.includes(path.extname(dirent.name).toLowerCase())) {
-                    musicFiles.push(resolvedPath);
+            try {
+                // 对于 OneDrive 等云存储，需要用 stat 来获取真实的文件/目录状态
+                const stats = await fs.promises.stat(resolvedPath);
+                if (stats.isDirectory()) {
+                    musicFiles = musicFiles.concat(await findMusicFilesRecursively(resolvedPath));
+                } else if (stats.isFile()) {
+                    if (musicExtensions.includes(path.extname(dirent.name).toLowerCase())) {
+                        musicFiles.push(resolvedPath);
+                    }
                 }
+            } catch (statError) {
+                console.error(`Error accessing ${resolvedPath}:`, statError.message);
             }
         }
     } catch (error) {
