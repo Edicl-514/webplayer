@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&display=swap');
+/* External Google Fonts import removed to improve offline loading.
+    Use a system/local font stack instead of requesting fonts.googleapis.com */
 
 :root {
     --primary-bg: #1a1a1a;
@@ -19,7 +20,8 @@
 }
 
 body {
-    font-family: 'Noto Sans SC', sans-serif;
+    /* Prefer local Noto Sans SC if available, otherwise fall back to common system Chinese and UI fonts */
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background: linear-gradient(145deg, #0a1929, #1a1a2e);
     color: var(--primary-text);
     display: flex;

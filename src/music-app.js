@@ -375,7 +375,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 artist = parts[0];
                 songTitle = parts.slice(1).join(' - ');
             }
-            const finalSrc = `${decodeURIComponent(src)}?mediaDir=${encodeURIComponent(mediaDir)}`;
+            
+            // 修复：正确编码路径，防止 # 等特殊字符被误解析
+            // src 已经是编码后的路径，不需要解码
+            // 直接使用 src，并在末尾添加 mediaDir 参数
+            const finalSrc = `${src}?mediaDir=${encodeURIComponent(mediaDir)}`;
     
             let songIndex = savedPlaylist.findIndex(pSong => pSong.src === finalSrc);
     
@@ -770,12 +774,21 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchMusicCover(song) {
         try {
+            console.log('[fetchMusicCover] song.src:', song.src);
             const url = new URL(song.src, window.location.origin);
             const mediaDir = url.searchParams.get('mediaDir');
             let musicPath = decodeURIComponent(url.pathname);
+            console.log('[fetchMusicCover] url.pathname:', url.pathname);
+            console.log('[fetchMusicCover] decoded musicPath:', musicPath);
+            console.log('[fetchMusicCover] mediaDir:', mediaDir);
+            
             if (musicPath.startsWith('/music/')) {
                 musicPath = musicPath.substring('/music/'.length);
+            } else if (musicPath.startsWith('/')) {
+                musicPath = musicPath.substring(1);
             }
+            
+            console.log('[fetchMusicCover] final musicPath for API:', musicPath);
             
             const settings = getSettings();
             const params = new URLSearchParams({
@@ -829,6 +842,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let musicPath = decodeURIComponent(url.pathname);
             if (musicPath.startsWith('/music/')) {
                 musicPath = musicPath.substring('/music/'.length);
+            } else if (musicPath.startsWith('/')) {
+                musicPath = musicPath.substring(1);
             }
             
             const settings = getSettings();
@@ -937,6 +952,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let musicPath = decodeURIComponent(url.pathname);
             if (musicPath.startsWith('/music/')) {
                 musicPath = musicPath.substring('/music/'.length);
+            } else if (musicPath.startsWith('/')) {
+                musicPath = musicPath.substring(1);
             }
             
             const settings = getSettings();
@@ -1978,6 +1995,15 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', () => {
         if (window.innerWidth > 768) {
             collapseVolumeControl();
+            // 切换到PC端时移除lyrics-mode class
+            playerContainer.classList.remove('lyrics-mode');
+        } else {
+            // 切换到移动端时,根据当前显示状态添加或移除class
+            if (lyricsWrapper.style.display !== 'none' && visualizationContainer.style.display === 'none') {
+                playerContainer.classList.add('lyrics-mode');
+            } else {
+                playerContainer.classList.remove('lyrics-mode');
+            }
         }
     });
     
@@ -2119,6 +2145,11 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsContainer.classList.remove('masked'); // 移除遮罩
         isVisualizerVisible = true;
         
+        // 移动端移除lyrics-mode class,显示封面
+        if (window.innerWidth <= 768) {
+            playerContainer.classList.remove('lyrics-mode');
+        }
+        
         // Ensure canvas is correctly sized before drawing
         setupVisualizer();
 
@@ -2133,6 +2164,12 @@ document.addEventListener('DOMContentLoaded', () => {
         visualizationContainer.style.display = 'none';
         lyricsContainer.classList.add('masked'); // 添加遮罩
         isVisualizerVisible = false;
+        
+        // 移动端添加lyrics-mode class,隐藏封面
+        if (window.innerWidth <= 768) {
+            playerContainer.classList.add('lyrics-mode');
+        }
+        
         cancelAnimationFrame(visualizerRAF);
     }
 
@@ -2157,6 +2194,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let musicPath = decodeURIComponent(url.pathname); // 解码路径
         if (musicPath.startsWith('/music/')) {
             musicPath = musicPath.substring('/music/'.length);
+        } else if (musicPath.startsWith('/')) {
+            musicPath = musicPath.substring(1);
         }
     
         const typeMap = { lyrics: '歌词', cover: '封面', info: '信息' };
@@ -3114,4 +3153,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initializePlayer(); // 初始化播放器
     // 设置默认激活的倍速选项
     document.querySelector('.speed-options div[data-speed="1.0"]').classList.add('active');
+    
+    // 移动端初始化:默认显示歌词时添加lyrics-mode class
+    if (window.innerWidth <= 768) {
+        // 检查当前是否显示歌词(非可视化模式)
+        if (lyricsWrapper.style.display !== 'none' && visualizationContainer.style.display === 'none') {
+            playerContainer.classList.add('lyrics-mode');
+        }
+    }
 });

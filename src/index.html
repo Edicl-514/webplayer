@@ -1184,7 +1184,7 @@
                     gridItem.classList.add('is-file');
                     const extension = file.name.split('.').pop().toLowerCase();
                     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
-                    const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv','wmv'].includes(extension);
+                    const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv','wmv', 'ts'].includes(extension);
                     const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
 
                     if (isImage) {
@@ -1246,7 +1246,7 @@
                     // 为文件创建缩略图或图标
                     const extension = file.name.split('.').pop().toLowerCase();
                     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
-                    const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv','wmv'].includes(extension);
+                    const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv','wmv', 'ts'].includes(extension);
                     const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
                     const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
                     const encodedFileName = encodeURIComponent(file.name);

@@ -113,7 +113,7 @@
 ## 个人使用的模型
  - 对于字幕的日译中任务，推荐使用 [Sakura LLM系列模型](https://huggingface.co/SakuraLLM)，该模型对**R18内容**的翻译有较好支持，预设模板里已经包含了针对该模型的提示词，下载好模型后，将 `Settings` -> `Models` -> `path/to/your/model.gguf(默认模板的第三项)` 中的模型路径替换为实际的 **.gguf** 文件路径即可。
   
- - 对于日文语音的字幕生成，推荐使用 [whisper-large-v2-translate-zh-v0.1-lt-ct2](https://huggingface.co/chickenrice0721/whisper-large-v2-translate-zh-v0.1-lt-ct2)，该模型能直接将日文语音转换为中文字幕，对于**日文音声**有很好的效果。下载好模型后，将 `Settings` -> `Transcriber Models` -> `path\\to\\your\\whisper\\model(默认模板的第一项)` 中的路径改为**模型文件夹**的实际路径即可。注意：模型文件夹中需要同时有 **config.json、model.bin、preprocessor_config.json、tokenizer.json、vocabulary.json**，下载时不要漏掉了。
+ - 对于日文语音的字幕生成，推荐使用 [whisper-large-v2-translate-zh-v0.2-lt-ct2](https://huggingface.co/chickenrice0721/whisper-large-v2-translate-zh-v0.2-st-ct2)，该模型能直接将日文语音转换为中文字幕，对于**日文音声**有很好的效果。下载好模型后，将 `Settings` -> `Transcriber Models` -> `path\\to\\your\\whisper\\model(默认模板的第一项)` 中的路径改为**模型文件夹**的实际路径即可。注意：模型文件夹中需要同时有 **config.json、model.bin、preprocessor_config.json、tokenizer.json、vocabulary.json**，下载时不要漏掉了。
   
  - 对于通用的本地大模型 (例如 [Qwen系列](https://huggingface.co/Qwen) ) ，程序也做了理论上的支持，下载好模型后，将 `Settings` -> `Models` -> `path/to/your/model(默认模板的第二项)` 中的路径改为**模型文件夹**路径即可，但具体的参数和提示词需要自己微调。在大多数情况下，推荐优先使用在线大模型，在 `your online model name(默认模板的第一项)` -> `Online Config` 中填入 API 相关信息即可。
   

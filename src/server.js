@@ -90,6 +90,9 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/music-info' && req.method === 'GET') {
         const musicPath = parsedUrl.query.path;
         const mediaDir = parsedUrl.query.mediaDir;
+        
+        console.log(`[music-info] Received request - path: ${musicPath}, mediaDir: ${mediaDir}`);
+        
         if (!musicPath) {
             res.statusCode = 400;
             res.end(JSON.stringify({ success: false, message: 'Missing music path parameter' }));
@@ -97,9 +100,26 @@ const server = http.createServer(async (req, res) => {
         }
 
         // 验证 mediaDir 是否在允许的目录列表中，增加安全性
-        const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
-        const baseDir = allowedMediaDir ? allowedMediaDir.path : MUSIC_DIR; // 如果无效或未提供，则回退到默认
+        let baseDir;
+        if (mediaDir) {
+            // 首先尝试精确匹配
+            const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
+            if (allowedMediaDir) {
+                baseDir = allowedMediaDir.path;
+                console.log(`[music-info] Matched allowed mediaDir: ${baseDir}`);
+            } else {
+                // 如果提供了 mediaDir 但不在允许列表中，使用它（假设它是有效路径）
+                // 这样可以支持动态媒体目录
+                baseDir = mediaDir;
+                console.log(`[music-info] Using provided mediaDir (not in allowed list): ${mediaDir}`);
+            }
+        } else {
+            // 如果未提供 mediaDir，回退到默认
+            baseDir = MUSIC_DIR;
+            console.log(`[music-info] No mediaDir provided, using default: ${MUSIC_DIR}`);
+        }
         const fullMusicPath = path.join(baseDir, musicPath);
+        console.log(`[music-info] Full music path: ${fullMusicPath}`);
 
        const { source, 'no-write': noWrite, 'original-lyrics': originalLyrics, 'force-match': forceMatch, limit, only } = parsedUrl.query;
        
@@ -185,8 +205,18 @@ const server = http.createServer(async (req, res) => {
         }
 
         const mediaDir = parsedUrl.query.mediaDir;
-        const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
-        const baseDir = allowedMediaDir ? allowedMediaDir.path : MUSIC_DIR;
+        let baseDir;
+        if (mediaDir) {
+            const allowedMediaDir = MEDIA_DIRS.find(d => d.path === mediaDir);
+            if (allowedMediaDir) {
+                baseDir = allowedMediaDir.path;
+            } else {
+                baseDir = mediaDir;
+                console.log(`[fetch-info] Using provided mediaDir: ${mediaDir}`);
+            }
+        } else {
+            baseDir = MUSIC_DIR;
+        }
         const fullMusicPath = path.join(baseDir, musicPath);
 
         // 为了安全性和一致性，从 exec 改为 spawn，并添加所有参数
@@ -616,7 +646,7 @@ const server = http.createServer(async (req, res) => {
                 }
 
                 const extension = path.extname(fullPath).toLowerCase();
-                const isVideo = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'].includes(extension);
+                const isVideo = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.ts', '.flv','.wmv'].includes(extension);
                 const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(extension);
 
                 if (isVideo) {
@@ -740,7 +770,7 @@ const server = http.createServer(async (req, res) => {
             const files = await fs.promises.readdir(fullPath);
             const coverNames = ['cover', 'folder', 'front', 'back'];
             const imageExtensions = ['.jpg', '.jpeg', '.png'];
-            const videoExtensions = ['.mp4', '.mkv', 'avi', '.mov', '.wmv', 'flv', 'webm'];
+            const videoExtensions = ['.mp4', '.mkv', 'avi', '.mov', '.wmv', 'flv', 'webm', '.ts'];
 
             // 1. 查找专辑封面
             for (const name of coverNames) {
@@ -3032,7 +3062,7 @@ server.listen(PORT, () => {
 // --- 新增：批量刮削功能 ---
 async function findVideoFilesRecursively(dir) {
     let videoFiles = [];
-    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm'];
+    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.ts'];
     try {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {

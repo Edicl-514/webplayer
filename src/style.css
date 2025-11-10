@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&display=swap');
+/* Removed external Google Fonts import to improve offline/loading reliability.
+    Use a system/local font stack for Chinese and fallback fonts instead. */
 
 :root {
     --primary-bg: #1a1a1a;
@@ -20,7 +21,8 @@
 }
 
 body {
-    font-family: 'Noto Sans SC', sans-serif;
+    /* Prefer local Noto Sans SC if installed, else fall back to common Chinese/system fonts */
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background: linear-gradient(145deg, #0a1929, #1a1a2e);
     color: var(--primary-text);
     display: flex;
@@ -51,7 +53,7 @@ body {
     overflow: hidden;
     display: flex;
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 2.2);
-    cursor: pointer;
+    /* cursor: pointer; */
     /* 禁用移动端点击高亮效果 */
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
@@ -489,6 +491,7 @@ body {
 }
 .volume-slider {
     -webkit-appearance: none;
+    appearance: none;
     width: 0;
     height: 4px;
     background: var(--secondary-text);
@@ -503,6 +506,7 @@ body {
 }
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
+    appearance: none;
     width: 12px;
     height: 12px;
     background: var(--primary-text);
@@ -843,8 +847,25 @@ body {
         z-index: 4;
     }
     .extra-controls {
+        /* 两行四列的栅格布局以容纳 8 个移动端控件 */
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        column-gap: 8px;
+        row-gap: 12px;
         width: 100%;
-        justify-content: space-around;
+        justify-items: center;
+    }
+    .extra-controls > * {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-width: 0;
+    }
+    .extra-controls .control-btn {
+        margin: 0 auto;
+    }
+    .volume-control {
+        justify-content: center;
     }
     .volume-control:hover .volume-slider {
         width: 60px;
@@ -874,6 +895,13 @@ body {
     .visualization-container {
         display: none;
     }
+    
+    /* 移动端显示歌词时隐藏封面，让歌词区域更大 */
+    /* 通过JS添加lyrics-mode class来控制 */
+    .player-container.lyrics-mode .info-container {
+        display: none !important;
+    }
+    
     /* 移动端播放列表变为覆盖层 */
     .playlist-panel {
         position: absolute;
@@ -909,6 +937,65 @@ body {
     .player-container.playlist-open .player-main {
         filter: blur(8px) brightness(0.5);
         transition: filter 0.35s ease-in-out;
+    }
+
+    /* 移动端将悬浮菜单居中展开，避免超出屏幕 */
+    .subtitle-control .subtitle-options,
+    .network-control .network-options {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        max-width: min(90vw, 320px);
+    }
+    /* 移动端二级菜单向上展开，避免覆盖一级菜单和超出屏幕下部 */
+    /* 移动端：让选项成为相对定位，二级菜单相对于一级菜单的顶部展开 */
+    .subtitle-control .local-subtitle-option,
+    .subtitle-control .transcribe-option,
+    .network-control .cover-options,
+    .network-control .info-options,
+    .network-control .lyrics-options {
+        position: static; /* 取消相对定位 */
+    }
+    .subtitle-control .local-subtitle-list,
+    .subtitle-control .transcribe-model-list {
+        left: 50%;
+        right: auto;
+        bottom: 100%; /* 相对于一级菜单底部向上展开 */
+        top: auto;
+        transform: translateX(-50%);
+        margin-bottom: 10px; /* 与一级菜单保持间距 */
+        max-width: min(90vw, 280px);
+        max-height: 40vh; /* 限制最大高度，避免超出屏幕 */
+        overflow-y: auto; /* 内容过多时滚动 */
+    }
+    .network-control .cover-sources,
+    .network-control .info-sources,
+    .network-control .lyrics-sources {
+        left: 50%;
+        right: auto;
+        bottom: 100%; /* 相对于一级菜单底部向上展开 */
+        top: auto;
+        transform: translateX(-50%);
+        margin-bottom: 10px; /* 与一级菜单保持间距 */
+        max-width: min(90vw, 280px);
+        max-height: 40vh; /* 限制最大高度，避免超出屏幕 */
+        overflow-y: auto; /* 内容过多时滚动 */
+    }
+    /* 二级菜单滚动条样式 */
+    .subtitle-control .local-subtitle-list::-webkit-scrollbar,
+    .subtitle-control .transcribe-model-list::-webkit-scrollbar,
+    .network-control .cover-sources::-webkit-scrollbar,
+    .network-control .info-sources::-webkit-scrollbar,
+    .network-control .lyrics-sources::-webkit-scrollbar {
+        width: 4px;
+    }
+    .subtitle-control .local-subtitle-list::-webkit-scrollbar-thumb,
+    .subtitle-control .transcribe-model-list::-webkit-scrollbar-thumb,
+    .network-control .cover-sources::-webkit-scrollbar-thumb,
+    .network-control .info-sources::-webkit-scrollbar-thumb,
+    .network-control .lyrics-sources::-webkit-scrollbar-thumb {
+        background-color: var(--accent-color);
+        border-radius: 2px;
     }
 }
 
@@ -1640,7 +1727,8 @@ body {
     padding: 10px 15px;
     border-radius: 20px;
     resize: none;
-    font-family: 'Noto Sans SC', sans-serif;
+    /* Use offline-friendly font stack */
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-size: 14px;
     margin-right: 10px;
     transition: border-color 0.2s;
