@@ -806,30 +806,18 @@ const server = http.createServer(async (req, res) => {
                 }
             }
 
-            // 2. 查找视频并生成缩略图
-            const firstVideo = files.find(f => videoExtensions.includes(path.extname(f).toLowerCase()));
-            if (firstVideo) {
-                // Correctly join the path without adding extra slashes if relativePath is the root.
-                const videoPathForThumbnail = relativePath === '/' ? firstVideo : path.join(relativePath, firstVideo);
-                // 确保路径使用 /
-                const encodedVideoPath = videoPathForThumbnail.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
-                res.writeHead(302, { 'Location': `/thumbnail/${encodedVideoPath}?mediaDir=${encodeURIComponent(requestedMediaDir)}` });
-                res.end();
-                return;
-            }
-
-            // 3. 查找图片
+            // 2. 查找图片（优先于视频）
             const firstImage = files.find(f => imageExtensions.includes(path.extname(f).toLowerCase()));
             if (firstImage) {
-                 const streamPath = path.join(fullPath, firstImage);
+                const streamPath = path.join(fullPath, firstImage);
                 const stream = fs.createReadStream(streamPath);
-                
+
                 // 监听客户端断开连接
                 req.on('close', () => stream.destroy());
                 req.on('error', () => stream.destroy());
                 res.on('close', () => stream.destroy());
                 res.on('error', () => stream.destroy());
-                
+
                 stream.on('error', (err) => {
                     console.error(`Error streaming first image ${streamPath}:`, err);
                     if (!res.headersSent) {
@@ -838,13 +826,25 @@ const server = http.createServer(async (req, res) => {
                     }
                     stream.destroy();
                 });
-                
+
                 res.setHeader('Content-Type', getContentType(streamPath));
                 if (!res.headersSent && !res.finished) {
                     stream.pipe(res);
                 } else {
                     stream.destroy();
                 }
+                return;
+            }
+
+            // 3. 查找视频并生成缩略图
+            const firstVideo = files.find(f => videoExtensions.includes(path.extname(f).toLowerCase()));
+            if (firstVideo) {
+                // Correctly join the path without adding extra slashes if relativePath is the root.
+                const videoPathForThumbnail = relativePath === '/' ? firstVideo : path.join(relativePath, firstVideo);
+                // 确保路径使用 /
+                const encodedVideoPath = videoPathForThumbnail.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                res.writeHead(302, { 'Location': `/thumbnail/${encodedVideoPath}?mediaDir=${encodeURIComponent(requestedMediaDir)}` });
+                res.end();
                 return;
             }
             

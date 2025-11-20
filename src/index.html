@@ -913,6 +913,24 @@
         let currentFiles = []; // 保存当前目录的文件列表
         let scrollPositions = {}; // 保存每个路径的滚动位置
 
+        const closeImagePreviewIfOpen = () => {
+            if (window.$ && $.fancybox && $.fancybox.getInstance()) {
+                $.fancybox.close();
+                return true;
+            }
+            return false;
+        };
+
+        const revertHistoryNavigation = () => {
+            setTimeout(() => {
+                try {
+                    history.go(1);
+                } catch (err) {
+                    console.warn('Unable to restore history after closing preview:', err);
+                }
+            }, 0);
+        };
+
         // 添加排序相关的变量
         const sortBy = document.getElementById('sortBy');
         const sortOrder = document.getElementById('sortOrder');
@@ -997,7 +1015,7 @@
                     gridItem.appendChild(fileInfo);
                     
                     // 添加点击事件
-                    gridItem.onclick = () => switchMediaDir(dir.path);
+                    gridItem.onclick = () => switchMediaDir(dir.path, '/', 'push');
                     
                     // 添加到网格容器
                     rootDirsGrid.appendChild(gridItem);
@@ -1011,7 +1029,7 @@
 
         // 切换媒体目录
         // 增加 currentPath 参数，允许在切换媒体目录后直接导航到指定路径
-        async function switchMediaDir(newDir, targetPath = '/') {
+        async function switchMediaDir(newDir, targetPath = '/', historyAction = 'replace') {
             try {
                 const response = await fetch('/api/set-media-dir', {
                     method: 'POST',
@@ -1035,7 +1053,11 @@
                     console.log(`Switched to media directory: ${result.newMediaDir}`);
                     
                     // 更新浏览器历史记录
-                    history.replaceState({ path: currentPath, mediaDir: newDir }, '', `#${currentPath}`);
+                    if (historyAction === 'push') {
+                        history.pushState({ path: currentPath, mediaDir: newDir }, '', `#${currentPath}`);
+                    } else if (historyAction === 'replace') {
+                        history.replaceState({ path: currentPath, mediaDir: newDir }, '', `#${currentPath}`);
+                    }
                 } else {
                     console.error('Failed to switch media directory:', result.message);
                 }
@@ -1484,6 +1506,9 @@
         }
 
         backButton.onclick = async () => {
+            if (closeImagePreviewIfOpen()) {
+                return;
+            }
             // 返回前保存当前滚动位置
             scrollPositions[currentPath] = window.scrollY;
             // 在导航前通知后端停止缩略图生成
@@ -1493,6 +1518,9 @@
         };
 
         homeButton.onclick = async () => {
+            if (closeImagePreviewIfOpen()) {
+                return;
+            }
             // 返回主目录前保存当前滚动位置
             scrollPositions[currentPath] = window.scrollY;
             // 在导航前通知后端停止缩略图生成
@@ -1669,6 +1697,10 @@
 
         // 处理浏览器后退按钮
         window.onpopstate = function(event) {
+            if (closeImagePreviewIfOpen()) {
+                revertHistoryNavigation();
+                return;
+            }
             if (event.state) {
                 const restoreScroll = () => {
                     const savedPosition = scrollPositions[event.state.path];
@@ -1683,7 +1715,7 @@
                     fetchRootDirs();
                 } else if (event.state.mediaDir) {
                     // 切换到指定的媒体目录，并导航到相应的路径
-                    switchMediaDir(event.state.mediaDir, event.state.path).then(restoreScroll);
+                    switchMediaDir(event.state.mediaDir, event.state.path, 'none').then(restoreScroll);
                 } else if (event.state.path) {
                     // 导航到指定路径
                     currentPath = event.state.path;
@@ -2084,6 +2116,11 @@
 </script>
     <script src="vendor/jquery-3.5.1.min.js"></script>
     <script src="vendor/jquery.fancybox.min.js"></script>
+    <script>
+        if (window.jQuery && $.fancybox) {
+            $.fancybox.defaults.hash = false;
+        }
+    </script>
     <!-- 视频刮削面板 -->
     <div id="scraper-panel" class="hidden">
         <button id="closeScraperPanelButton">&times;</button>

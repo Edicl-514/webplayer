@@ -640,8 +640,6 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchMusicCover(song);
         
         // 2. 获取详细信息(也应该很快,只读取本地标签)
-        fetchMusicInfo(song);
-        
         // 3. 获取歌词(可能需要联网,耗时较长)
         // 清空旧歌词,显示加载提示
         currentLyrics = [];
@@ -655,8 +653,11 @@ document.addEventListener('DOMContentLoaded', () => {
             lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">正在搜索歌词...</div>';
         }
         
-        // 异步获取更好的歌词
-        fetchMusicLyrics(song);
+        // 先获取音乐信息，然后再获取歌词(确保 titleFromFilename 等标记被正确更新)
+        fetchMusicInfo(song).then(() => {
+            // 异步获取更好的歌词
+            fetchMusicLyrics(song);
+        });
     
         // The song.src from the server now includes the full path and mediaDir query
         const finalSrcForHowler = song.src;
@@ -718,6 +719,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const title = (song.title || '').trim();
         const artist = (song.artist || '').trim();
         const album = (song.album || '').trim();
+        
+        console.log('[AUTO] Checking song:', { 
+            title, 
+            artist, 
+            album, 
+            titleFromFilename: song.titleFromFilename,
+            userModified: song.userModified 
+        });
         
         // 没有标题，肯定不值得搜索
         if (!title) {
@@ -886,6 +895,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!song.title && songTitle.textContent) { song.title = songTitle.textContent; updated = true; }
                     if (!song.artist && songArtist.textContent) { song.artist = songArtist.textContent; updated = true; }
                     if (!song.album && songAlbum.textContent) { song.album = songAlbum.textContent; updated = true; }
+                    
+                    // 如果成功获取到元数据，标记标题不再是从文件名生成的
+                    if (info.title || info.artist || info.album) {
+                        song.titleFromFilename = false;
+                        updated = true;
+                    }
                 }
 
                 if (updated) {

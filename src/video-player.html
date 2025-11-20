@@ -245,6 +245,45 @@
            let dpOptions; // 提升作用域以便全局访问
            let currentSubtitleUrl = null; // 用于存储当前字幕的URL
            let transcriberModels = []; // 存储从config.json加载的转录模型配置
+
+           const closeImagePreviewIfOpen = () => {
+               if (window.$ && $.fancybox && $.fancybox.getInstance()) {
+                   $.fancybox.close();
+                   return true;
+               }
+               return false;
+           };
+
+           (function setupPreviewBackGuard() {
+               if (!window.history || typeof window.history.pushState !== 'function') {
+                   return;
+               }
+
+               const baseState = { page: 'video-player-base' };
+               const guardState = { page: 'video-player-guard' };
+               history.replaceState(baseState, document.title, window.location.href);
+               history.pushState(guardState, document.title, window.location.href);
+
+               const handlePopstate = (event) => {
+                   if (closeImagePreviewIfOpen()) {
+                       history.pushState(guardState, document.title, window.location.href);
+                       return;
+                   }
+                   window.removeEventListener('popstate', handlePopstate);
+                   if (window.opener && !window.opener.closed) {
+                       window.close();
+                       setTimeout(() => {
+                           if (!window.closed) {
+                               history.back();
+                           }
+                       }, 150);
+                       return;
+                   }
+                   history.back();
+               };
+
+               window.addEventListener('popstate', handlePopstate);
+           })();
    
            // 规范化路径，用于生成一致的 taskId
            function normalizePathForTaskId(path) {
@@ -3086,6 +3125,11 @@
         </script>
         <script src="vendor/jquery-3.5.1.min.js"></script>
         <script src="vendor/jquery.fancybox.min.js"></script>
+        <script>
+            if (window.jQuery && $.fancybox) {
+                $.fancybox.defaults.hash = false;
+            }
+        </script>
         <script>
             // 清理字幕缓存：在页面卸载或播放器关闭时发送请求到后端
             (function() {
