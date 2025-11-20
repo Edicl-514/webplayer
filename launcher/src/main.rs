@@ -475,6 +475,7 @@ impl MyApp {
                 state.child = Some(child);
                 state.status = "Running".to_string();
 
+                // spawn stdout reader
                 let sender_stdout = log_sender.clone();
                 thread::spawn(move || {
                     let reader = BufReader::new(stdout);
@@ -487,7 +488,8 @@ impl MyApp {
                     }
                 });
 
-                let sender_stderr = log_sender;
+                // spawn stderr reader
+                let sender_stderr = log_sender.clone();
                 thread::spawn(move || {
                     let reader = BufReader::new(stderr);
                     for line in reader.lines() {
@@ -495,6 +497,40 @@ impl MyApp {
                             sender_stderr
                                 .send(format!("[{}-stderr] {}", process_name, line))
                                 .ok();
+                        }
+                    }
+                });
+
+                // Spawn a monitor thread to detect if the child exits immediately (e.g., port conflict)
+                let monitor_state = Arc::clone(&process_state);
+                let monitor_sender = log_sender_clone.clone();
+                let monitor_name = process_name;
+                thread::spawn(move || {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        let mut st = monitor_state.lock().unwrap();
+                        if let Some(child_ref) = st.child.as_mut() {
+                            match child_ref.try_wait() {
+                                Ok(Some(exit_status)) => {
+                                    monitor_sender
+                                        .send(format!("[{}] Process exited: {}", monitor_name, exit_status))
+                                        .ok();
+                                    st.status = format!("Exited: {}", exit_status);
+                                    st.child = None;
+                                    break;
+                                }
+                                Ok(None) => {
+                                    // still running
+                                }
+                                Err(e) => {
+                                    monitor_sender
+                                        .send(format!("[{}] try_wait error: {}", monitor_name, e))
+                                        .ok();
+                                }
+                            }
+                        } else {
+                            // no child to monitor
+                            break;
                         }
                     }
                 });
@@ -507,6 +543,23 @@ impl MyApp {
         }
     }
 
+    fn is_process_running(process_state: &Arc<Mutex<ProcessState>>) -> bool {
+        let mut st = process_state.lock().unwrap();
+        if let Some(child) = st.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    // process has exited — cleanup
+                    st.status = format!("Exited: {}", status);
+                    st.child = None;
+                    return false;
+                }
+                Ok(None) => return true,
+                Err(_) => return true,
+            }
+        }
+        false
+    }
+
     fn stop_process(
         process_state: Arc<Mutex<ProcessState>>,
         name: &str,
@@ -514,16 +567,63 @@ impl MyApp {
     ) {
         let mut state = process_state.lock().unwrap();
         if let Some(mut child) = state.child.take() {
+            let pid = child.id();
+            let mut stopped_normally = false;
             match child.kill() {
                 Ok(_) => {
+                    // give it a moment and wait
                     let _ = child.wait();
-                    log_sender.send(format!("[{}] Process stopped.", name)).ok();
-                    state.status = "Stopped".to_string();
+                    stopped_normally = true;
                 }
                 Err(e) => {
-                    let error_msg = format!("[{}] Failed to stop process: {}", name, e);
-                    log_sender.send(error_msg.clone()).ok();
-                    state.status = error_msg;
+                    log_sender
+                        .send(format!("[{}] child.kill() error: {}", name, e))
+                        .ok();
+                }
+            }
+
+            if stopped_normally {
+                log_sender.send(format!("[{}] Process stopped.", name)).ok();
+                state.status = "Stopped".to_string();
+            } else {
+                // Fallback: try to force-kill the process tree on Windows using taskkill
+                #[cfg(target_os = "windows")]
+                {
+                    let pid_str = pid.to_string();
+                    match Command::new("taskkill").args(["/PID", &pid_str, "/T", "/F"]).output() {
+                        Ok(output) => {
+                            if output.status.success() {
+                                log_sender
+                                    .send(format!("[{}] taskkill succeeded for PID {}.", name, pid))
+                                    .ok();
+                                state.status = "Stopped (taskkill)".to_string();
+                            } else {
+                                log_sender
+                                    .send(format!(
+                                        "[{}] taskkill failed for PID {}. stderr: {}",
+                                        name,
+                                        pid,
+                                        String::from_utf8_lossy(&output.stderr)
+                                    ))
+                                    .ok();
+                                state.status = format!("Failed to stop: taskkill failed (PID {})", pid);
+                            }
+                        }
+                        Err(e) => {
+                            log_sender
+                                .send(format!("[{}] Failed to run taskkill: {}", name, e))
+                                .ok();
+                            state.status = format!("Failed to stop: {}", e);
+                        }
+                    }
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    log_sender
+                        .send(format!("[{}] Unable to guarantee stop; child.kill() failed.", name))
+                        .ok();
+                    state.status = "Failed to stop process".to_string();
                 }
             }
         } else {
@@ -548,11 +648,17 @@ impl MyApp {
                 // Node Server
                 ui.label("Node Server:");
                 if ui.button("Start").clicked() {
-                    let sender = self.log_sender.clone();
-                    let state = Arc::clone(&self.node_server);
-                    thread::spawn(move || {
-                        Self::spawn_process("node", &["server.js"], Some("./src"), sender, state, "Node");
-                    });
+                    if MyApp::is_process_running(&self.node_server) {
+                        self.log_sender
+                            .send("[Node] Already running, start skipped.".to_string())
+                            .ok();
+                    } else {
+                        let sender = self.log_sender.clone();
+                        let state = Arc::clone(&self.node_server);
+                        thread::spawn(move || {
+                            Self::spawn_process("node", &["server.js"], Some("./src"), sender, state, "Node");
+                        });
+                    }
                 }
                 if ui.button("Stop").clicked() {
                     MyApp::stop_process(Arc::clone(&self.node_server), "Node", &self.log_sender);
@@ -571,18 +677,24 @@ impl MyApp {
                 // Python Backend
                 ui.label("Python Backend:");
                 if ui.button("Start").clicked() {
-                    let sender = self.log_sender.clone();
-                    let state = Arc::clone(&self.python_server);
-                    thread::spawn(move || {
-                        Self::spawn_process(
-                            "python",
-                            &["subtitle_process_backend.py"],
-                            Some("./src"),
-                            sender,
-                            state,
-                            "Python",
-                        );
-                    });
+                    if MyApp::is_process_running(&self.python_server) {
+                        self.log_sender
+                            .send("[Python] Already running, start skipped.".to_string())
+                            .ok();
+                    } else {
+                        let sender = self.log_sender.clone();
+                        let state = Arc::clone(&self.python_server);
+                        thread::spawn(move || {
+                            Self::spawn_process(
+                                "python",
+                                &["subtitle_process_backend.py"],
+                                Some("./src"),
+                                sender,
+                                state,
+                                "Python",
+                            );
+                        });
+                    }
                 }
                 if ui.button("Stop").clicked() {
                     MyApp::stop_process(Arc::clone(&self.python_server), "Python", &self.log_sender);
@@ -865,7 +977,9 @@ impl MyApp {
                 let mut model_move_down: Option<usize> = None;
 
                 for (i, model) in &mut self.config.models.iter_mut().enumerate() {
-                    ui.collapsing(model.model_path.clone(), |ui| {
+                    egui::CollapsingHeader::new(model.model_path.clone())
+                        .id_source(format!("model_{}", i))
+                        .show(ui, |ui| {
                         // Move up/down and remove controls
                         ui.horizontal(|ui| {
                             if ui.small_button("↑").clicked() {
@@ -1049,7 +1163,7 @@ impl MyApp {
                                     .desired_width(200.0));
                                 ui.end_row();
                             });
-                    });
+                        });
                 }
                 // Apply model move up
                 if let Some(i) = model_move_up {
@@ -1079,7 +1193,9 @@ impl MyApp {
                 let mut t_move_down: Option<usize> = None;
 
                 for (i, tmodel) in &mut self.config.transcriber_models.iter_mut().enumerate() {
-                    ui.collapsing(format!("{}: {}", tmodel.model_source, tmodel.model), |ui| {
+                    egui::CollapsingHeader::new(format!("{}: {}", tmodel.model_source, tmodel.model))
+                        .id_source(format!("transcriber_model_{}", i))
+                        .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Source:");
                             ui.add(egui::TextEdit::singleline(&mut tmodel.model_source).desired_width(120.0));
