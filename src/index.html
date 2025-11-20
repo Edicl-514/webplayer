@@ -1666,26 +1666,140 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
+        // --- Thumbnail lazy loading queue (prevents flooding the server when scrolling fast) ---
+        const MAX_CONCURRENT_THUMBNAIL_LOADS = 6;
+        const thumbnailLoadQueue = [];
+        const queuedThumbnails = new Set();
+        let activeThumbnailLoads = 0;
+        let thumbnailObserver = null;
 
-        // Intersection Observer for lazy loading
-        const lazyLoadImages = () => {
-            const lazyImages = document.querySelectorAll('img.lazy');
-            const observer = new IntersectionObserver((entries, observer) => {
+        function distanceToViewport(element) {
+            const rect = element.getBoundingClientRect();
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+            if (rect.top >= 0 && rect.bottom <= viewportHeight) {
+                return 0;
+            }
+            if (rect.bottom < 0) {
+                return Math.abs(rect.bottom);
+            }
+            return rect.top - viewportHeight;
+        }
+
+        function isWithinPrefetchWindow(element) {
+            const rect = element.getBoundingClientRect();
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+            const buffer = 300; // allow a small lead so scrolling still feels instant
+            return rect.bottom >= -buffer && rect.top <= viewportHeight + buffer;
+        }
+
+        function ensureThumbnailObserver() {
+            if (thumbnailObserver) {
+                return thumbnailObserver;
+            }
+            thumbnailObserver = new IntersectionObserver((entries) => {
                 entries.forEach(entry => {
+                    const img = entry.target;
                     if (entry.isIntersecting) {
-                        const img = entry.target;
-                        img.src = img.dataset.src;
-                        img.classList.remove('lazy');
-                        observer.unobserve(img);
+                        queueThumbnailLoad(img);
+                    } else {
+                        cancelQueuedThumbnail(img);
                     }
                 });
             }, {
-                rootMargin: '0px 0px 100px 0px' // Load images 100px before they enter viewport
+                rootMargin: '0px 0px 200px 0px',
+                threshold: 0.01
             });
+            return thumbnailObserver;
+        }
+
+        function queueThumbnailLoad(img) {
+            if (!img.dataset.src || img.dataset.thumbnailLoading === '1' || queuedThumbnails.has(img)) {
+                return;
+            }
+            queuedThumbnails.add(img);
+            thumbnailLoadQueue.push(img);
+            processThumbnailQueue();
+        }
+
+        function cancelQueuedThumbnail(img) {
+            if (!queuedThumbnails.has(img) || img.dataset.thumbnailLoading === '1') {
+                return;
+            }
+            queuedThumbnails.delete(img);
+            const idx = thumbnailLoadQueue.indexOf(img);
+            if (idx !== -1) {
+                thumbnailLoadQueue.splice(idx, 1);
+            }
+        }
+
+        function processThumbnailQueue() {
+            if (!thumbnailLoadQueue.length || activeThumbnailLoads >= MAX_CONCURRENT_THUMBNAIL_LOADS) {
+                return;
+            }
+
+            thumbnailLoadQueue.sort((a, b) => distanceToViewport(a) - distanceToViewport(b));
+
+            while (activeThumbnailLoads < MAX_CONCURRENT_THUMBNAIL_LOADS && thumbnailLoadQueue.length) {
+                const nextImg = thumbnailLoadQueue.shift();
+                queuedThumbnails.delete(nextImg);
+
+                if (!isWithinPrefetchWindow(nextImg)) {
+                    continue; // Skip items that already left the viewport region
+                }
+
+                startThumbnailLoad(nextImg);
+            }
+        }
+
+        function startThumbnailLoad(img) {
+            if (!img.dataset.src) {
+                return;
+            }
+
+            activeThumbnailLoads++;
+            img.dataset.thumbnailLoading = '1';
+
+            const finalize = () => {
+                img.classList.remove('lazy');
+                delete img.dataset.thumbnailLoading;
+                delete img.dataset.lazyBound;
+                activeThumbnailLoads = Math.max(0, activeThumbnailLoads - 1);
+                if (thumbnailObserver) {
+                    thumbnailObserver.unobserve(img);
+                }
+                processThumbnailQueue();
+            };
+
+            const handleComplete = () => finalize();
+
+            img.addEventListener('load', handleComplete, { once: true });
+            img.addEventListener('error', handleComplete, { once: true });
+
+            img.src = img.dataset.src;
+        }
+
+        // Re-sort the queue on scroll so newly visible rows jump to the front
+        window.addEventListener('scroll', () => {
+            if (thumbnailLoadQueue.length) {
+                processThumbnailQueue();
+            }
+        }, { passive: true });
+
+
+        // Intersection Observer for lazy loading
+        const lazyLoadImages = () => {
+            const observer = ensureThumbnailObserver();
+            const lazyImages = document.querySelectorAll('img.lazy');
 
             lazyImages.forEach(img => {
+                if (img.dataset.lazyBound === '1') {
+                    return;
+                }
+                img.dataset.lazyBound = '1';
                 observer.observe(img);
             });
+
+            processThumbnailQueue();
         };
 
         // 重新显示文件时调用懒加载
