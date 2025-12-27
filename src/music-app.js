@@ -2829,6 +2829,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             statusHtml += '</ul></div>';
 
+            // 转录模型
+            statusHtml += '<div class="model-status-category">';
+            statusHtml += `<h5>Whisper 转录模型 (当前: ${data.transcription_models?.active || 'N/A'})</h5>`;
+            statusHtml += '<ul class="chat-selection-list model-selection-list">';
+            (data.transcription_models?.available || []).forEach(model => {
+                const isActive = model === data.transcription_models.active;
+                statusHtml += `<li><button class="${isActive ? 'active' : ''}" onclick="switchModel('transcription', '${model}')" ${isActive ? 'disabled' : ''}>${model}</button></li>`;
+            });
+            statusHtml += '</ul></div>';
+
             // 纠错/翻译模型
             statusHtml += '<div class="model-status-category">';
             statusHtml += `<h5>大语言模型 (当前: ${data.corrector_models?.active || 'N/A'})</h5>`;
@@ -2852,13 +2862,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 切换模型：type = 'semantic' | 'corrector'
+    // 切换模型：type = 'semantic' | 'corrector' | 'transcription'
     async function switchModel(type, identifier) {
-        const loadingMsg = addChatMessage(`正在切换 ${type === 'semantic' ? '语义搜索' : '大语言'} 模型...`, 'bot');
+        const typeName = type === 'semantic' ? '语义搜索' : type === 'transcription' ? 'Whisper 转录' : '大语言';
+        const loadingMsg = addChatMessage(`正在切换 ${typeName} 模型...`, 'bot');
         const url = `/api/switch-model/${type}`;
-        const body = type === 'semantic'
-            ? JSON.stringify({ model_name: identifier })
-            : JSON.stringify({ model_index: identifier });
+        
+        let body;
+        if (type === 'semantic') {
+            body = JSON.stringify({ model_name: identifier });
+        } else if (type === 'transcription') {
+            body = JSON.stringify({ model_name: identifier });
+        } else {
+            body = JSON.stringify({ model_index: identifier });
+        }
 
         try {
             const response = await fetch(url, {

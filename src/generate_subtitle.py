@@ -27,34 +27,8 @@ except ImportError:
     sys.exit(1)
 
 
-# --- CLI 参数解析 ---
-parser = argparse.ArgumentParser(description="Generate VTT subtitles using OpenAI Whisper-style models")
-parser.add_argument('input', help='Path to video or audio file')
-parser.add_argument('--model-source', choices=['pretrained', 'local'], default='pretrained',
-                    help='Where to load the model from: pretrained (download) or local (filesystem)')
-parser.add_argument('--model', default='large-v3',
-                    help='Model name for pretrained (e.g. large-v3) or local model path (e.g. D:\\\\temp\\\\webplayer\\\\models\\\\... )')
-parser.add_argument('--task', choices=['transcribe', 'translate'], default=None,
-                    help="Task for model.transcribe; if omitted, whisper will auto-detect or use default")
-parser.add_argument('--language', default=None, help='Language code to pass to transcribe (e.g. ja, zh)')
-parser.add_argument('--vad-filter', action='store_true', help='Enable VAD filtering if supported by model')
-parser.add_argument('--vad-threshold', type=float, default=None, help='VAD threshold for speech detection. Overrides dynamic calculation.')
-parser.add_argument('--condition-on-previous-text', action='store_true',
-                    help='Whether to enable condition_on_previous_text when transcribing')
-parser.add_argument('--transcribe-kwargs', default=None,
-                    help='Additional transcribe keyword args as JSON string, e.g. "{\"temperature\":0.0}"')
-parser.add_argument('--output-dir', default='./cache/subtitles/', help='Directory to write VTT file')
-parser.add_argument('--merge-threshold', type=float, default=1.0,
-                    help='Seconds threshold to merge adjacent identical segments')
-parser.add_argument('--dense-subtitles', action='store_true',
-                    help='Generate denser subtitles with shorter lines, based on word-level timestamps.')
-parser.add_argument('--max-chars-per-line', type=int, default=30,
-                    help='Maximum number of characters per subtitle line in dense mode.')
+# --- Helper Functions ---
 
-args = parser.parse_args()
-audio_file_path = args.input
-
-# --- 音频预处理（响度标准化） ---
 def preprocess_audio_for_vad(audio_path, output_dir, quiet_threshold=-30.0, target_loudness=-20.0):
     """
     分析音频响度。如果太安静，则施加增益并保存一个新版本。
@@ -101,14 +75,7 @@ def preprocess_audio_for_vad(audio_path, output_dir, quiet_threshold=-30.0, targ
     except Exception as e:
         print(f"[Pre-process Error] An unexpected error occurred: {e}. Using original.")
         return audio_path
-# 如果音频太安静，此函数会增加音量并返回一个新文件路径
-processed_audio_path = preprocess_audio_for_vad(audio_file_path, args.output_dir)
 
-
-# 记录开始时间
-start_timestamp = int(datetime.datetime.now().timestamp())
-
-# --- VAD 动态阈值计算 ---
 def calculate_dynamic_vad_threshold(audio_path):
     """分析音频响度并返回一个动态的 VAD 阈值。"""
     try:
@@ -143,7 +110,6 @@ def calculate_dynamic_vad_threshold(audio_path):
         print(f"[VAD Error] An unexpected error occurred during loudness analysis: {e}. Using default VAD threshold.")
         return 0.2
 
-# --- 模型加载 ---
 def load_model(model_source: str, model_identifier: str):
     """使用 faster-whisper 加载模型。
     model_identifier 可以是 Hugging Face 上的模型名，也可以是本地 CTranslate2 模型的路径。
@@ -156,8 +122,6 @@ def load_model(model_source: str, model_identifier: str):
     # 例如: device="cuda", compute_type="float16"
     return WhisperModel(model_identifier, device="auto", compute_type="int8")
 
-
-# 解析 transcribe kwargs（由 flag 合并 JSON）
 DEFAULT_TRANSCRIBE_PARAMS = {
     # 基于提供的 transcribe 函数签名设定默认值
     'language': None,
@@ -193,38 +157,39 @@ DEFAULT_TRANSCRIBE_PARAMS = {
     'language_detection_segments': 1,
 }
 
-
-def build_transcribe_kwargs(args):
+def build_transcribe_kwargs(task='transcribe', language=None, condition_on_previous_text=False, 
+                            vad_filter=False, vad_threshold=None, transcribe_kwargs_json=None,
+                            processed_audio_path=None):
     # 从默认参数拷贝
     kwargs = DEFAULT_TRANSCRIBE_PARAMS.copy()
-    # 显式参数（CLI 覆盖默认值）
-    if args.task:
-        kwargs['task'] = args.task
-    if args.language:
-        kwargs['language'] = args.language
+    
+    if task:
+        kwargs['task'] = task
+    if language:
+        kwargs['language'] = language
     # condition_on_previous_text 在部分 whisper API 里是 transcribe 的参数
-    if args.condition_on_previous_text:
+    if condition_on_previous_text:
         kwargs['condition_on_previous_text'] = True
     # vad_filter （如果模型/库支持）
-    if args.vad_filter:
+    if vad_filter:
         kwargs['vad_filter'] = True
         
         # VAD 阈值处理
-        if args.vad_threshold is not None:
+        if vad_threshold is not None:
             # 优先使用用户指定的阈值
-            vad_threshold = args.vad_threshold
-            print(f"[VAD] Using user-specified VAD threshold: {vad_threshold}")
+            final_vad_threshold = vad_threshold
+            print(f"[VAD] Using user-specified VAD threshold: {final_vad_threshold}")
         else:
             # 否则，动态计算阈值
-            vad_threshold = calculate_dynamic_vad_threshold(processed_audio_path) # 注意: 传递处理过的音频路径
+            final_vad_threshold = calculate_dynamic_vad_threshold(processed_audio_path) # 注意: 传递处理过的音频路径
         
         # 更新 VAD 参数
-        kwargs['vad_parameters'] = {"threshold": vad_threshold}
+        kwargs['vad_parameters'] = {"threshold": final_vad_threshold}
 
     # 合并来自 --transcribe-kwargs 的 JSON
-    if args.transcribe_kwargs:
+    if transcribe_kwargs_json:
         try:
-            extra = json.loads(args.transcribe_kwargs)
+            extra = json.loads(transcribe_kwargs_json)
             if not isinstance(extra, dict):
                 print("--transcribe-kwargs must be a JSON object/dict. Ignoring.")
             else:
@@ -236,17 +201,6 @@ def build_transcribe_kwargs(args):
     kwargs['word_timestamps'] = True
     return kwargs
 
-
-model = load_model(args.model_source, args.model)
-
-transcribe_kwargs = build_transcribe_kwargs(args)
-
-# 使用模型处理文件
-print(f"Transcribing {processed_audio_path} (from original: {audio_file_path}) with kwargs: {transcribe_kwargs}")
-segments, info = model.transcribe(processed_audio_path, **transcribe_kwargs)
-
-# segment 生成器只能迭代一次，所以我们先把它转换成一个列表
-segments = list(segments)
 def seconds_to_vtt_time(seconds):
     """将秒数转换为 VTT 时间格式 (HH:MM:SS.mmm)"""
     hours = int(seconds // 3600)
@@ -255,10 +209,6 @@ def seconds_to_vtt_time(seconds):
     millisecs = int((seconds - int(seconds)) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millisecs:03d}"
 
-# 生成与视频文件同名的 VTT 文件路径（使用 CLI 提供的 --output-dir）
-output_dir = args.output_dir
-os.makedirs(output_dir, exist_ok=True)
-base_name = os.path.splitext(os.path.basename(audio_file_path))[0]
 def compute_file_hash(path, length=8):
     """Compute a short hex hash of a file's contents. Returns fallback timestamp on error."""
     try:
@@ -268,13 +218,7 @@ def compute_file_hash(path, length=8):
                 h.update(chunk)
         return h.hexdigest()[:length]
     except Exception:
-        return str(start_timestamp)
-
-# 使用音频文件内容的哈希避免输出文件名冲突
-hash_suffix = compute_file_hash(audio_file_path)
-vtt_file_path = os.path.join(output_dir, f"{base_name}_{hash_suffix}_transcribe.vtt")
-
-# --- 字幕生成函数 ---
+        return str(int(datetime.datetime.now().timestamp()))
 
 def generate_dense_segments(segments, max_chars=30):
     """
@@ -369,8 +313,6 @@ def generate_dense_segments(segments, max_chars=30):
             
     return [s for s in dense_segments if s['text']]
 
-
-# 字幕后处理函数
 def post_process_subtitles(segments, merge_threshold=1.0):
     """
     后处理字幕段.
@@ -404,52 +346,124 @@ def post_process_subtitles(segments, merge_threshold=1.0):
 
     return merged_segments
 
-# --- 字幕生成与后处理 ---
-
-# 根据命令行参数选择字幕处理方式
-if args.dense_subtitles:
-    print(f"\n[Post-process] Generating dense subtitles with max {args.max_chars_per_line} chars per line.")
-    # 对于密集模式，我们直接使用原始的 faster-whisper segment 对象，因为它包含词信息
-    processed_segments = generate_dense_segments(segments, max_chars=args.max_chars_per_line)
-else:
-    print(f"\n[Post-process] Merging adjacent identical segments with threshold: {args.merge_threshold}s")
-    # 对于普通模式，需要先将 segment 对象转换为字典列表
-    openai_style_segments = [{
-        'start': s.start,
-        'end': s.end,
-        'text': s.text
-    } for s in segments]
-    processed_segments = post_process_subtitles(openai_style_segments, merge_threshold=args.merge_threshold)
-
-# 写入 VTT 文件
-with open(vtt_file_path, 'w', encoding='utf-8') as f:
-    # 写入 VTT 头部
-    f.write("WEBVTT FILE\n\n")
+def run_transcription(audio_file_path, model_source='pretrained', model_identifier='large-v3', 
+                      task='transcribe', language=None, vad_filter=False, vad_threshold=None, 
+                      condition_on_previous_text=False, transcribe_kwargs_json=None, 
+                      output_dir='./cache/subtitles/', merge_threshold=1.0, 
+                      dense_subtitles=False, max_chars_per_line=30, 
+                      loaded_model=None):
     
-    # 写入每个经过处理的字幕段
-    for i, segment in enumerate(processed_segments, 1):
-        start_time = seconds_to_vtt_time(segment['start'])
-        end_time = seconds_to_vtt_time(segment['end'])
-        text = segment['text'].strip()
+    start_timestamp = int(datetime.datetime.now().timestamp())
+    
+    # Preprocess
+    processed_audio_path = preprocess_audio_for_vad(audio_file_path, output_dir)
+    
+    # Load model if not provided
+    if loaded_model:
+        model = loaded_model
+    else:
+        model = load_model(model_source, model_identifier)
         
-        # 再次检查以防万一
-        if not text:
-            continue
-            
-        f.write(f"{i}\n")
-        f.write(f"{start_time} --> {end_time}\n")
-        f.write(f"{text}\n\n")
-
-print(f"\n字幕已保存为 VTT 格式: {vtt_file_path}")
-
-# --- 清理临时文件 ---
-if processed_audio_path != audio_file_path:
+    # Build kwargs
+    transcribe_kwargs = build_transcribe_kwargs(
+        task=task, language=language, condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter, vad_threshold=vad_threshold, 
+        transcribe_kwargs_json=transcribe_kwargs_json,
+        processed_audio_path=processed_audio_path
+    )
+    
     try:
-        if os.path.exists(processed_audio_path):
-            print(f"[Cleanup] Deleting temporary boosted audio file: {processed_audio_path}")
-            os.remove(processed_audio_path)
-    except OSError as e:
-        print(f"[Cleanup Error] Failed to delete temporary file: {e}")
+        print(f"Transcribing {processed_audio_path} (from original: {audio_file_path}) with kwargs: {transcribe_kwargs}")
+    except UnicodeEncodeError:
+        # Fallback for consoles that don't support full unicode (e.g. Windows GBK)
+        safe_msg = f"Transcribing {processed_audio_path} (from original: {audio_file_path}) with kwargs: {transcribe_kwargs}"
+        print(safe_msg.encode(sys.stdout.encoding or 'utf-8', errors='replace').decode(sys.stdout.encoding or 'utf-8'))
+    
+    # Transcribe
+    segments, info = model.transcribe(processed_audio_path, **transcribe_kwargs)
+    segments = list(segments) # Consume generator
+    
+    # Post-process
+    if dense_subtitles:
+        print(f"\n[Post-process] Generating dense subtitles with max {max_chars_per_line} chars per line.")
+        processed_segments = generate_dense_segments(segments, max_chars=max_chars_per_line)
+    else:
+        print(f"\n[Post-process] Merging adjacent identical segments with threshold: {merge_threshold}s")
+        openai_style_segments = [{'start': s.start, 'end': s.end, 'text': s.text} for s in segments]
+        processed_segments = post_process_subtitles(openai_style_segments, merge_threshold=merge_threshold)
+        
+    # Save VTT
+    os.makedirs(output_dir, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(audio_file_path))[0]
+    
+    # Use original file for hash to be consistent
+    hash_suffix = compute_file_hash(audio_file_path)
+    vtt_file_path = os.path.join(output_dir, f"{base_name}_{hash_suffix}_transcribe.vtt")
+    
+    with open(vtt_file_path, 'w', encoding='utf-8') as f:
+        f.write("WEBVTT FILE\n\n")
+        for i, segment in enumerate(processed_segments, 1):
+            start_time = seconds_to_vtt_time(segment['start'])
+            end_time = seconds_to_vtt_time(segment['end'])
+            text = segment['text'].strip()
+            if not text: continue
+            f.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
+            
+    print(f"\n字幕已保存为 VTT 格式: {vtt_file_path}")
+    
+    # Cleanup
+    if processed_audio_path != audio_file_path:
+        try:
+            if os.path.exists(processed_audio_path):
+                print(f"[Cleanup] Deleting temporary boosted audio file: {processed_audio_path}")
+                os.remove(processed_audio_path)
+        except OSError as e:
+            print(f"[Cleanup Error] Failed to delete temporary file: {e}")
+            
+    end_timestamp = int(datetime.datetime.now().timestamp())
+    print(f"处理时间: {end_timestamp - start_timestamp}")
+    
+    return vtt_file_path
 
-end_timestamp = int(datetime.datetime.now().timestamp())
-print(f"处理时间: {end_timestamp - start_timestamp}")
+if __name__ == "__main__":
+    # --- CLI 参数解析 ---
+    parser = argparse.ArgumentParser(description="Generate VTT subtitles using OpenAI Whisper-style models")
+    parser.add_argument('input', help='Path to video or audio file')
+    parser.add_argument('--model-source', choices=['pretrained', 'local'], default='pretrained',
+                        help='Where to load the model from: pretrained (download) or local (filesystem)')
+    parser.add_argument('--model', default='large-v3',
+                        help='Model name for pretrained (e.g. large-v3) or local model path (e.g. D:\\\\temp\\\\webplayer\\\\models\\\\... )')
+    parser.add_argument('--task', choices=['transcribe', 'translate'], default=None,
+                        help="Task for model.transcribe; if omitted, whisper will auto-detect or use default")
+    parser.add_argument('--language', default=None, help='Language code to pass to transcribe (e.g. ja, zh)')
+    parser.add_argument('--vad-filter', action='store_true', help='Enable VAD filtering if supported by model')
+    parser.add_argument('--vad-threshold', type=float, default=None, help='VAD threshold for speech detection. Overrides dynamic calculation.')
+    parser.add_argument('--condition-on-previous-text', action='store_true',
+                        help='Whether to enable condition_on_previous_text when transcribing')
+    parser.add_argument('--transcribe-kwargs', default=None,
+                        help='Additional transcribe keyword args as JSON string, e.g. "{\"temperature\":0.0}"')
+    parser.add_argument('--output-dir', default='./cache/subtitles/', help='Directory to write VTT file')
+    parser.add_argument('--merge-threshold', type=float, default=1.0,
+                        help='Seconds threshold to merge adjacent identical segments')
+    parser.add_argument('--dense-subtitles', action='store_true',
+                        help='Generate denser subtitles with shorter lines, based on word-level timestamps.')
+    parser.add_argument('--max-chars-per-line', type=int, default=30,
+                        help='Maximum number of characters per subtitle line in dense mode.')
+
+    args = parser.parse_args()
+    
+    run_transcription(
+        audio_file_path=args.input,
+        model_source=args.model_source,
+        model_identifier=args.model,
+        task=args.task,
+        language=args.language,
+        vad_filter=args.vad_filter,
+        vad_threshold=args.vad_threshold,
+        condition_on_previous_text=args.condition_on_previous_text,
+        transcribe_kwargs_json=args.transcribe_kwargs,
+        output_dir=args.output_dir,
+        merge_threshold=args.merge_threshold,
+        dense_subtitles=args.dense_subtitles,
+        max_chars_per_line=args.max_chars_per_line
+    )

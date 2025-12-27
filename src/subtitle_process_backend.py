@@ -4,13 +4,25 @@ from urllib.parse import unquote
 from sentence_transformers import SentenceTransformer
 import faiss
 import os
+import sys
 import pickle
 import hashlib
 import torch
 import semantic_search_logic as logic
+
+# 解决 Windows 下控制台输出编码问题
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass # Python < 3.7
+
 from process_subtitle import VTTCorrector, setup_model_directory, _set_progress_callback, _set_current_file_info
 from generate_glossary import GlossaryGenerator
 import queue
+import generate_subtitle
+import json
 
 # --- 全局变量和初始化 ---
 app = Flask(__name__)
@@ -23,6 +35,24 @@ CACHE_DIR = os.path.join(".", "cache", "vectordata")
 
 # 字幕纠错模型
 CORRECTOR = None
+
+# 视频转录模型
+WHISPER_MODEL = None
+CURRENT_WHISPER_MODEL_CONFIG = None
+TRANSCRIBER_CONFIGS = []
+
+def load_transcriber_configs():
+    global TRANSCRIBER_CONFIGS
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            TRANSCRIBER_CONFIGS = config.get('transcriber_models', [])
+    except Exception as e:
+        print(f"加载配置文件失败: {e}")
+        TRANSCRIBER_CONFIGS = []
+
+load_transcriber_configs()
 
 # 运行中的任务管理（存储正在处理的任务，用于取消）
 import threading
@@ -58,6 +88,43 @@ def load_corrector_model():
         except Exception as e:
             print(f"错误: 初始化字幕纠错/翻译模块失败: {e}")
             print("  - 请确保 'models' 目录下有正确的模型文件和 'model_config.json' 配置文件。")
+
+def load_transcription_model(model_index=0):
+    """在服务启动时加载 Whisper 转录模型。"""
+    global WHISPER_MODEL, CURRENT_WHISPER_MODEL_CONFIG
+    
+    if not TRANSCRIBER_CONFIGS:
+        print("未找到转录模型配置。")
+        return
+
+    if model_index < 0 or model_index >= len(TRANSCRIBER_CONFIGS):
+        print(f"无效的模型索引: {model_index}")
+        return
+
+    config = TRANSCRIBER_CONFIGS[model_index]
+    model_identifier = config.get('model')
+    model_source = config.get('model-source', 'pretrained')
+    
+    # 检查是否已经加载
+    if WHISPER_MODEL is not None and CURRENT_WHISPER_MODEL_CONFIG == config:
+        print(f"Whisper 模型 {model_identifier} 已经加载。")
+        return
+
+    print(f"正在加载 Whisper 转录模型 ({model_identifier})...")
+    try:
+        # 卸载旧模型（如果有）
+        if WHISPER_MODEL is not None:
+            del WHISPER_MODEL
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        WHISPER_MODEL = generate_subtitle.load_model(model_source, model_identifier)
+        CURRENT_WHISPER_MODEL_CONFIG = config
+        print(f"Whisper 转录模型 ({model_identifier}) 加载完毕。")
+    except Exception as e:
+        print(f"加载 Whisper 模型失败: {e}")
+        WHISPER_MODEL = None
+        CURRENT_WHISPER_MODEL_CONFIG = None
 
 # --- 索引管理 ---
 def get_or_build_index(vtt_file, chunk_params, force_rebuild=False):
@@ -496,6 +563,9 @@ AVAILABLE_SEMANTIC_MODELS = [
     "moka-ai/m3e-base"
 ]
 
+# 可用的 Whisper 转录模型列表
+# AVAILABLE_TRANSCRIPTION_MODELS = [] # 现在从 config.json 动态加载
+
 @app.route('/api/models', methods=['GET'])
 def get_available_models():
     """
@@ -535,6 +605,22 @@ def get_available_models():
     # 获取语义搜索模型
     active_semantic_model = MODEL_NAME if MODEL is not None else "N/A"
 
+    # 获取转录模型
+    transcription_models = []
+    for cfg in TRANSCRIBER_CONFIGS:
+        # 使用 model 字段作为显示名称，如果是路径则取文件名
+        name = cfg.get('model', 'Unknown')
+        if os.path.sep in name or '/' in name:
+            name = os.path.basename(name)
+        transcription_models.append(name)
+
+    active_transcription_model = "N/A"
+    if CURRENT_WHISPER_MODEL_CONFIG:
+        name = CURRENT_WHISPER_MODEL_CONFIG.get('model', 'Unknown')
+        if os.path.sep in name or '/' in name:
+            name = os.path.basename(name)
+        active_transcription_model = name
+
     return jsonify({
         "semantic_search_models": {
             "available": AVAILABLE_SEMANTIC_MODELS,
@@ -544,6 +630,10 @@ def get_available_models():
             "available": corrector_models,
             "active": active_corrector_model,
             "is_online": is_online
+        },
+        "transcription_models": {
+            "available": transcription_models,
+            "active": active_transcription_model
         }
     })
 
@@ -628,6 +718,44 @@ def switch_semantic_model():
         return jsonify({"error": f"切换模型失败: {str(e)}"}), 500
 
 
+@app.route('/api/switch_model/transcription', methods=['POST'])
+def switch_transcription_model():
+    """
+    切换 Whisper 转录模型。
+    请求体: {"model_name": "medium"}
+    """
+    data = request.get_json()
+    if not data or 'model_name' not in data:
+        return jsonify({"error": "请求体中缺少 'model_name'"}), 400
+
+    model_name = data['model_name']
+
+    # 查找对应的配置索引
+    target_index = -1
+    for i, cfg in enumerate(TRANSCRIBER_CONFIGS):
+        name = cfg.get('model', '')
+        if os.path.basename(name) == model_name or name == model_name:
+            target_index = i
+            break
+    
+    if target_index != -1:
+        try:
+            print(f"正在切换 Whisper 转录模型至: {model_name}...")
+            load_transcription_model(target_index)
+            
+            if WHISPER_MODEL is not None:
+                return jsonify({
+                    "message": f"Whisper 转录模型已切换至: {model_name}"
+                })
+            else:
+                return jsonify({"error": "模型加载失败"}), 500
+        except Exception as e:
+            print(f"切换 Whisper 模型时发生错误: {e}")
+            return jsonify({"error": f"切换模型失败: {str(e)}"}), 500
+    else:
+        return jsonify({"error": "未找到指定的模型配置"}), 400
+
+
 import gc
 
 @app.route('/api/unload_models', methods=['POST'])
@@ -635,7 +763,7 @@ def unload_all_models():
     """
     卸载所有当前加载的模型以释放显存。
     """
-    global MODEL, MODEL_NAME, CORRECTOR
+    global MODEL, MODEL_NAME, CORRECTOR, WHISPER_MODEL, CURRENT_WHISPER_MODEL_CONFIG
     
     unloaded = []
     errors = []
@@ -655,6 +783,30 @@ def unload_all_models():
             print("语义搜索模型已卸载。")
     except Exception as e:
         error_msg = f"卸载语义搜索模型时出错: {e}"
+        print(error_msg)
+        errors.append(error_msg)
+
+    try:
+        # 卸载转录模型
+        if WHISPER_MODEL is not None:
+            print("正在卸载 Whisper 转录模型...")
+            model_name_to_log = "Unknown"
+            if CURRENT_WHISPER_MODEL_CONFIG:
+                name = CURRENT_WHISPER_MODEL_CONFIG.get('model', 'Unknown')
+                if os.path.sep in name or '/' in name:
+                    name = os.path.basename(name)
+                model_name_to_log = name
+            
+            del WHISPER_MODEL
+            WHISPER_MODEL = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            unloaded.append(f"Whisper 转录模型 ({model_name_to_log})")
+            CURRENT_WHISPER_MODEL_CONFIG = None
+            print("Whisper 转录模型已卸载。")
+    except Exception as e:
+        error_msg = f"卸载 Whisper 转录模型时出错: {e}"
         print(error_msg)
         errors.append(error_msg)
 
@@ -813,9 +965,114 @@ def cancel_subtitle_task():
             return jsonify({"success": False, "message": "任务未找到或已完成"}), 404
 
 
+@app.route('/api/transcribe_video', methods=['POST'])
+def transcribe_video():
+    """
+    处理视频转录请求。
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': 'No data provided'}), 400
+        
+    src = data.get('src')
+    media_dir = data.get('mediaDir')
+    
+    if not src or not media_dir:
+        return jsonify({'success': False, 'message': 'Missing src or mediaDir'}), 400
+        
+    full_video_path = os.path.join(media_dir, src)
+    
+    # 提取参数
+    model_source = data.get('modelSource', 'pretrained')
+    model_identifier = data.get('model', 'large-v3')
+    
+    # 尝试在配置中找到对应的模型
+    target_index = -1
+    for i, config in enumerate(TRANSCRIBER_CONFIGS):
+        # 比较 model 和 model-source
+        # 注意：config 中的 key 是 'model' 和 'model-source'
+        if config.get('model') == model_identifier and config.get('model-source') == model_source:
+            target_index = i
+            break
+            
+    # 如果在配置中找到了模型，确保它被加载
+    if target_index != -1:
+        current_model_name = CURRENT_WHISPER_MODEL_CONFIG.get('model') if CURRENT_WHISPER_MODEL_CONFIG else None
+        # 如果当前没有加载模型，或者加载的模型不是请求的模型
+        if WHISPER_MODEL is None or current_model_name != model_identifier:
+            print(f"请求的模型 ({model_identifier}) 与当前加载的模型 ({current_model_name}) 不一致，正在切换...")
+            load_transcription_model(target_index)
+    else:
+        # 如果请求的模型不在配置中（可能是临时请求），且当前没有加载任何模型，则加载默认模型
+        # 或者如果当前加载的模型不匹配，我们可能需要警告或者重新加载？
+        # 这里为了简单起见，如果当前没有模型，就加载默认的
+        if WHISPER_MODEL is None:
+            load_transcription_model()
+
+    if WHISPER_MODEL is None:
+        return jsonify({'success': False, 'message': 'Failed to load Whisper model'}), 500
+        
+    try:
+        # 获取配置中的默认值
+        defaults = {}
+        if target_index != -1:
+            defaults = TRANSCRIBER_CONFIGS[target_index]
+
+        # 辅助函数：优先从请求中获取，否则从配置中获取，最后使用默认值
+        def get_param(data_key, config_key, default_val):
+            if data_key in data:
+                return data[data_key]
+            if config_key in defaults:
+                return defaults[config_key]
+            return default_val
+
+        task = get_param('task', 'task', 'transcribe')
+        language = get_param('language', 'language', None)
+        if language == 'None': language = None
+        
+        vad_filter = get_param('vadFilter', 'vad_filter', False)
+        vad_threshold = get_param('vadThreshold', 'vad_threshold', None)
+        condition_on_previous_text = get_param('conditionOnPreviousText', 'condition_on_previous_text', False)
+        transcribe_kwargs = get_param('transcribeKwargs', 'transcribe-kwargs', None)
+        output_dir = get_param('outputDir', 'output-dir', './cache/subtitles/')
+        merge_threshold = float(get_param('mergeThreshold', 'merge-threshold', 1.0))
+        dense_subtitles = get_param('denseSubtitles', 'dense-subtitles', False)
+        max_chars_per_line = int(get_param('maxCharsPerLine', 'max-chars-per-line', 30))
+        
+        # 调用 generate_subtitle.run_transcription
+        vtt_path = generate_subtitle.run_transcription(
+            audio_file_path=full_video_path,
+            model_source=model_source,
+            model_identifier=model_identifier,
+            task=task,
+            language=language,
+            vad_filter=vad_filter,
+            vad_threshold=vad_threshold,
+            condition_on_previous_text=condition_on_previous_text,
+            transcribe_kwargs_json=transcribe_kwargs if isinstance(transcribe_kwargs, str) else json.dumps(transcribe_kwargs) if transcribe_kwargs else None,
+            output_dir=output_dir,
+            merge_threshold=merge_threshold,
+            dense_subtitles=dense_subtitles,
+            max_chars_per_line=max_chars_per_line,
+            loaded_model=WHISPER_MODEL
+        )
+        
+        return jsonify({
+            'success': True, 
+            'vtt_file': vtt_path.replace('\\', '/')
+        })
+        
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 if __name__ == '__main__':
     load_global_model()
     load_corrector_model()
+    load_transcription_model()
     # 使用 waitress 或 gunicorn 在生产环境中运行
     # 例如: waitress-serve --host 127.0.0.1 --port 5000 semantic-search-app:app
     # 这里为了简单起见，直接用 Flask 的开发服务器

@@ -1357,160 +1357,192 @@ const server = http.createServer(async (req, res) => {
             body += chunk.toString();
         });
         req.on('end', () => {
-            try {
-                const {
-                    src,
-                    mediaDir,
-                    modelSource,
-                    model,
-                    task,
-                    language,
-                    vadFilter,
-                    conditionOnPreviousText,
-                    maxCharsPerLine,
-                    denseSubtitles,
-                    vadThreshold,
-                    transcribeKwargs,
-                    mergeThreshold,
-                    outputDir
-                } = JSON.parse(body);
-                if (!src || !mediaDir) {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
-                    return;
-                }
-
-                const fullVideoPath = path.join(mediaDir, src);
-                
-                // 构建Python脚本参数
-                const args = [path.join(__dirname, 'generate_subtitle.py'), fullVideoPath];
-                
-                // 添加可选参数
-                if (modelSource) {
-                    args.push('--model-source', modelSource);
-                }
-                if (model) {
-                    args.push('--model', model);
-                }
-                if (task) {
-                    args.push('--task', task);
-                }
-                if (language && language !== 'None') {
-                    args.push('--language', language);
-                }
-                if (vadFilter === true) {
-                    args.push('--vad-filter');
-                }
-                if (conditionOnPreviousText === true) {
-                    args.push('--condition-on-previous-text');
-                }
-                // 新增可选参数映射
-                if (typeof maxCharsPerLine !== 'undefined' && maxCharsPerLine !== null) {
-                    args.push('--max-chars-per-line', String(maxCharsPerLine));
-                }
-                if (denseSubtitles === true) {
-                    args.push('--dense-subtitles');
-                }
-                if (typeof vadThreshold !== 'undefined' && vadThreshold !== null) {
-                    // 在命令行中以 --vad-threshold <value> 形式传递
-                    args.push('--vad-threshold', String(vadThreshold));
-                }
-                if (transcribeKwargs) {
-                    // 如果是对象，序列化为 JSON 字符串
-                    const payload = typeof transcribeKwargs === 'string' ? transcribeKwargs : JSON.stringify(transcribeKwargs);
-                    args.push('--transcribe-kwargs', payload);
-                }
-                if (typeof mergeThreshold !== 'undefined' && mergeThreshold !== null) {
-                    args.push('--merge-threshold', String(mergeThreshold));
-                }
-                if (outputDir) {
-                    args.push('--output-dir', outputDir);
-                }
-                
-                const pythonProcess = spawn('python', args, {
-                    env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
-                });
-
-                let stdoutData = '';
-                let stderrData = '';
-
-                pythonProcess.stdout.on('data', (data) => {
-                    stdoutData += data.toString();
-                    // 实时输出到服务器控制台以便调试
-                    console.log(`[Transcribe] ${data.toString().trim()}`);
-                });
-
-                pythonProcess.stderr.on('data', (data) => {
-                    stderrData += data.toString();
-                    console.error(`[Transcribe Error] ${data.toString().trim()}`);
-                });
-
-                pythonProcess.on('close', (code) => {
-                    // 首先尝试从输出中提取VTT文件路径
-                    const vttPathMatch = stdoutData.match(/字幕已保存为\s*VTT\s*格式:\s*(.+?)(?:\r?\n|$)/);
-                    let vttFilePath = null;
-                    
-                    if (vttPathMatch && vttPathMatch[1]) {
-                        vttFilePath = vttPathMatch[1].trim().replace(/\\/g, '/');
-                        console.log(`[Transcribe] Successfully extracted VTT path from output: ${vttFilePath}`);
-                    } else {
-                        // 尝试通过文件系统查找
-                        const baseName = path.basename(fullVideoPath, path.extname(fullVideoPath));
-                        const outputDirPath = outputDir || path.join(__dirname, 'cache', 'subtitles');
-                        const expectedVttPath = path.join(outputDirPath, `${baseName}_transcribe.vtt`);
-                        
-                        if (fs.existsSync(expectedVttPath)) {
-                            vttFilePath = expectedVttPath.replace(/\\/g, '/');
-                            console.log(`[Transcribe] Found VTT file by path: ${vttFilePath}`);
-                        }
-                    }
-                    
-                    // 如果找到了VTT文件，认为是成功的，即使退出码非0
-                    if (vttFilePath && fs.existsSync(vttFilePath)) {
-                        console.log(`[Transcribe] Task completed successfully (exit code: ${code})`);
-                        res.setHeader('Content-Type', 'application/json');
-                        res.end(JSON.stringify({ 
-                            success: true, 
-                            vtt_file: vttFilePath,
-                            note: code !== 0 ? `转录成功，但进程退出码为 ${code}（可能是清理过程中的非关键错误）` : undefined
-                        }));
+            const fallbackToSpawn = () => {
+                try {
+                    const {
+                        src,
+                        mediaDir,
+                        modelSource,
+                        model,
+                        task,
+                        language,
+                        vadFilter,
+                        conditionOnPreviousText,
+                        maxCharsPerLine,
+                        denseSubtitles,
+                        vadThreshold,
+                        transcribeKwargs,
+                        mergeThreshold,
+                        outputDir
+                    } = JSON.parse(body);
+                    if (!src || !mediaDir) {
+                        res.statusCode = 400;
+                        res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
                         return;
                     }
+
+                    const fullVideoPath = path.join(mediaDir, src);
                     
-                    // 如果没有找到VTT文件且退出码非0，才报告错误
-                    if (code !== 0) {
-                        console.error(`generate_subtitle.py stderr: ${stderrData}`);
-                        console.error(`generate_subtitle.py stdout: ${stdoutData}`);
+                    // 构建Python脚本参数
+                    const args = [path.join(__dirname, 'generate_subtitle.py'), fullVideoPath];
+                    
+                    // 添加可选参数
+                    if (modelSource) {
+                        args.push('--model-source', modelSource);
+                    }
+                    if (model) {
+                        args.push('--model', model);
+                    }
+                    if (task) {
+                        args.push('--task', task);
+                    }
+                    if (language && language !== 'None') {
+                        args.push('--language', language);
+                    }
+                    if (vadFilter === true) {
+                        args.push('--vad-filter');
+                    }
+                    if (conditionOnPreviousText === true) {
+                        args.push('--condition-on-previous-text');
+                    }
+                    // 新增可选参数映射
+                    if (typeof maxCharsPerLine !== 'undefined' && maxCharsPerLine !== null) {
+                        args.push('--max-chars-per-line', String(maxCharsPerLine));
+                    }
+                    if (denseSubtitles === true) {
+                        args.push('--dense-subtitles');
+                    }
+                    if (typeof vadThreshold !== 'undefined' && vadThreshold !== null) {
+                        // 在命令行中以 --vad-threshold <value> 形式传递
+                        args.push('--vad-threshold', String(vadThreshold));
+                    }
+                    if (transcribeKwargs) {
+                        // 如果是对象，序列化为 JSON 字符串
+                        const payload = typeof transcribeKwargs === 'string' ? transcribeKwargs : JSON.stringify(transcribeKwargs);
+                        args.push('--transcribe-kwargs', payload);
+                    }
+                    if (typeof mergeThreshold !== 'undefined' && mergeThreshold !== null) {
+                        args.push('--merge-threshold', String(mergeThreshold));
+                    }
+                    if (outputDir) {
+                        args.push('--output-dir', outputDir);
+                    }
+                    
+                    const pythonProcess = spawn('python', args, {
+                        env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+                    });
+
+                    let stdoutData = '';
+                    let stderrData = '';
+
+                    pythonProcess.stdout.on('data', (data) => {
+                        stdoutData += data.toString();
+                        // 实时输出到服务器控制台以便调试
+                        console.log(`[Transcribe] ${data.toString().trim()}`);
+                    });
+
+                    pythonProcess.stderr.on('data', (data) => {
+                        stderrData += data.toString();
+                        console.error(`[Transcribe Error] ${data.toString().trim()}`);
+                    });
+
+                    pythonProcess.on('close', (code) => {
+                        // 首先尝试从输出中提取VTT文件路径
+                        const vttPathMatch = stdoutData.match(/字幕已保存为\s*VTT\s*格式:\s*(.+?)(?:\r?\n|$)/);
+                        let vttFilePath = null;
+                        
+                        if (vttPathMatch && vttPathMatch[1]) {
+                            vttFilePath = vttPathMatch[1].trim().replace(/\\/g, '/');
+                            console.log(`[Transcribe] Successfully extracted VTT path from output: ${vttFilePath}`);
+                        } else {
+                            // 尝试通过文件系统查找
+                            const baseName = path.basename(fullVideoPath, path.extname(fullVideoPath));
+                            const outputDirPath = outputDir || path.join(__dirname, 'cache', 'subtitles');
+                            const expectedVttPath = path.join(outputDirPath, `${baseName}_transcribe.vtt`);
+                            
+                            if (fs.existsSync(expectedVttPath)) {
+                                vttFilePath = expectedVttPath.replace(/\\/g, '/');
+                                console.log(`[Transcribe] Found VTT file by path: ${vttFilePath}`);
+                            }
+                        }
+                        
+                        // 如果找到了VTT文件，认为是成功的，即使退出码非0
+                        if (vttFilePath && fs.existsSync(vttFilePath)) {
+                            console.log(`[Transcribe] Task completed successfully (exit code: ${code})`);
+                            res.setHeader('Content-Type', 'application/json');
+                            res.end(JSON.stringify({ 
+                                success: true, 
+                                vtt_file: vttFilePath,
+                                note: code !== 0 ? `转录成功，但进程退出码为 ${code}（可能是清理过程中的非关键错误）` : undefined
+                            }));
+                            return;
+                        }
+                        
+                        // 如果没有找到VTT文件且退出码非0，才报告错误
+                        if (code !== 0) {
+                            console.error(`generate_subtitle.py stderr: ${stderrData}`);
+                            console.error(`generate_subtitle.py stdout: ${stdoutData}`);
+                            res.statusCode = 500;
+                            res.end(JSON.stringify({ 
+                                success: false, 
+                                message: `转录脚本执行失败，退出码: ${code}`, 
+                                details: stderrData || stdoutData,
+                                stdout: stdoutData,
+                                stderr: stderrData
+                            }));
+                            return;
+                        }
+                        
+                        // 退出码为0但没找到VTT文件
+                        console.error('Failed to find VTT file despite successful exit');
+                        console.error('Expected VTT path from output:', stdoutData);
+                        console.error('stderr:', stderrData);
                         res.statusCode = 500;
                         res.end(JSON.stringify({ 
                             success: false, 
-                            message: `转录脚本执行失败，退出码: ${code}`, 
-                            details: stderrData || stdoutData,
+                            message: '无法从脚本输出中解析VTT文件路径且未找到预期的VTT文件。', 
+                            details: '脚本执行完成但输出格式不匹配且未找到预期的VTT文件',
                             stdout: stdoutData,
                             stderr: stderrData
                         }));
-                        return;
-                    }
-                    
-                    // 退出码为0但没找到VTT文件
-                    console.error('Failed to find VTT file despite successful exit');
-                    console.error('Expected VTT path from output:', stdoutData);
-                    console.error('stderr:', stderrData);
-                    res.statusCode = 500;
-                    res.end(JSON.stringify({ 
-                        success: false, 
-                        message: '无法从脚本输出中解析VTT文件路径且未找到预期的VTT文件。', 
-                        details: '脚本执行完成但输出格式不匹配且未找到预期的VTT文件',
-                        stdout: stdoutData,
-                        stderr: stderrData
-                    }));
-                });
+                    });
 
-            } catch (e) {
-                console.error('Error processing /api/transcribe-video:', e);
-                res.statusCode = 400;
-                res.end(JSON.stringify({ success: false, message: '无效的JSON请求。' }));
-            }
+                } catch (e) {
+                    console.error('Error processing /api/transcribe-video:', e);
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: '无效的JSON请求。' }));
+                }
+            };
+
+            // 尝试代理到 Flask 服务
+            const proxyReq = http.request({
+                hostname: '127.0.0.1',
+                port: 5000,
+                path: '/api/transcribe_video',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body)
+                }
+            }, (proxyRes) => {
+                // 如果 Flask 服务返回 404，说明端点不存在（可能是旧版本服务），也回退
+                if (proxyRes.statusCode === 404) {
+                    console.log('[Transcribe] Flask backend endpoint not found (404), falling back to spawn process.');
+                    fallbackToSpawn();
+                    return;
+                }
+                
+                res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                proxyRes.pipe(res);
+            });
+
+            proxyReq.on('error', (err) => {
+                console.log('[Transcribe] Flask backend not reachable, falling back to spawn process.');
+                fallbackToSpawn();
+            });
+
+            proxyReq.write(body);
+            proxyReq.end();
         });
         return;
     }
@@ -2166,6 +2198,12 @@ const server = http.createServer(async (req, res) => {
     // 代理 /api/switch-model/semantic
     if (pathname === '/api/switch-model/semantic' && req.method === 'POST') {
         proxyRequestToPython(req, res, 5000, '/api/switch_model/semantic');
+        return;
+    }
+
+    // 代理 /api/switch-model/transcription
+    if (pathname === '/api/switch-model/transcription' && req.method === 'POST') {
+        proxyRequestToPython(req, res, 5000, '/api/switch_model/transcription');
         return;
     }
 
