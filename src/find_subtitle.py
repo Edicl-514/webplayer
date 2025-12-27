@@ -340,21 +340,38 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
                         # Fallback to basename URL
                         subtitle_url = f"/{urllib.parse.quote(os.path.basename(filepath))}"
 
-                    # Compute priority according to new rules:
-                    # 0 = contains base name AND contains 'translated' (case-insensitive)
-                    # 1 = exact same basename
-                    # 2 = contains base name
-                    # 3 = other (lowest)
+                    # Compute priority according to updated rules:
+                    # 0 = filename matches <video_basename>_<8hex>... (our short-hash match) — HIGHEST
+                    # 1 = contains base name AND contains 'translated' (case-insensitive)
+                    # 2 = exact same basename
+                    # 3 = contains base name
+                    # 4 = other (lowest)
                     low_basename = basename.lower()
                     video_base_low = video_basename.lower()
-                    if (video_base_low in low_basename) and ('translated' in low_basename):
-                        priority = 0
-                    elif basename == video_basename:
-                        priority = 1
-                    elif video_basename in basename:
-                        priority = 2
-                    else:
-                        priority = 3
+
+                    # Detect short 8-hex hash filenames like: <video_basename>_<8hex> or <video_basename>_<8hex>_suffix
+                    try:
+                        short_hash_pattern = rf'^{re.escape(video_basename)}_[0-9a-fA-F]{{8}}(?:_|$)'
+                        if re.search(short_hash_pattern, basename, flags=re.IGNORECASE):
+                            priority = 0
+                        elif (video_base_low in low_basename) and ('translated' in low_basename):
+                            priority = 1
+                        elif basename == video_basename:
+                            priority = 2
+                        elif video_basename in basename:
+                            priority = 3
+                        else:
+                            priority = 4
+                    except re.error:
+                        # On any regex construction issue, fallback to previous simpler logic
+                        if (video_base_low in low_basename) and ('translated' in low_basename):
+                            priority = 1
+                        elif basename == video_basename:
+                            priority = 2
+                        elif video_basename in basename:
+                            priority = 3
+                        else:
+                            priority = 4
 
                     subtitle_items.append({
                         'url': subtitle_url,

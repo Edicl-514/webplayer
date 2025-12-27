@@ -743,10 +743,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // 检查艺术家和专辑是否是占位符
         const isUnknownArtist = !artist || artist === 'Unknown Artist' || artist === '未知艺术家';
         const isUnknownAlbum = !album || album === 'Unknown Album' || album === '未知专辑';
-        
-        // 如果艺术家和专辑都是未知的，搜索质量会很差
-        if (isUnknownArtist && isUnknownAlbum) {
-            console.log('[AUTO] Skip: No valid artist or album (both are unknown placeholders)');
+
+        // 要求同时有艺术家和专辑，否则认为不是可靠的“音乐”元数据
+        if (isUnknownArtist || isUnknownAlbum) {
+            console.log('[AUTO] Skip: Missing valid artist or album (both required)');
+            return false;
+        }
+
+        // 排除形如 RJ+数字 的标题，这类通常不是音乐
+        if (/^RJ\d+$/i.test(title)) {
+            console.log('[AUTO] Skip: Title matches RJ<number> pattern:', title);
             return false;
         }
         

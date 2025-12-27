@@ -19,6 +19,7 @@ import sys
 import argparse
 import json
 import numpy as np
+import hashlib
 try:
     from pydub import AudioSegment, exceptions as pydub_exceptions
 except ImportError:
@@ -258,7 +259,20 @@ def seconds_to_vtt_time(seconds):
 output_dir = args.output_dir
 os.makedirs(output_dir, exist_ok=True)
 base_name = os.path.splitext(os.path.basename(audio_file_path))[0]
-vtt_file_path = os.path.join(output_dir, f"{base_name}_transcribe.vtt")
+def compute_file_hash(path, length=8):
+    """Compute a short hex hash of a file's contents. Returns fallback timestamp on error."""
+    try:
+        h = hashlib.md5()
+        with open(path, 'rb') as fh:
+            for chunk in iter(lambda: fh.read(8192), b''):
+                h.update(chunk)
+        return h.hexdigest()[:length]
+    except Exception:
+        return str(start_timestamp)
+
+# 使用音频文件内容的哈希避免输出文件名冲突
+hash_suffix = compute_file_hash(audio_file_path)
+vtt_file_path = os.path.join(output_dir, f"{base_name}_{hash_suffix}_transcribe.vtt")
 
 # --- 字幕生成函数 ---
 
