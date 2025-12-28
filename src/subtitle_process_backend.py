@@ -974,13 +974,17 @@ def transcribe_video():
     if not data:
         return jsonify({'success': False, 'message': 'No data provided'}), 400
         
-    src = data.get('src')
-    media_dir = data.get('mediaDir')
+    # 优先使用 videoPath（完整路径），如果不存在则使用 src + mediaDir
+    full_video_path = data.get('videoPath')
     
-    if not src or not media_dir:
-        return jsonify({'success': False, 'message': 'Missing src or mediaDir'}), 400
+    if not full_video_path:
+        src = data.get('src')
+        media_dir = data.get('mediaDir')
         
-    full_video_path = os.path.join(media_dir, src)
+        if not src or not media_dir:
+            return jsonify({'success': False, 'message': 'Missing videoPath or (src and mediaDir)'}), 400
+            
+        full_video_path = os.path.join(media_dir, src)
     
     # 提取参数
     model_source = data.get('modelSource', 'pretrained')

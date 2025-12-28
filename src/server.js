@@ -1411,11 +1411,31 @@ const server = http.createServer(async (req, res) => {
             body += chunk.toString();
         });
         req.on('end', () => {
+            try {
+                const parsedData = JSON.parse(body);
+                const { src, mediaDir } = parsedData;
+                
+                if (!src || !mediaDir) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
+                    return;
+                }
+
+                // 构建完整的视频路径
+                const fullVideoPath = path.join(mediaDir, src);
+                
+                // 准备发送给 Flask 的数据，使用完整路径
+                const flaskData = {
+                    ...parsedData,
+                    videoPath: fullVideoPath,  // 使用完整路径
+                    mediaDir: mediaDir
+                };
+                
+                const flaskBody = JSON.stringify(flaskData);
+                
             const fallbackToSpawn = () => {
                 try {
                     const {
-                        src,
-                        mediaDir,
                         modelSource,
                         model,
                         task,
@@ -1428,14 +1448,13 @@ const server = http.createServer(async (req, res) => {
                         transcribeKwargs,
                         mergeThreshold,
                         outputDir
-                    } = JSON.parse(body);
-                    if (!src || !mediaDir) {
+                    } = parsedData;
+                    
+                    if (!fullVideoPath) {
                         res.statusCode = 400;
-                        res.end(JSON.stringify({ success: false, message: 'Missing src or mediaDir' }));
+                        res.end(JSON.stringify({ success: false, message: 'Missing video path' }));
                         return;
                     }
-
-                    const fullVideoPath = path.join(mediaDir, src);
                     
                     // 构建Python脚本参数
                     const args = [path.join(__dirname, 'generate_subtitle.py'), fullVideoPath];
@@ -1562,7 +1581,7 @@ const server = http.createServer(async (req, res) => {
                     });
 
                 } catch (e) {
-                    console.error('Error processing /api/transcribe-video:', e);
+                    console.error('Error processing /api/transcribe-video fallback:', e);
                     res.statusCode = 400;
                     res.end(JSON.stringify({ success: false, message: '无效的JSON请求。' }));
                 }
@@ -1576,7 +1595,7 @@ const server = http.createServer(async (req, res) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(body)
+                    'Content-Length': Buffer.byteLength(flaskBody)
                 }
             }, (proxyRes) => {
                 // 如果 Flask 服务返回 404，说明端点不存在（可能是旧版本服务），也回退
@@ -1595,8 +1614,13 @@ const server = http.createServer(async (req, res) => {
                 fallbackToSpawn();
             });
 
-            proxyReq.write(body);
+            proxyReq.write(flaskBody);
             proxyReq.end();
+            } catch (e) {
+                console.error('Error processing /api/transcribe-video request:', e);
+                res.statusCode = 400;
+                res.end(JSON.stringify({ success: false, message: '无效的JSON请求。' }));
+            }
         });
         return;
     }
