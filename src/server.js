@@ -1350,6 +1350,60 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 新增：计算文件哈希的API端点
+    if (pathname === '/api/compute-file-hash' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const params = JSON.parse(body);
+                const filePath = params.filePath;
+                const mediaDir = params.mediaDir || currentMediaDir;
+                
+                if (!filePath) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ success: false, message: 'Missing filePath parameter' }));
+                    return;
+                }
+                
+                // 构建完整文件路径
+                let fullPath;
+                if (path.isAbsolute(filePath)) {
+                    fullPath = filePath;
+                } else {
+                    fullPath = path.join(mediaDir, filePath);
+                }
+                
+                // 计算文件的MD5哈希（前8位）
+                try {
+                    const fileBuffer = fs.readFileSync(fullPath);
+                    const hashSum = crypto.createHash('md5');
+                    hashSum.update(fileBuffer);
+                    const hash = hashSum.digest('hex').substring(0, 8);
+                    
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: true, hash: hash }));
+                } catch (fileError) {
+                    console.error('Error reading file for hash:', fileError);
+                    res.statusCode = 500;
+                    res.end(JSON.stringify({ 
+                        success: false, 
+                        message: 'Failed to read file',
+                        error: fileError.message 
+                    }));
+                }
+            } catch (error) {
+                console.error('Error computing file hash:', error);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ success: false, message: 'Failed to compute hash', error: error.message }));
+            }
+        });
+        return;
+    }
+
     // 新增：处理视频转录请求
     if (pathname === '/api/transcribe-video' && req.method === 'POST') {
         let body = '';

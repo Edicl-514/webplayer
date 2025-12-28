@@ -1104,7 +1104,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- UI更新与交互 ---
 
     function updateProgress() {
-        if (!sound || !sound.playing()) return;
+        if (!sound || !isPlaying) return;
         const seek = sound.seek() || 0;
         currentTimeEl.textContent = formatTime(seek);
         progressBar.value = (seek / sound.duration()) * 100 || 0;
@@ -2616,6 +2616,135 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(startMessage, 'info', 5000);
         addChatMessage(startMessage, 'bot');
 
+        // --- 计算音频文件哈希以匹配字幕 ---
+        /**
+         * 计算文件的 MD5 哈希值（前8位）
+         * 这与 generate_subtitle.py 中的 compute_file_hash 函数保持一致
+         */
+        async function computeAudioHash(audioUrl) {
+            try {
+                // 直接向后端请求哈希值，无需下载整个音频文件
+                const hashResponse = await fetch('/api/compute-file-hash', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        filePath: decodeURIComponent(audioUrl.split('?')[0].replace(/^\//, '')),
+                        mediaDir: mediaDir || null
+                    })
+                });
+                
+                if (hashResponse.ok) {
+                    const hashData = await hashResponse.json();
+                    if (hashData.success && hashData.hash) {
+                        console.log('[Hash] Computed audio hash:', hashData.hash);
+                        return hashData.hash;
+                    }
+                }
+                
+                return null;
+            } catch (error) {
+                console.warn('[Hash] Error computing audio hash:', error);
+                return null;
+            }
+        }
+
+        // 获取当前音频的哈希值（如果可能）
+        const expectedHash = await computeAudioHash(musicPath);
+        if (expectedHash) {
+            console.log('[Transcribe] Expected subtitle hash suffix:', expectedHash);
+        }
+
+        // --- 自动刷新字幕逻辑 ---
+        let autoRefreshInterval = null;
+        let isRefreshing = false;
+        
+        const startAutoRefresh = () => {
+            // 延迟2秒启动，给后端一点时间创建文件
+            setTimeout(() => {
+                if (autoRefreshInterval) return;
+                console.log('[Auto Refresh] Starting subtitle auto-refresh loop...');
+                
+                autoRefreshInterval = setInterval(async () => {
+                    if (isRefreshing) return;
+                    isRefreshing = true;
+                    
+                    try {
+                        // 1. 获取当前音乐的字幕列表
+                        const params = new URLSearchParams({
+                            src: musicPath,
+                            all: 'true'
+                        });
+                        if (mediaDir) params.append('mediaDir', mediaDir);
+                        
+                        const res = await fetch(`/api/find-music-subtitles?${params.toString()}`);
+                        const data = await res.json();
+                        
+                        if (data.success && data.subtitles && data.subtitles.length > 0) {
+                            // 2. 寻找匹配哈希值的字幕文件
+                            // 优先级：
+                            // a) 如果有哈希值，查找文件名包含该哈希的 transcribe 字幕
+                            // b) 否则，查找最新的 transcribe 字幕
+                            let targetSub = null;
+                            
+                            if (expectedHash) {
+                                // 查找匹配哈希值的字幕文件
+                                targetSub = data.subtitles.find(s => 
+                                    s.url && 
+                                    s.url.includes('transcribe') && 
+                                    s.url.includes(expectedHash)
+                                );
+                                if (targetSub) {
+                                    console.log('[Auto Refresh] Found hash-matching subtitle:', targetSub.url);
+                                }
+                            }
+                            
+                            // 如果没有找到匹配哈希的，或者没有哈希值，则使用第一个包含 transcribe 的
+                            // if (!targetSub) {
+                            //     targetSub = data.subtitles.find(s => s.url && s.url.includes('transcribe'));
+                            //     if (targetSub && expectedHash) {
+                            //         console.warn('[Auto Refresh] No hash match found, using first transcribe subtitle');
+                            //     }
+                            // }
+                            
+                            if (targetSub) {
+                                let subtitlePath = targetSub.url;
+                                
+                                // 3. 路径转换逻辑 (构建可访问的 URL)
+                                if (subtitlePath.includes('cache/subtitles') || subtitlePath.includes('cache\\subtitles')) {
+                                    const cachePart = subtitlePath.match(/(cache[\\/]subtitles[\\/].+)/);
+                                    if (cachePart) {
+                                        subtitlePath = '/' + cachePart[1].replace(/\\/g, '/');
+                                    }
+                                } else if (mediaDir) {
+                                    subtitlePath = subtitlePath.replace(/\\/g, '/');
+                                    if (subtitlePath.startsWith(mediaDir.replace(/\\/g, '/'))) {
+                                        subtitlePath = subtitlePath.substring(mediaDir.length);
+                                    }
+                                    subtitlePath = '/' + subtitlePath.replace(/^\/+/,'');
+                                    if (mediaDir) {
+                                        subtitlePath += `?mediaDir=${encodeURIComponent(mediaDir)}`;
+                                    }
+                                }
+                                
+                                console.log('[Auto Refresh] Loading partial subtitle:', subtitlePath);
+                                showToast('检测到新的字幕片段，正在加载...', 'info', 2000);
+                                await loadLyrics(subtitlePath);
+                                // 顺便刷新本地字幕列表 UI
+                                await loadLocalSubtitles();
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[Auto Refresh] Failed:', e);
+                    } finally {
+                        isRefreshing = false;
+                    }
+                }, 3000); // 每 3 秒刷新一次
+            }, 2000);
+        };
+        
+        startAutoRefresh();
+        // -----------------------
+
         try {
             const response = await fetch('/api/transcribe-video', {
                 method: 'POST',
@@ -2624,6 +2753,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 body: JSON.stringify(transcribeParams)
             });
+
+            // 转录结束，清除定时器
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
 
             const result = await response.json();
 
@@ -2640,6 +2775,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // 刷新本地字幕列表
                 await loadLocalSubtitles();
+
+                // 自动加载后端返回的字幕文件（如果有）
+                if (result.vtt_file) {
+                    let subtitlePath = result.vtt_file;
+
+                    // 如果是缓存目录中的文件，提取相对于项目根的路径
+                    if (subtitlePath.includes('cache/subtitles') || subtitlePath.includes('cache\\subtitles')) {
+                        const cachePart = subtitlePath.match(/(cache[\\/]subtitles[\\/].+)/);
+                        if (cachePart) {
+                            subtitlePath = '/' + cachePart[1].replace(/\\/g, '/');
+                        }
+                    } else if (mediaDir) {
+                        // 如果是媒体目录中的文件，尝试构建带 mediaDir 的可访问路径
+                        subtitlePath = subtitlePath.replace(/\\/g, '/');
+                        if (subtitlePath.startsWith(mediaDir.replace(/\\/g, '/'))) {
+                            subtitlePath = subtitlePath.substring(mediaDir.length);
+                        }
+                        subtitlePath = '/' + subtitlePath.replace(/^\/+/,'');
+                        if (mediaDir) {
+                            subtitlePath += `?mediaDir=${encodeURIComponent(mediaDir)}`;
+                        }
+                    }
+
+                    console.log('[Auto Load] Loading generated subtitle:', subtitlePath);
+                    try {
+                        loadLyrics(subtitlePath);
+
+                        // 更新当前播放项的 lrc 字段并持久化
+                        try {
+                            if (playlist && playlist[currentSongIndex]) {
+                                playlist[currentSongIndex].lrc = subtitlePath;
+                                playlist[currentSongIndex].userModified = true;
+                                localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                            }
+                        } catch (e) {
+                            console.warn('Failed to update playlist lrc field:', e);
+                        }
+                    } catch (e) {
+                        console.warn('Auto-load subtitle failed:', e);
+                    }
+                }
             } else {
                 const errorMessage = `${taskLabel}失败: ${result.message || '未知错误'}`;
                 showToast(errorMessage, 'error', 5000);
@@ -2658,6 +2834,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (error) {
+            // 出错时也要清除定时器
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
             const errorMessage = `${taskLabel}请求失败: ${error.message}`;
             showToast(errorMessage, 'error', 5000);
             addChatMessage(`错误: ${errorMessage}`, 'bot');

@@ -225,13 +225,12 @@ def generate_dense_segments(segments, max_chars=30):
     使用词时间戳，结合标点符号和最大字符数限制，智能地切分字幕。
     回溯策略：优先标点 > 词边界（空格） > 允许突破上限
     """
-    dense_segments = []
     BREAK_PUNCTUATION = "。！？，、,."
 
     for segment in segments:
         if not hasattr(segment, 'words') or not segment.words:
             if segment.text.strip():
-                dense_segments.append({'start': segment.start, 'end': segment.end, 'text': segment.text.strip()})
+                yield {'start': segment.start, 'end': segment.end, 'text': segment.text.strip()}
             continue
 
         # 缓存当前正在构建的行的所有词
@@ -256,11 +255,11 @@ def generate_dense_segments(segments, max_chars=30):
             
             if has_punctuation:
                 # 遇到标点，创建一行（不管长度）
-                dense_segments.append({
+                yield {
                     'start': line_start_time,
                     'end': word.end,
                     'text': current_line_text.strip()
-                })
+                }
                 # 重置
                 current_words = []
                 line_start_time = -1
@@ -288,11 +287,11 @@ def generate_dense_segments(segments, max_chars=30):
                     # 找到了切分点（标点或词边界）
                     words_for_line = current_words[:break_index + 1]
                     line_text = ''.join(w.word for w in words_for_line)
-                    dense_segments.append({
+                    yield {
                         'start': line_start_time,
                         'end': words_for_line[-1].end,
                         'text': line_text.strip()
-                    })
+                    }
                     # 剩余的词作为新行的开始
                     current_words = current_words[break_index + 1:]
                     line_start_time = current_words[0].start if current_words else -1
@@ -305,13 +304,11 @@ def generate_dense_segments(segments, max_chars=30):
         if current_words:
             line_text = ''.join(w.word for w in current_words)
             if line_text.strip():
-                dense_segments.append({
+                yield {
                     'start': line_start_time,
                     'end': current_words[-1].end,
                     'text': line_text.strip()
-                })
-            
-    return [s for s in dense_segments if s['text']]
+                }
 
 def post_process_subtitles(segments, merge_threshold=1.0):
     """
@@ -319,32 +316,31 @@ def post_process_subtitles(segments, merge_threshold=1.0):
     1. 删除空字幕.
     2. 合并时间上邻近且内容相同的字幕.
     """
-    # 1. 删除空字幕
-    processed_segments = [s for s in segments if s['text'].strip()]
+    current_segment = None
 
-    if not processed_segments:
-        return []
+    for segment in segments:
+        # 1. 删除空字幕
+        if not segment['text'].strip():
+            continue
 
-    # 2. 合并内容相同且时间邻近的字幕
-    merged_segments = []
-    current_segment = processed_segments[0].copy()
+        if current_segment is None:
+            current_segment = segment.copy()
+            continue
 
-    for i in range(1, len(processed_segments)):
-        next_segment = processed_segments[i]
+        # 2. 合并内容相同且时间邻近的字幕
         # 检查文本是否相同，以及时间间隔是否在阈值内
-        if (next_segment['text'].strip() == current_segment['text'].strip() and
-            (next_segment['start'] - current_segment['end']) < merge_threshold):
+        if (segment['text'].strip() == current_segment['text'].strip() and
+            (segment['start'] - current_segment['end']) < merge_threshold):
             # 合并字幕，只延长结束时间
-            current_segment['end'] = next_segment['end']
+            current_segment['end'] = segment['end']
         else:
-            # 如果不满足合并条件，将当前字幕段存入列表，并开始处理下一个
-            merged_segments.append(current_segment)
-            current_segment = next_segment.copy()
+            # 如果不满足合并条件，yield 当前字幕段，并开始处理下一个
+            yield current_segment
+            current_segment = segment.copy()
     
-    # 添加最后一个处理过的字幕段
-    merged_segments.append(current_segment)
-
-    return merged_segments
+    # yield 最后一个处理过的字幕段
+    if current_segment:
+        yield current_segment
 
 def run_transcription(audio_file_path, model_source='pretrained', model_identifier='large-v3', 
                       task='transcribe', language=None, vad_filter=False, vad_threshold=None, 
@@ -381,16 +377,20 @@ def run_transcription(audio_file_path, model_source='pretrained', model_identifi
     
     # Transcribe
     segments, info = model.transcribe(processed_audio_path, **transcribe_kwargs)
-    segments = list(segments) # Consume generator
+    # Transcribe
+    segments, info = model.transcribe(processed_audio_path, **transcribe_kwargs)
     
-    # Post-process
+    # Post-process Pipeline
     if dense_subtitles:
         print(f"\n[Post-process] Generating dense subtitles with max {max_chars_per_line} chars per line.")
-        processed_segments = generate_dense_segments(segments, max_chars=max_chars_per_line)
+        segments = generate_dense_segments(segments, max_chars=max_chars_per_line)
     else:
         print(f"\n[Post-process] Merging adjacent identical segments with threshold: {merge_threshold}s")
-        openai_style_segments = [{'start': s.start, 'end': s.end, 'text': s.text} for s in segments]
-        processed_segments = post_process_subtitles(openai_style_segments, merge_threshold=merge_threshold)
+        # Convert Whisper segments to dicts
+        segments = ({'start': s.start, 'end': s.end, 'text': s.text} for s in segments)
+        
+    # Apply post-processing (merging) to the stream
+    processed_segments = post_process_subtitles(segments, merge_threshold=merge_threshold)
         
     # Save VTT
     os.makedirs(output_dir, exist_ok=True)
@@ -400,14 +400,18 @@ def run_transcription(audio_file_path, model_source='pretrained', model_identifi
     hash_suffix = compute_file_hash(audio_file_path)
     vtt_file_path = os.path.join(output_dir, f"{base_name}_{hash_suffix}_transcribe.vtt")
     
+    print(f"正在写入字幕到: {vtt_file_path}")
     with open(vtt_file_path, 'w', encoding='utf-8') as f:
         f.write("WEBVTT FILE\n\n")
+        f.flush()
+        
         for i, segment in enumerate(processed_segments, 1):
             start_time = seconds_to_vtt_time(segment['start'])
             end_time = seconds_to_vtt_time(segment['end'])
             text = segment['text'].strip()
             if not text: continue
             f.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
+            f.flush()
             
     print(f"\n字幕已保存为 VTT 格式: {vtt_file_path}")
     
