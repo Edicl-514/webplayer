@@ -840,6 +840,7 @@
                                 <option value="name">文件名</option>
                                 <option value="type">文件类型</option>
                                 <option value="time">修改时间</option>
+                                <option value="time-system">修改时间(系统)</option>
                             </select>
                         </div>
                         <div class="sort-option">
@@ -1089,9 +1090,10 @@
             const sortOrderValue = sortOrder.value;
 
             // Step 1: Sort the files based on current settings
-            if (sortTypeValue === 'time') {
+            if (sortTypeValue === 'time' || sortTypeValue === 'time-system') {
                 try {
-                    const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}`);
+                    const useSystemTime = sortTypeValue === 'time-system' ? '&system=true' : '';
+                    const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}${useSystemTime}`);
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }

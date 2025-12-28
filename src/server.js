@@ -1100,14 +1100,21 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/sort-by-time' && req.method === 'GET') {
         const targetPath = parsedUrl.query.path || '';
         const sortOrder = parsedUrl.query.order || 'asc';
+        const useSystemTime = parsedUrl.query.system === 'true';
        const fullPath = path.join(currentMediaDir, targetPath);
 
-       const pythonProcess = spawn('python', [
+       const args = [
            path.join(__dirname, 'concurrent-time-sort.py'),
            '-path', fullPath,
            '-s', sortOrder,
            '-j'
-       ], {
+       ];
+       
+       if (useSystemTime) {
+           args.push('-f');
+       }
+
+       const pythonProcess = spawn('python', args, {
            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
        });
 

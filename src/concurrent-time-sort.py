@@ -67,12 +67,13 @@ class FolderInfo:
     method_used: str
 
 class SmartFolderModTimeManager:
-    def __init__(self, everything_path="./everything_sdk/es.exe", cache_db=os.path.join("cache", "foldercache.db"), max_workers=8, use_database_cache=True):
+    def __init__(self, everything_path="./everything_sdk/es.exe", cache_db=os.path.join("cache", "foldercache.db"), max_workers=8, use_database_cache=True, fast_mode=False):
         self.everything_path = everything_path
         self.cache_db = cache_db
         # 增加最大工作线程数以提高并行度
         self.max_workers = max_workers
         self.use_database_cache = use_database_cache
+        self.fast_mode = fast_mode
         self.cache = {}  # 内存缓存
 
         if self.use_database_cache:
@@ -277,6 +278,40 @@ class SmartFolderModTimeManager:
 
         return None
     
+    def _get_mtime_scandir_fast(self, folder_path: str) -> Optional[datetime]:
+        """
+        【快速模式】使用os.scandir()仅扫描一层文件，获取最新修改时间。
+        不递归子目录，速度最快，适合快速预览。
+        """
+        try:
+            folder = Path(folder_path)
+            if not folder.is_dir():
+                return None
+            
+            latest_mtime = 0.0
+            
+            # 只扫描第一层，不递归
+            with os.scandir(folder_path) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            mtime = entry.stat(follow_symlinks=False).st_mtime
+                            if mtime > latest_mtime:
+                                latest_mtime = mtime
+                    except (PermissionError, FileNotFoundError, OSError) as e:
+                        logger.debug(f"跳过文件: {entry.path} - {e}")
+                        continue
+            
+            if latest_mtime > 0:
+                return datetime.fromtimestamp(latest_mtime)
+            
+            # 如果文件夹为空或只有子文件夹，使用文件夹本身的时间
+            return datetime.fromtimestamp(os.path.getmtime(folder_path))
+            
+        except Exception as e:
+            logger.error(f"scandir快速模式出错 {folder_path}: {e}")
+            return None
+    
     def _concurrent_get_mtime(self, folder_path: str) -> Tuple[Optional[datetime], str]:
         """并发执行Everything和pathlib方法，返回最先完成的有效结果"""
         stop_event = threading.Event()
@@ -305,7 +340,12 @@ class SmartFolderModTimeManager:
         if cached_info:
             return cached_info
         
-        real_mtime, method = self._concurrent_get_mtime(folder_path)
+        # 快速模式：直接使用scandir扫描一层
+        if self.fast_mode:
+            real_mtime = self._get_mtime_scandir_fast(folder_path)
+            method = "scandir-fast"
+        else:
+            real_mtime, method = self._concurrent_get_mtime(folder_path)
         
         if not real_mtime:
             try:
@@ -388,12 +428,13 @@ class SmartFolderModTimeManager:
 # --- 使用示例 ---
 if __name__ == "__main__":
     
-    def process_items_optimized(target_path: str, reverse_sort=True, output_json=False):
+    def process_items_optimized(target_path: str, reverse_sort=True, output_json=False, fast_mode=False):
         """
         【已优化】处理指定路径下的一级项目（文件和文件夹），使用批量并行处理。
         """
         if not output_json:
-            print(f"开始处理路径: {target_path}")
+            mode_str = " (快速模式)" if fast_mode else ""
+            print(f"开始处理路径: {target_path}{mode_str}")
 
         if not os.path.isdir(target_path):
             error_message = f"错误: 路径 '{target_path}' 不是一个有效的目录。"
@@ -403,6 +444,67 @@ if __name__ == "__main__":
                 print(error_message)
             return
 
+        start_time = time.time()
+        
+        # 快速模式：直接使用 os.scandir() 获取项目本身的修改时间
+        if fast_mode:
+            items_data = []
+            try:
+                with os.scandir(target_path) as entries:
+                    for entry in entries:
+                        try:
+                            stat = entry.stat()
+                            items_data.append({
+                                'path': entry.path,
+                                'name': entry.name,
+                                'mtime': stat.st_mtime,
+                                'is_dir': entry.is_dir()
+                            })
+                        except OSError:
+                            continue
+            except OSError as e:
+                error_message = f"错误: 无法访问路径 '{target_path}'。 {e}"
+                if output_json:
+                    print(json.dumps({"error": error_message}, ensure_ascii=False, indent=4))
+                else:
+                    print(error_message)
+                return
+            
+            if not items_data:
+                if not output_json:
+                    print(f"路径 '{target_path}' 下没有任何项目。")
+                return
+            
+            # 排序
+            items_data.sort(key=lambda x: x['mtime'], reverse=reverse_sort)
+            
+            end_time = time.time()
+            total_duration = end_time - start_time
+            
+            if output_json:
+                results_list = []
+                for item in items_data:
+                    results_list.append({
+                        "path": item['path'],
+                        "mtime": datetime.fromtimestamp(item['mtime']).isoformat(),
+                        "item_type": "folder" if item['is_dir'] else "file",
+                        "method": "scandir-fast"
+                    })
+                print(json.dumps(results_list, ensure_ascii=False, indent=4))
+            else:
+                print("\n" + "-"*20 + " 排序结果 " + "-"*20)
+                for item in items_data:
+                    mtime_str = datetime.fromtimestamp(item['mtime']).strftime('%Y-%m-%d %H:%M:%S')
+                    item_type = "文件夹" if item['is_dir'] else "文件  "
+                    print(f"{mtime_str} - {item['name']:<40} ({item_type}, 方法: scandir-fast)")
+                
+                print("-" * 52)
+                print(f"处理 {len(items_data)} 个项目总耗时: {total_duration:.4f}s")
+                print(f"平均每个项目耗时: {total_duration/len(items_data):.4f}s")
+            
+            return
+        
+        # 普通模式：使用深度扫描获取真实的最新修改时间
         try:
             items = [f.path for f in os.scandir(target_path)]
         except OSError as e:
@@ -421,8 +523,7 @@ if __name__ == "__main__":
         if not output_json:
             print(f"找到 {len(items)} 个项目，开始并行计算修改时间...")
         
-        manager = SmartFolderModTimeManager(use_database_cache=True)
-        start_time = time.time()
+        manager = SmartFolderModTimeManager(use_database_cache=True, fast_mode=False)
         
         sorted_item_infos = manager.sort_folders_by_real_mtime(items, reverse=reverse_sort)
         
@@ -458,13 +559,15 @@ if __name__ == "__main__":
                         help="排序顺序: 'asc' 表示升序, 'desc' 表示降序 (默认)。")
     parser.add_argument("-j", dest="json_output", action="store_true",
                         help="如果指定，则以JSON格式输出结果。")
+    parser.add_argument("-f", dest="fast_mode", action="store_true",
+                        help="快速模式：仅扫描文件夹第一层，速度更快但可能不够精确。")
     
     args = parser.parse_args()
     
     reverse_order = args.sort_order == "desc"
     
     if os.path.exists(args.target_path):
-        process_items_optimized(args.target_path, reverse_sort=reverse_order, output_json=args.json_output)
+        process_items_optimized(args.target_path, reverse_sort=reverse_order, output_json=args.json_output, fast_mode=args.fast_mode)
     else:
         error_message = f"\n错误：路径 '{args.target_path}' 不存在。"
         if args.json_output:
