@@ -106,7 +106,14 @@ def _read_wav_chunks(file_path):
                     break
                 cid, size = struct.unpack('<4sI', ch)
                 cid = cid.decode('ascii', errors='replace')
-                data = f.read(size)
+                
+                # Optimization: Skip 'data' chunk content (audio samples)
+                if cid.lower() == 'data':
+                    f.seek(size, 1)
+                    data = b''
+                else:
+                    data = f.read(size)
+                
                 chunks.append((cid, data, offset))
                 offset += 8 + size
                 if size % 2:  # RIFF 块必须 2 字节对齐

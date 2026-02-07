@@ -1092,9 +1092,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- Mobile Audio Unlock ---
+    function unlockAudioContext() {
+        if (Howler.ctx && Howler.ctx.state === 'suspended') {
+            Howler.ctx.resume().then(() => {
+                console.log('AudioContext resumed via user interaction');
+            });
+        }
+    }
+    document.addEventListener('touchstart', unlockAudioContext, { passive: true });
+    document.addEventListener('click', unlockAudioContext, { passive: true });
+    document.addEventListener('keydown', unlockAudioContext, { passive: true });
+
     function playSong() {
+        if (!sound) return;
+
+        // 尝试恢复可能挂起的 Context
+        if (Howler.ctx && Howler.ctx.state === 'suspended') {
+            Howler.ctx.resume();
+        }
+
         if (!sound.playing()) {
             sound.play();
+
+            // 检查是否因为自动播放策略被阻止
+            setTimeout(() => {
+                if (sound && !sound.playing() && (Howler.ctx && Howler.ctx.state === 'suspended')) {
+                    showToast('请点击页面任意位置开始播放', 'info');
+                }
+            }, 500);
         }
     }
 
