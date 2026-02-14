@@ -9,8 +9,13 @@ from mutagen.id3 import ID3
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4
 
+# 需要读取数据的元数据块（小块）
+_METADATA_CHUNKS = {b'LIST', b'fmt ', b'bext', b'iXML', b'cue ', b'smpl', b'inst'}
+# 跳过读取的阈值：超过此大小的非元数据块直接 seek 跳过
+_CHUNK_READ_LIMIT = 1 * 1024 * 1024  # 1MB
+
 def _read_wav_chunks(file_path):
-    """遍历 WAV 文件的 RIFF 块"""
+    """遍历 WAV 文件的 RIFF 块，只读取元数据块，跳过大数据块（如 PCM data）"""
     try:
         with open(file_path, 'rb') as f:
             header = f.read(12)
@@ -21,12 +26,18 @@ def _read_wav_chunks(file_path):
                 ch = f.read(8)
                 if len(ch) < 8:
                     break
+                cid_raw = ch[:4]
                 cid, size = struct.unpack('<4sI', ch)
                 cid = cid.decode('ascii', errors='replace')
-                data = f.read(size)
+                # 只读取已知的元数据块或很小的块，其余全部 seek 跳过
+                if cid_raw in _METADATA_CHUNKS or size <= _CHUNK_READ_LIMIT:
+                    data = f.read(size)
+                    chunks.append((cid, data))
+                else:
+                    # 跳过大块（如 data 块），不读入内存
+                    f.seek(size, 1)
                 if size % 2:  # RIFF 块必须 2 字节对齐
-                    f.read(1)  # 跳过填充字节
-                chunks.append((cid, data))
+                    f.seek(1, 1)  # 跳过填充字节
             return chunks
     except Exception:
         return []
@@ -91,21 +102,21 @@ def get_audio_metadata(file_path):
     try:
         file_ext = os.path.splitext(file_path)[1].lower()
         
-        # For WAV files, try fallback parsing first (handles non-standard WAV files)
+        # For WAV files, use our own lightweight parser to avoid mutagen reading the entire file
         if file_ext == '.wav':
             fallback = _fallback_wav_metadata(file_path)
-            if fallback:
-                # Successfully parsed with fallback, use these values (with proper defaults)
-                has_real_title = bool(fallback.get('title'))
-                return {
-                    "title": fallback.get('title') or os.path.splitext(os.path.basename(file_path))[0],
-                    "artist": fallback.get('artist') or 'Unknown Artist',
-                    "album": fallback.get('album') or 'Unknown Album',
-                    "tracknumber": parse_track_number(fallback.get('tracknumber')),
-                    "titleFromFilename": not has_real_title
-                }
+            # 无论 fallback 是否找到了元数据标签，都直接返回，不再调用 mutagen
+            # mutagen.File() 对 WAV 可能会读取大量数据，导致严重的磁盘 IO
+            has_real_title = bool(fallback.get('title')) if fallback else False
+            return {
+                "title": (fallback.get('title') if fallback else None) or os.path.splitext(os.path.basename(file_path))[0],
+                "artist": (fallback.get('artist') if fallback else None) or 'Unknown Artist',
+                "album": (fallback.get('album') if fallback else None) or 'Unknown Album',
+                "tracknumber": parse_track_number(fallback.get('tracknumber') if fallback else None),
+                "titleFromFilename": not has_real_title
+            }
         
-        # Standard mutagen parsing for all files (including WAV with standard tags)
+        # Standard mutagen parsing for non-WAV files
         audio = File(file_path)
         if audio is None:
             # Fallback for files that mutagen can't read

@@ -171,33 +171,21 @@ def _extract_wav_cover(file_path):
     1. ID3v2标签（部分WAV文件在末尾或开头附加ID3标签）
     2. RIFF块中嵌入的图片数据
     3. 通过魔术字节识别的图片块
+    注意：不使用 mutagen.File() 以避免读取整个 WAV 数据导致磁盘 IO 延迟
     """
-    cover_data = None
     
-    # 方法1: 尝试使用mutagen读取（可能有ID3标签）
-    try:
-        audio = File(file_path, easy=False)
-        if audio is not None and hasattr(audio, 'tags') and audio.tags:
-            # 检查是否有APIC标签（ID3格式）
-            if hasattr(audio.tags, 'getall'):
-                apic_frames = audio.tags.getall('APIC')
-                if apic_frames:
-                    print("DEBUG: Found APIC in WAV file's ID3 tags.", file=sys.stderr)
-                    return BytesIO(apic_frames[0].data)
-    except Exception as e:
-        print(f"DEBUG: mutagen could not extract WAV cover: {e}", file=sys.stderr)
-    
-    # 方法2: 尝试直接读取ID3标签（某些WAV在文件末尾有ID3v2）
+    # 方法1: 尝试直接读取ID3标签（某些WAV在文件末尾或开头有ID3v2）
+    # ID3() 只读取 ID3 header，非常快
     try:
         id3 = ID3(file_path)
         apic_key = next((k for k in id3.keys() if k.startswith('APIC')), None)
         if apic_key:
-            print("DEBUG: Found APIC in WAV file's appended ID3 tags.", file=sys.stderr)
+            print("DEBUG: Found APIC in WAV file's ID3 tags.", file=sys.stderr)
             return BytesIO(id3[apic_key].data)
     except Exception:
         pass
     
-    # 方法3: 解析RIFF块查找图片数据
+    # 方法2: 解析RIFF块查找图片数据
     # 某些编码器会添加自定义块如 'JUNK', 'PAD ', 或自定义块包含图片
     chunks = _read_wav_chunks(file_path)
     for cid, cdata, _ in chunks:
@@ -1498,6 +1486,41 @@ def get_audio_metadata(file_path):
     """
     try:
         #print(f"DEBUG: Reading metadata from: {file_path}", file=sys.stderr)
+        file_ext = os.path.splitext(file_path)[1].lower()
+        print(f"DEBUG: Detected file extension: {file_ext}", file=sys.stderr)
+
+        track_info = {}
+
+        # WAV 文件特殊处理：不调用 mutagen.File()，因为 mutagen 会读取大量 WAV 数据，
+        # 导致严重的磁盘 IO 延迟。改用轻量级的 RIFF chunk 解析器。
+        if file_ext == '.wav':
+            fallback_meta = _fallback_wav_metadata(file_path)
+            if fallback_meta:
+                track_info = {
+                    'title': fallback_meta.get('title') or None,
+                    'artist': fallback_meta.get('artist') or None,
+                    'album': fallback_meta.get('album') or None,
+                    'albumartist': fallback_meta.get('artist') or None,
+                }
+            else:
+                # Try ID3 tags (some WAV files have ID3 appended)
+                try:
+                    easy_tags = EasyID3(file_path)
+                    track_info = {
+                        'title': easy_tags.get('title', [None])[0],
+                        'artist': easy_tags.get('artist', [None])[0],
+                        'album': easy_tags.get('album', [None])[0],
+                        'albumartist': easy_tags.get('albumartist', [None])[0],
+                    }
+                except Exception:
+                    pass  # No metadata found, track_info stays empty
+
+            # Ensure all keys exist
+            for key in ["title", "artist", "album", "albumartist"]:
+                track_info.setdefault(key, None)
+            return track_info
+
+        # 非 WAV 文件：使用 mutagen 正常解析
         with open(file_path, 'rb') as f:
             audio = File(f)
             if audio is None:
@@ -1506,10 +1529,6 @@ def get_audio_metadata(file_path):
 
             tags = audio.tags
         #print(f"DEBUG: Raw tags from mutagen: {tags}", file=sys.stderr)
-        track_info = {}
-
-        file_ext = os.path.splitext(file_path)[1].lower()
-        print(f"DEBUG: Detected file extension: {file_ext}", file=sys.stderr)
 
         if file_ext == '.mp3':
             # Handle MP3 files (ID3 tags)
@@ -1549,46 +1568,6 @@ def get_audio_metadata(file_path):
                     'album': tags.get('\xa9alb', [None])[0],
                     'albumartist': tags.get('aART', [None])[0]
                 }
-        elif file_ext == '.wav':
-            # Handle WAV files: try custom fallback parser first (handles RIFF/INFO chunks),
-            # then try ID3 tags, then try mutagen's generic tag reading
-            fallback_meta = _fallback_wav_metadata(file_path)
-            if fallback_meta:
-                # Successfully parsed with fallback, use these values
-                track_info = {
-                    'title': fallback_meta.get('title') or None,
-                    'artist': fallback_meta.get('artist') or None,
-                    'album': fallback_meta.get('album') or None,
-                    'albumartist': fallback_meta.get('artist') or None,
-                }
-            else:
-                # Try ID3 tags (some WAV files have ID3 appended)
-                try:
-                    easy_tags = EasyID3(file_path)
-                    track_info = {
-                        'title': easy_tags.get('title', [None])[0],
-                        'artist': easy_tags.get('artist', [None])[0],
-                        'album': easy_tags.get('album', [None])[0],
-                        'albumartist': easy_tags.get('albumartist', [None])[0],
-                    }
-                except Exception:
-                    # Final fallback to mutagen's generic tag reading
-                    if tags:
-                        def _get_tag(key, default=None):
-                            val = tags.get(key, default)
-                            if val is None:
-                                return None
-                            # mutagen may return a list or a single string
-                            if isinstance(val, (list, tuple)):
-                                return val[0]
-                            return val
-
-                        track_info = {
-                            'title': _get_tag('INAM') or _get_tag('TITLE') or _get_tag('\xa9nam') or None,
-                            'artist': _get_tag('IART') or _get_tag('ARTIST') or _get_tag('\xa9ART') or None,
-                            'album': _get_tag('IPRD') or _get_tag('ALBUM') or _get_tag('\xa9alb') or None,
-                            'albumartist': _get_tag('IART') or None,
-                        }
         
         elif file_ext == '.ogg':
              if tags:
