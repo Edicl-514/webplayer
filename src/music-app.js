@@ -90,6 +90,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let playlist = [];
 
+    // --- VBR→CBR 代理流状态 ---
+    let vbrProxyActive = false;     // 当前是否使用 CBR 代理流
+    let vbrTimeOffset = 0;          // 代理流的时间偏移（seek 起始时间）
+    let vbrAccurateDuration = 0;    // ffprobe 获取的精确总时长
+    let vbrClientId = 'music_' + Date.now(); // 客户端 ID，用于后端 ffmpeg 进程管理
+    let vbrCurrentMusicPath = '';   // 当前音乐文件路径（用于 CBR 代理 API）
+    let vbrCurrentMediaDir = '';    // 当前媒体目录
+
     // --- WebSocket 初始化和任务进度处理 ---
     function initializeWebSocket() {
         ws = new WebSocket(`ws://${window.location.host}`);
@@ -665,19 +673,61 @@ document.addEventListener('DOMContentLoaded', () => {
         // The song.src from the server now includes the full path and mediaDir query
         const finalSrcForHowler = song.src;
 
+        // --- VBR 检测与 CBR 代理流 ---
+        // 解析音频文件路径信息，用于 CBR 代理 API
+        const songUrl = new URL(song.src, window.location.origin);
+        const songMediaDir = songUrl.searchParams.get('mediaDir') || '';
+        let songMusicPath = decodeURIComponent(songUrl.pathname);
+        if (songMusicPath.startsWith('/music/')) {
+            songMusicPath = songMusicPath.substring('/music/'.length);
+        } else if (songMusicPath.startsWith('/')) {
+            songMusicPath = songMusicPath.substring(1);
+        }
+        vbrCurrentMusicPath = songMusicPath;
+        vbrCurrentMediaDir = songMediaDir;
+        vbrTimeOffset = 0;
+        vbrProxyActive = false;
+        vbrAccurateDuration = 0;
+
+        // 检测是否为 MP3 文件，如果是则获取音频信息并启用 CBR 代理
+        const isMP3 = songMusicPath.toLowerCase().endsWith('.mp3');
+        if (isMP3) {
+            // 异步获取精确时长，如果是 VBR 则启用代理模式
+            fetchAudioInfoForVBR(songMusicPath, songMediaDir);
+        }
+
+        // 决定使用的音频源
+        let audioSrc;
+        if (isMP3) {
+            // MP3 文件统一使用 CBR 代理流（从头开始）
+            const params = new URLSearchParams({
+                path: songMusicPath,
+                t: '0',
+                cid: vbrClientId,
+            });
+            if (songMediaDir) params.append('mediaDir', songMediaDir);
+            audioSrc = `/api/audio-cbr?${params.toString()}&_=${Date.now()}`;
+            vbrProxyActive = true;
+            console.log('[VBR Proxy] Using CBR proxy stream for MP3:', songMusicPath);
+        } else {
+            audioSrc = finalSrcForHowler;
+        }
+
         sound = new Howl({
-            src: [finalSrcForHowler],
+            src: [audioSrc],
             html5: true,
             useWebAudio: true,
-            crossOrigin: 'anonymous', // 恢复此行以启用音频可视化
-            format: ['flac', 'mp3', 'm4a', 'ogg', 'wav'],  // 添加 WAV 支持
+            crossOrigin: 'anonymous',
+            format: ['flac', 'mp3', 'm4a', 'ogg', 'wav'],
             volume: volumeSlider.value,
             onplay: () => {
                 isPlaying = true;
                 playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
                 albumCover.classList.add('playing');
                 albumCover.style.animationPlayState = 'running';
-                durationEl.textContent = formatTime(sound.duration());
+                // 使用精确时长（如果有）
+                const displayDuration = vbrAccurateDuration > 0 ? vbrAccurateDuration : sound.duration();
+                durationEl.textContent = formatTime(displayDuration);
                 requestAnimationFrame(updateProgress);
                 cancelAnimationFrame(lyricRAF);
                 lyricRAF = requestAnimationFrame(updateLyrics);
@@ -694,17 +744,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
 
                                 if (!audioNode._webAudioSource) {
-                                    // 创建 MediaElementSource 连接源
                                     const source = Howler.ctx.createMediaElementSource(audioNode);
                                     audioNode._webAudioSource = source;
-
-                                    // 连接到分析器用于可视化
                                     source.connect(analyser);
-
-                                    // 必须连接到 destination 才能听到声音(因为 createMediaElementSource 会切断默认输出)
                                     source.connect(Howler.ctx.destination);
                                 } else {
-                                    // 如果已创建，确保连接存在
                                     audioNode._webAudioSource.connect(analyser);
                                     audioNode._webAudioSource.connect(Howler.ctx.destination);
                                 }
@@ -713,7 +757,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             console.warn('Visualization setup failed for HTML5 audio:', e);
                         }
                     } else {
-                        // Web Audio 模式(默认)可以直接连接 masterGain
                         Howler.masterGain.connect(analyser);
                     }
 
@@ -732,8 +775,8 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             onend: () => playNext(),
             onload: () => {
-                durationEl.textContent = formatTime(sound.duration());
-                // 不在这里设置主题色,等待封面真正加载完成后再取色
+                const displayDuration = vbrAccurateDuration > 0 ? vbrAccurateDuration : sound.duration();
+                durationEl.textContent = formatTime(displayDuration);
                 if (playOnLoad) {
                     playSong();
                 }
@@ -1147,7 +1190,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function playNext() {
         if (playMode === 1) { // 单曲循环
-            sound.seek(0);
+            if (vbrProxyActive) {
+                // VBR 代理模式下，重新加载从 0 开始的流
+                seekVBR(0);
+            } else {
+                sound.seek(0);
+            }
             playSong();
             return;
         }
@@ -1166,17 +1214,156 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- UI更新与交互 ---
 
+    // 获取校正后的当前播放时间（VBR 代理模式下加上偏移量）
+    function getCorrectedSeekTime() {
+        if (!sound) return 0;
+        const rawSeek = sound.seek() || 0;
+        return rawSeek + vbrTimeOffset;
+    }
+
+    // 获取当前歌曲的有效总时长
+    function getEffectiveDuration() {
+        if (vbrAccurateDuration > 0) return vbrAccurateDuration;
+        if (sound) return sound.duration() || 0;
+        return 0;
+    }
+
     function updateProgress() {
         if (!sound || !isPlaying) return;
-        const seek = sound.seek() || 0;
-        currentTimeEl.textContent = formatTime(seek);
-        progressBar.value = (seek / sound.duration()) * 100 || 0;
+        const correctedTime = getCorrectedSeekTime();
+        const duration = getEffectiveDuration();
+        currentTimeEl.textContent = formatTime(correctedTime);
+        progressBar.value = duration > 0 ? (correctedTime / duration) * 100 : 0;
         requestAnimationFrame(updateProgress);
     }
 
     function seek(e) {
         const percent = e.target.value / 100;
-        sound.seek(sound.duration() * percent);
+        const duration = getEffectiveDuration();
+        const targetTime = duration * percent;
+
+        if (vbrProxyActive) {
+            seekVBR(targetTime);
+        } else {
+            sound.seek(targetTime);
+        }
+    }
+
+    // VBR 代理模式下的 seek：销毁旧流，创建新流
+    function seekVBR(targetTime) {
+        if (!vbrCurrentMusicPath) return;
+        const wasPlaying = isPlaying;
+
+        console.log(`[VBR Proxy] Seeking to ${formatTime(targetTime)}`);
+
+        // 保存当前音量
+        const currentVolume = sound ? sound.volume() : volumeSlider.value;
+        const currentRate = sound ? sound.rate() : 1;
+
+        // 销毁旧的 Howl
+        if (sound) {
+            sound.unload();
+        }
+
+        // 更新时间偏移
+        vbrTimeOffset = targetTime;
+
+        // 构建新的 CBR 代理流 URL
+        const params = new URLSearchParams({
+            path: vbrCurrentMusicPath,
+            t: String(targetTime),
+            cid: vbrClientId,
+        });
+        if (vbrCurrentMediaDir) params.append('mediaDir', vbrCurrentMediaDir);
+        const newSrc = `/api/audio-cbr?${params.toString()}&_=${Date.now()}`;
+
+        // 创建新的 Howl
+        sound = new Howl({
+            src: [newSrc],
+            html5: true,
+            useWebAudio: true,
+            crossOrigin: 'anonymous',
+            format: ['mp3'],
+            volume: currentVolume,
+            rate: currentRate,
+            onplay: () => {
+                isPlaying = true;
+                playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                albumCover.classList.add('playing');
+                albumCover.style.animationPlayState = 'running';
+                const displayDuration = getEffectiveDuration();
+                durationEl.textContent = formatTime(displayDuration);
+                requestAnimationFrame(updateProgress);
+                cancelAnimationFrame(lyricRAF);
+                lyricRAF = requestAnimationFrame(updateLyrics);
+
+                if (canvas.getContext) {
+                    setupVisualizer();
+                    if (sound._html5) {
+                        try {
+                            const audioNode = sound._sounds[0]._node;
+                            if (audioNode) {
+                                if (!audioNode.crossOrigin) audioNode.crossOrigin = 'anonymous';
+                                if (!audioNode._webAudioSource) {
+                                    const source = Howler.ctx.createMediaElementSource(audioNode);
+                                    audioNode._webAudioSource = source;
+                                    source.connect(analyser);
+                                    source.connect(Howler.ctx.destination);
+                                } else {
+                                    audioNode._webAudioSource.connect(analyser);
+                                    audioNode._webAudioSource.connect(Howler.ctx.destination);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('VBR seek: Visualization setup failed:', e);
+                        }
+                    } else {
+                        Howler.masterGain.connect(analyser);
+                    }
+                    if (isVisualizerVisible) {
+                        cancelAnimationFrame(visualizerRAF);
+                        draw();
+                    }
+                }
+            },
+            onpause: () => {
+                isPlaying = false;
+                playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+                albumCover.style.animationPlayState = 'paused';
+                cancelAnimationFrame(lyricRAF);
+                cancelAnimationFrame(visualizerRAF);
+            },
+            onend: () => playNext(),
+            onload: () => {
+                durationEl.textContent = formatTime(getEffectiveDuration());
+                if (wasPlaying) {
+                    playSong();
+                }
+            }
+        });
+
+        // 立即更新进度条显示
+        currentTimeEl.textContent = formatTime(targetTime);
+        const duration = getEffectiveDuration();
+        progressBar.value = duration > 0 ? (targetTime / duration) * 100 : 0;
+    }
+
+    // 异步获取音频信息，检测是否需要 VBR 代理
+    async function fetchAudioInfoForVBR(musicPath, mediaDir) {
+        try {
+            const params = new URLSearchParams({ path: musicPath });
+            if (mediaDir) params.append('mediaDir', mediaDir);
+            const resp = await fetch(`/api/audio-info?${params.toString()}`);
+            const data = await resp.json();
+            if (data.duration && data.duration > 0) {
+                vbrAccurateDuration = data.duration;
+                // 更新显示的总时长
+                durationEl.textContent = formatTime(vbrAccurateDuration);
+                console.log(`[VBR Proxy] Accurate duration: ${formatTime(vbrAccurateDuration)} (${data.codec}, ${Math.round(data.bitrate / 1000)}kbps)`);
+            }
+        } catch (err) {
+            console.warn('[VBR Proxy] Failed to fetch audio info:', err);
+        }
     }
 
     function setVolume(e) {
@@ -1557,7 +1744,7 @@ document.addEventListener('DOMContentLoaded', () => {
             cancelAnimationFrame(lyricRAF);
             return;
         }
-        const currentTime = sound.seek();
+        const currentTime = getCorrectedSeekTime();
         let activeIndex = -1;
 
         // 找到当前高亮的行
@@ -1720,7 +1907,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const targetGroup = lyricsWrapper.querySelector('.lyric-group.target');
             if (targetGroup) {
                 const time = parseFloat(targetGroup.dataset.time);
-                sound.seek(time);
+                if (vbrProxyActive) {
+                    seekVBR(time);
+                } else {
+                    sound.seek(time);
+                }
                 if (!isPlaying) playSong();
             }
             exitLyricScrollState();

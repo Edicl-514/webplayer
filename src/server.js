@@ -18,6 +18,15 @@ const MUSIC_DIR = MEDIA_DIRS.find(d => d.alias === 'MUSIC')?.path || path.join(_
 let currentMediaDir = MEDIA_DIRS[0].path; // 默认使用第一个媒体目录
 const WEB_ROOT = __dirname; // 静态文件（如 index.html）的根目录
 
+// VBR→CBR 代理流：跟踪每个客户端的活跃 ffmpeg 进程
+const activeFFmpegProcesses = new Map();
+// 进程退出时清理所有 ffmpeg
+process.on('exit', () => {
+    for (const [, proc] of activeFFmpegProcesses) {
+        try { proc.kill('SIGTERM'); } catch (e) { }
+    }
+});
+
 const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     // 安全地解码路径，处理可能的编码错误
@@ -28,6 +37,159 @@ const server = http.createServer(async (req, res) => {
         // 如果解码失败，使用原始路径并记录错误
         console.warn('Failed to decode pathname, using raw pathname:', parsedUrl.pathname);
         pathname = parsedUrl.pathname;
+    }
+
+    // ============================================================
+    // VBR→CBR 代理流：跟踪活跃的 ffmpeg 转码进程
+    // ============================================================
+    // (activeFFmpegProcesses 定义在 server handler 外部)
+
+    // --- CBR 代理流 API ---
+    if (pathname === '/api/audio-cbr') {
+        const audioPath = parsedUrl.query.path;
+        const startTime = parseFloat(parsedUrl.query.t || '0');
+        const clientId = parsedUrl.query.cid || 'default';
+        const bitrateK = parsedUrl.query.br || '192';
+
+        if (!audioPath) {
+            res.statusCode = 400;
+            res.end('Missing path parameter');
+            return;
+        }
+
+        // 解析完整文件路径
+        const requestedMediaDir = parsedUrl.query.mediaDir;
+        let fullAudioPath;
+        if (requestedMediaDir) {
+            fullAudioPath = path.join(requestedMediaDir, audioPath);
+        } else {
+            fullAudioPath = path.join(MUSIC_DIR, audioPath);
+        }
+
+        if (!fs.existsSync(fullAudioPath)) {
+            res.statusCode = 404;
+            res.end('Audio file not found: ' + fullAudioPath);
+            return;
+        }
+
+        // 清理该客户端之前的 ffmpeg 进程
+        if (activeFFmpegProcesses.has(clientId)) {
+            const old = activeFFmpegProcesses.get(clientId);
+            console.log(`[CBR Proxy] Killing old ffmpeg for client ${clientId}`);
+            try { old.kill('SIGTERM'); } catch (e) { }
+            activeFFmpegProcesses.delete(clientId);
+        }
+
+        console.log(`[CBR Proxy] Stream: file=${path.basename(fullAudioPath)}, t=${startTime}s, br=${bitrateK}k, cid=${clientId}`);
+
+        const ffmpegArgs = ['-hide_banner', '-loglevel', 'warning'];
+        if (startTime > 0) {
+            ffmpegArgs.push('-ss', String(startTime));
+        }
+        ffmpegArgs.push(
+            '-i', fullAudioPath,
+            '-c:a', 'libmp3lame',
+            '-b:a', `${bitrateK}k`,
+            '-f', 'mp3',
+            '-fflags', '+genpts',
+            'pipe:1'
+        );
+
+        const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+        activeFFmpegProcesses.set(clientId, ffmpeg);
+
+        ffmpeg.stderr.on('data', d => {
+            const msg = d.toString().trim();
+            if (msg) console.log(`[CBR Proxy ffmpeg] ${msg}`);
+        });
+
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-store, no-cache');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        ffmpeg.stdout.pipe(res);
+
+        const cleanup = () => {
+            if (activeFFmpegProcesses.get(clientId) === ffmpeg) {
+                activeFFmpegProcesses.delete(clientId);
+            }
+            try { ffmpeg.kill('SIGTERM'); } catch (e) { }
+        };
+
+        req.on('close', cleanup);
+        req.on('error', cleanup);
+        res.on('error', cleanup);
+        ffmpeg.on('error', (err) => {
+            console.error(`[CBR Proxy] ffmpeg error:`, err.message);
+            cleanup();
+        });
+        ffmpeg.on('close', (code) => {
+            if (activeFFmpegProcesses.get(clientId) === ffmpeg) {
+                activeFFmpegProcesses.delete(clientId);
+            }
+        });
+        return;
+    }
+
+    // --- 音频信息 API (精确时长) ---
+    if (pathname === '/api/audio-info' && req.method === 'GET') {
+        const audioPath = parsedUrl.query.path;
+        if (!audioPath) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Missing path parameter' }));
+            return;
+        }
+
+        const requestedMediaDir = parsedUrl.query.mediaDir;
+        let fullAudioPath;
+        if (requestedMediaDir) {
+            fullAudioPath = path.join(requestedMediaDir, audioPath);
+        } else {
+            fullAudioPath = path.join(MUSIC_DIR, audioPath);
+        }
+
+        if (!fs.existsSync(fullAudioPath)) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'File not found' }));
+            return;
+        }
+
+        const ffprobe = spawn('ffprobe', [
+            '-v', 'quiet',
+            '-show_entries', 'format=duration,bit_rate,size',
+            '-show_entries', 'stream=codec_name,bit_rate,sample_rate,channels',
+            '-of', 'json',
+            fullAudioPath
+        ]);
+
+        let output = '';
+        ffprobe.stdout.on('data', d => output += d);
+        ffprobe.on('close', (code) => {
+            res.setHeader('Content-Type', 'application/json');
+            if (code !== 0) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: 'ffprobe failed' }));
+                return;
+            }
+            try {
+                const info = JSON.parse(output);
+                const stream = info.streams?.[0] || {};
+                res.end(JSON.stringify({
+                    duration: parseFloat(info.format?.duration || 0),
+                    bitrate: parseInt(info.format?.bit_rate || 0),
+                    size: parseInt(info.format?.size || 0),
+                    codec: stream.codec_name || 'unknown',
+                    sample_rate: parseInt(stream.sample_rate || 0),
+                    channels: parseInt(stream.channels || 0),
+                }));
+            } catch (e) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: 'Failed to parse ffprobe output' }));
+            }
+        });
+        return;
     }
 
     // 新增：处理音乐列表请求
