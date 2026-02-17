@@ -131,7 +131,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // --- 音频信息 API (精确时长) ---
+    // --- 音频信息 API (精确时长 + LUFS 响度) ---
     if (pathname === '/api/audio-info' && req.method === 'GET') {
         const audioPath = parsedUrl.query.path;
         if (!audioPath) {
@@ -156,38 +156,84 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        const ffprobe = spawn('ffprobe', [
-            '-v', 'quiet',
-            '-show_entries', 'format=duration,bit_rate,size',
-            '-show_entries', 'stream=codec_name,bit_rate,sample_rate,channels',
-            '-of', 'json',
-            fullAudioPath
-        ]);
+        // 是否需要 LUFS 扫描
+        const scanLufs = parsedUrl.query.lufs === 'true';
 
-        let output = '';
-        ffprobe.stdout.on('data', d => output += d);
-        ffprobe.on('close', (code) => {
+        // 1. ffprobe 获取格式/流信息
+        const ffprobePromise = new Promise((resolve) => {
+            const ffprobe = spawn('ffprobe', [
+                '-v', 'quiet',
+                '-show_entries', 'format=duration,bit_rate,size',
+                '-show_entries', 'stream=codec_name,bit_rate,sample_rate,channels',
+                '-of', 'json',
+                fullAudioPath
+            ]);
+            let output = '';
+            ffprobe.stdout.on('data', d => output += d);
+            ffprobe.on('close', (code) => {
+                if (code !== 0) {
+                    resolve({ error: 'ffprobe failed' });
+                    return;
+                }
+                try {
+                    const info = JSON.parse(output);
+                    const stream = info.streams?.[0] || {};
+                    resolve({
+                        duration: parseFloat(info.format?.duration || 0),
+                        bitrate: parseInt(info.format?.bit_rate || 0),
+                        size: parseInt(info.format?.size || 0),
+                        codec: stream.codec_name || 'unknown',
+                        sample_rate: parseInt(stream.sample_rate || 0),
+                        channels: parseInt(stream.channels || 0),
+                    });
+                } catch (e) {
+                    resolve({ error: 'Failed to parse ffprobe output' });
+                }
+            });
+        });
+
+        // 2. ebur128 LUFS 扫描（仅在请求时执行）
+        const lufsPromise = scanLufs ? new Promise((resolve) => {
+            const ffmpeg = spawn('ffmpeg', [
+                '-hide_banner', '-nostats',
+                '-i', fullAudioPath,
+                '-af', 'ebur128',
+                '-f', 'null', 'NUL'
+            ], { stdio: ['pipe', 'pipe', 'pipe'] });
+            let stderrOutput = '';
+            ffmpeg.stderr.on('data', d => stderrOutput += d.toString());
+            ffmpeg.on('close', (code) => {
+                if (code !== 0) {
+                    console.warn('[audio-info] ebur128 scan failed, code:', code);
+                    resolve(null);
+                    return;
+                }
+                // 从 ebur128 输出中提取 Integrated loudness
+                const match = stderrOutput.match(/I:\s+(-?[\d.]+)\s+LUFS/);
+                if (match) {
+                    resolve(parseFloat(match[1]));
+                } else {
+                    console.warn('[audio-info] Could not parse LUFS from ebur128 output');
+                    resolve(null);
+                }
+            });
+            ffmpeg.on('error', () => resolve(null));
+        }) : Promise.resolve(null);
+
+        // 并行执行，合并结果
+        Promise.all([ffprobePromise, lufsPromise]).then(([probeResult, lufs]) => {
             res.setHeader('Content-Type', 'application/json');
-            if (code !== 0) {
+            if (probeResult.error) {
                 res.statusCode = 500;
-                res.end(JSON.stringify({ error: 'ffprobe failed' }));
+                res.end(JSON.stringify({ error: probeResult.error }));
                 return;
             }
-            try {
-                const info = JSON.parse(output);
-                const stream = info.streams?.[0] || {};
-                res.end(JSON.stringify({
-                    duration: parseFloat(info.format?.duration || 0),
-                    bitrate: parseInt(info.format?.bit_rate || 0),
-                    size: parseInt(info.format?.size || 0),
-                    codec: stream.codec_name || 'unknown',
-                    sample_rate: parseInt(stream.sample_rate || 0),
-                    channels: parseInt(stream.channels || 0),
-                }));
-            } catch (e) {
-                res.statusCode = 500;
-                res.end(JSON.stringify({ error: 'Failed to parse ffprobe output' }));
+            const result = { ...probeResult };
+            if (lufs !== null) {
+                result.lufs = lufs;
+                console.log(`[audio-info] ${path.basename(fullAudioPath)}: LUFS=${lufs}`);
             }
+            res.end(JSON.stringify(result));
         });
         return;
     }

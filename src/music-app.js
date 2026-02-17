@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lyricsTypeSelect = document.getElementById('lyrics-type');
     const searchResultsLimitInput = document.getElementById('search-results-limit');
     const forceMatchSelect = document.getElementById('force-match');
+    const autoGainSelect = document.getElementById('auto-gain');
     const subtitleBtn = document.getElementById('subtitle-btn');
     const localSubtitleList = document.querySelector('.local-subtitle-list');
     const transcribeModelList = document.querySelector('.transcribe-model-list');
@@ -97,6 +98,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let vbrClientId = 'music_' + Date.now(); // 客户端 ID，用于后端 ffmpeg 进程管理
     let vbrCurrentMusicPath = '';   // 当前音乐文件路径（用于 CBR 代理 API）
     let vbrCurrentMediaDir = '';    // 当前媒体目录
+
+    // --- 音量归一化状态 ---
+    const NORMALIZATION_TARGET_LUFS = -14;   // 目标响度 (EBU R128 流媒体标准)
+    const NORMALIZATION_TOLERANCE = 3;       // 容差：响度在目标±3 LUFS 内不调整
+    const NORMALIZATION_MAX_GAIN_DB = 20;    // 最大增益限制 (dB)
+    let normGainNode = null;                 // 归一化增益节点
+    let normCompressorNode = null;           // 防削波压缩器节点
+    let currentTrackLufs = null;             // 当前曲目的 LUFS 值
 
     // --- WebSocket 初始化和任务进度处理 ---
     function initializeWebSocket() {
@@ -534,6 +543,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const bufferLength = analyser.frequencyBinCount;
             dataArray = new Uint8Array(bufferLength);
             visualizerCtx = canvas.getContext('2d');
+
+            // 创建归一化增益节点
+            normGainNode = audioContext.createGain();
+            normGainNode.gain.value = 1.0; // 默认不调整
+
+            // 创建防削波压缩器（作为 limiter 使用）
+            normCompressorNode = audioContext.createDynamicsCompressor();
+            normCompressorNode.threshold.value = -1;   // -1 dBFS 开始压缩
+            normCompressorNode.knee.value = 0;          // 硬拐点，严格限制
+            normCompressorNode.ratio.value = 20;        // 高压缩比，接近 limiter
+            normCompressorNode.attack.value = 0.001;    // 1ms 快速响应
+            normCompressorNode.release.value = 0.1;     // 100ms 释放
         }
 
         // Always update canvas size for responsiveness
@@ -691,10 +712,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 检测是否为 MP3 文件，如果是则获取音频信息并启用 CBR 代理
         const isMP3 = songMusicPath.toLowerCase().endsWith('.mp3');
-        if (isMP3) {
-            // 异步获取精确时长，如果是 VBR 则启用代理模式
-            fetchAudioInfoForVBR(songMusicPath, songMediaDir);
-        }
+        // 重置归一化增益（新歌曲加载时先恢复默认）
+        currentTrackLufs = null;
+        if (normGainNode) normGainNode.gain.value = 1.0;
+        // 异步获取音频信息（精确时长 + LUFS 响度）
+        fetchAudioInfoAndLufs(songMusicPath, songMediaDir, isMP3);
 
         // 决定使用的音频源
         let audioSrc;
@@ -734,7 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (canvas.getContext) {
                     setupVisualizer();
 
-                    // 处理 HTML5 Audio 模式下的音频可视化连接
+                    // 处理 HTML5 Audio 模式下的音频可视化 + 归一化连接
                     if (sound._html5) {
                         try {
                             const audioNode = sound._sounds[0]._node;
@@ -746,18 +768,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (!audioNode._webAudioSource) {
                                     const source = Howler.ctx.createMediaElementSource(audioNode);
                                     audioNode._webAudioSource = source;
-                                    source.connect(analyser);
-                                    source.connect(Howler.ctx.destination);
+                                    connectAudioChain(source);
                                 } else {
-                                    audioNode._webAudioSource.connect(analyser);
-                                    audioNode._webAudioSource.connect(Howler.ctx.destination);
+                                    connectAudioChain(audioNode._webAudioSource);
                                 }
                             }
                         } catch (e) {
                             console.warn('Visualization setup failed for HTML5 audio:', e);
                         }
                     } else {
-                        Howler.masterGain.connect(analyser);
+                        connectAudioChain(Howler.masterGain);
                     }
 
                     if (isVisualizerVisible) {
@@ -1307,18 +1327,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (!audioNode._webAudioSource) {
                                     const source = Howler.ctx.createMediaElementSource(audioNode);
                                     audioNode._webAudioSource = source;
-                                    source.connect(analyser);
-                                    source.connect(Howler.ctx.destination);
+                                    connectAudioChain(source);
                                 } else {
-                                    audioNode._webAudioSource.connect(analyser);
-                                    audioNode._webAudioSource.connect(Howler.ctx.destination);
+                                    connectAudioChain(audioNode._webAudioSource);
                                 }
                             }
                         } catch (e) {
                             console.warn('VBR seek: Visualization setup failed:', e);
                         }
                     } else {
-                        Howler.masterGain.connect(analyser);
+                        connectAudioChain(Howler.masterGain);
                     }
                     if (isVisualizerVisible) {
                         cancelAnimationFrame(visualizerRAF);
@@ -1348,22 +1366,112 @@ document.addEventListener('DOMContentLoaded', () => {
         progressBar.value = duration > 0 ? (targetTime / duration) * 100 : 0;
     }
 
-    // 异步获取音频信息，检测是否需要 VBR 代理
-    async function fetchAudioInfoForVBR(musicPath, mediaDir) {
+    /**
+     * 将音频源连接到 归一化增益 → 压缩器(limiter) → 可视化(analyser) → 输出(destination)
+     * 如果归一化节点未初始化，则回退到直连
+     */
+    function connectAudioChain(sourceNode) {
         try {
-            const params = new URLSearchParams({ path: musicPath });
-            if (mediaDir) params.append('mediaDir', mediaDir);
-            const resp = await fetch(`/api/audio-info?${params.toString()}`);
-            const data = await resp.json();
-            if (data.duration && data.duration > 0) {
-                vbrAccurateDuration = data.duration;
-                // 更新显示的总时长
-                durationEl.textContent = formatTime(vbrAccurateDuration);
-                console.log(`[VBR Proxy] Accurate duration: ${formatTime(vbrAccurateDuration)} (${data.codec}, ${Math.round(data.bitrate / 1000)}kbps)`);
+            // 断开所有现有连接，防止重复连接导致音量叠加
+            try { sourceNode.disconnect(); } catch (e) { /* 可能未连接，忽略 */ }
+            if (normGainNode) try { normGainNode.disconnect(); } catch (e) { }
+            if (normCompressorNode) try { normCompressorNode.disconnect(); } catch (e) { }
+
+            if (normGainNode && normCompressorNode && analyser) {
+                // 完整链路: source → normGain → compressor → analyser → destination
+                //                                           └→ destination
+                sourceNode.connect(normGainNode);
+                normGainNode.connect(normCompressorNode);
+                normCompressorNode.connect(analyser);
+                normCompressorNode.connect(Howler.ctx.destination);
+            } else if (analyser) {
+                // 回退: source → analyser → destination
+                sourceNode.connect(analyser);
+                sourceNode.connect(Howler.ctx.destination);
+            } else {
+                sourceNode.connect(Howler.ctx.destination);
             }
-        } catch (err) {
-            console.warn('[VBR Proxy] Failed to fetch audio info:', err);
+        } catch (e) {
+            console.warn('[AudioChain] Connection failed:', e);
+            // 最终回退
+            try { sourceNode.connect(Howler.ctx.destination); } catch (e2) { }
         }
+    }
+
+    /**
+     * 根据 LUFS 值计算并应用归一化增益
+     * @param {number} lufs - 音频的集成响度 (LUFS)
+     */
+    function applyNormalizationGain(lufs) {
+        if (!normGainNode) return;
+
+        currentTrackLufs = lufs;
+        const setting = autoGainSelect ? autoGainSelect.value : 'auto';
+
+        if (setting === 'off') {
+            normGainNode.gain.value = 1.0;
+            console.log(`[Normalization] Disabled (Off), gain=1.0`);
+            return;
+        }
+
+        // 响度在目标±容差范围内，视为正常，不调整
+        const diff = NORMALIZATION_TARGET_LUFS - lufs;
+
+        // 如果是"auto"模式，应用容差检查
+        if (setting === 'auto' && Math.abs(diff) <= NORMALIZATION_TOLERANCE) {
+            normGainNode.gain.value = 1.0;
+            console.log(`[Normalization] Track LUFS=${lufs}, within tolerance (±${NORMALIZATION_TOLERANCE}), no adjustment (Auto)`);
+            return;
+        }
+
+        // "on"模式或者"auto"模式下超出容差，应用增益
+
+        // 限制最大增益
+        const clampedDiffDb = Math.min(diff, NORMALIZATION_MAX_GAIN_DB);
+        // 衰减不限制（响度过高的音频可以随意往下调）
+        const finalDiffDb = diff < 0 ? diff : clampedDiffDb;
+        const gainLinear = Math.pow(10, finalDiffDb / 20);
+
+        normGainNode.gain.value = gainLinear;
+        console.log(`[Normalization] Track LUFS=${lufs}, target=${NORMALIZATION_TARGET_LUFS}, gain=${finalDiffDb > 0 ? '+' : ''}${finalDiffDb.toFixed(1)}dB (x${gainLinear.toFixed(3)})`);
+
+        showToast(`已自动增益: ${finalDiffDb > 0 ? '+' : ''}${finalDiffDb.toFixed(1)}dB`, 'info');
+    }
+
+    // 异步获取音频信息（精确时长 + LUFS 响度）
+    // 分两步：1. 快速获取时长（ffprobe）  2. 异步获取 LUFS（ebur128，不阻塞播放）
+    async function fetchAudioInfoAndLufs(musicPath, mediaDir, isMP3 = false) {
+        const baseParams = new URLSearchParams({ path: musicPath });
+        if (mediaDir) baseParams.append('mediaDir', mediaDir);
+
+        // 第一步：快速获取基本信息（ffprobe only，不含 LUFS）
+        if (isMP3) {
+            try {
+                const resp = await fetch(`/api/audio-info?${baseParams.toString()}`);
+                const data = await resp.json();
+                if (data.duration && data.duration > 0) {
+                    vbrAccurateDuration = data.duration;
+                    durationEl.textContent = formatTime(vbrAccurateDuration);
+                    console.log(`[VBR Proxy] Accurate duration: ${formatTime(vbrAccurateDuration)} (${data.codec}, ${Math.round(data.bitrate / 1000)}kbps)`);
+                }
+            } catch (err) {
+                console.warn('[AudioInfo] Failed to fetch duration:', err);
+            }
+        }
+
+        // 第二步：异步获取 LUFS 响度（ebur128 扫描，不阻塞 UI）
+        const lufsParams = new URLSearchParams({ path: musicPath, lufs: 'true' });
+        if (mediaDir) lufsParams.append('mediaDir', mediaDir);
+        fetch(`/api/audio-info?${lufsParams.toString()}`)
+            .then(resp => resp.json())
+            .then(data => {
+                if (data.lufs !== undefined && data.lufs !== null) {
+                    applyNormalizationGain(data.lufs);
+                } else {
+                    console.log('[Normalization] No LUFS data available, skipping normalization');
+                }
+            })
+            .catch(err => console.warn('[Normalization] Failed to fetch LUFS:', err));
     }
 
     function setVolume(e) {
@@ -1940,8 +2048,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatTime(secs) {
-        const minutes = Math.floor(secs / 60) || 0;
-        const seconds = Math.floor(secs % 60) || 0;
+        // Handle invalid/unknown durations (Infinity, NaN, undefined, null, negative)
+        if (!Number.isFinite(secs) || secs <= 0) {
+            return '00:00';
+        }
+
+        const minutes = Math.floor(secs / 60);
+        const seconds = Math.floor(secs % 60);
         return `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
     }
 
@@ -2327,7 +2440,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lyricsFetch: lyricsFetchSelect.value,
             lyricsType: lyricsTypeSelect.value,
             searchResultsLimit: searchResultsLimitInput.value,
-            forceMatch: forceMatchSelect.value
+            forceMatch: forceMatchSelect.value,
+            autoGain: autoGainSelect.value
         };
         localStorage.setItem('playerSettings', JSON.stringify(settings));
     }
@@ -2340,6 +2454,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsTypeSelect.value = settings.lyricsType || 'bilingual';
         searchResultsLimitInput.value = settings.searchResultsLimit || '5';
         forceMatchSelect.value = settings.forceMatch || 'false';
+        autoGainSelect.value = settings.autoGain || 'auto';
     }
 
     function getSettings() {
@@ -2349,7 +2464,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lyricsFetch: lyricsFetchSelect.value,
             lyricsType: lyricsTypeSelect.value,
             searchResultsLimit: searchResultsLimitInput.value,
-            forceMatch: forceMatchSelect.value
+            forceMatch: forceMatchSelect.value,
+            autoGain: autoGainSelect.value
         };
     }
 
@@ -2359,6 +2475,12 @@ document.addEventListener('DOMContentLoaded', () => {
     lyricsTypeSelect.addEventListener('change', saveSettings);
     searchResultsLimitInput.addEventListener('change', saveSettings);
     forceMatchSelect.addEventListener('change', saveSettings);
+    autoGainSelect.addEventListener('change', () => {
+        saveSettings();
+        if (currentTrackLufs !== null) {
+            applyNormalizationGain(currentTrackLufs);
+        }
+    });
 
     // --- 歌词文件处理 ---
     function handleLrcFileSelect(event) {
