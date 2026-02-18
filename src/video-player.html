@@ -446,8 +446,25 @@
                 // --- End: Set initial background to thumbnail ---
 
                 decodedVideoSrc = decodeURIComponent(videoSrc); // 赋值给全局变量
-                // 检测需要 HLS 代理播放的格式（浏览器无法直接播放）
-                const _hlsProxyExts = ['.avi', '.mkv', '.flv', '.wmv'];
+                                // 检测需要 HLS 代理播放的格式（浏览器无法直接播放）
+                                const _hlsProxyExts = [
+                                                        '.avi',    // 微软早期格式
+                                                        '.mkv',    // 多媒体封装格式
+                                                        '.flv',    // Adobe Flash (浏览器已弃用)
+                                                        '.f4v',    // Adobe Flash
+                                                        '.wmv',    // Windows Media
+                                                        '.asf',    // Windows Media
+                                                        '.rmvb',   // RealMedia
+                                                        '.rm',     // RealMedia
+                                                        '.vob',    // DVD 视频格式
+                                                        '.mpg',    // MPEG-1/2
+                                                        '.mpeg',   // MPEG-1/2
+                                                        '.ts',     // 传输流 (虽 HLS 常用，但 .ts 文件不能直接在 <video> src 播放，需 hls.js)
+                                                        '.mts',    // AVCHD 高清
+                                                        '.m2ts',   // 蓝光/AVCHD
+                                                        '.3gp',    // 旧版手机格式
+                                                        '.mxf'     // 广播级格式
+                                                    ];
                 const _videoExtLower = '.' + decodedVideoSrc.split('.').pop().toLowerCase();
                 let finalVideoUrl = buildVideoUrl(videoSrc, mediaDir);
                 let _useHlsProxy = false;

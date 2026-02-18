@@ -855,8 +855,21 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
 
-                const extension = path.extname(fullPath).toLowerCase();
-                const isVideo = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.ts', '.flv', '.wmv'].includes(extension);
+                                const extension = path.extname(fullPath).toLowerCase();
+                                const isVideo = [
+                                                    // 现代网络格式 (多数浏览器原生支持)
+                                                    '.mp4', '.webm', '.ogv', 
+                                                    // Apple 格式
+                                                    '.mov', '.m4v', 
+                                                    // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                                                    '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                                                    // 高清/光盘/流格式
+                                                    '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                                                    // 移动端/老旧格式
+                                                    '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                                                    // 专业级
+                                                    '.mxf', '.dv'
+                                                ].includes(extension.toLowerCase());
                 const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(extension);
 
                 if (isVideo) {
@@ -980,7 +993,20 @@ const server = http.createServer(async (req, res) => {
             const files = await fs.promises.readdir(fullPath);
             const coverNames = ['cover', 'folder', 'front', 'back'];
             const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
-            const videoExtensions = ['.mp4', '.mkv', 'avi', '.mov', '.wmv', 'flv', 'webm', '.ts'];
+            const videoExtensions = [
+                                        // 现代网络格式 (多数浏览器原生支持)
+                                        '.mp4', '.webm', '.ogv', 
+                                        // Apple 格式
+                                        '.mov', '.m4v', 
+                                        // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                                        '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                                        // 高清/光盘/流格式
+                                        '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                                        // 移动端/老旧格式
+                                        '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                                        // 专业级
+                                        '.mxf', '.dv'
+                                    ];
 
             // 1. 查找专辑封面
             for (const name of coverNames) {
@@ -1864,7 +1890,8 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: '视频文件不存在' }));
                     return;
                 }
-                const videoId = Buffer.from(videoPath).toString('base64').replace(/[/+=]/g, '');
+                // 使用路径的哈希值作为 videoId，避免文件名过长
+                const videoId = crypto.createHash('sha256').update(videoPath).digest('hex');
                 if (hlsTranscodeTasks.has(videoId)) {
                     const task = hlsTranscodeTasks.get(videoId);
                     res.setHeader('Content-Type', 'application/json');
@@ -3395,29 +3422,50 @@ function generateHLSM3U8(videoId, videoInfo) {
 function transcodeHLSSegment(videoPath, segmentIndex, outputPath, videoInfo) {
     return new Promise((resolve, reject) => {
         const startOffset = segmentIndex * HLS_SEGMENT_DURATION;
-        const inputSeek = Math.max(0, startOffset - 2);
+        const inputSeek = Math.max(0, startOffset - 5); // 提前 5 秒开始转码，增加 GOP 兼容性
         const outputSeek = startOffset - inputSeek;
 
         const buildArgs = (useNvenc) => {
-            const args = ['-hide_banner', '-loglevel', 'warning'];
-            if (inputSeek > 0) args.push('-ss', inputSeek.toString());
-            args.push(
-                '-i', videoPath,
-                '-ss', outputSeek.toString(),
-                '-t', HLS_SEGMENT_DURATION.toString(),
-                '-map', '0:v:0', '-map', '0:a:0?',
-                '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
-                '-preset', useNvenc ? 'p4' : 'fast',
-                '-b:v', '2M', '-g', '60', '-keyint_min', '60',
-                '-sc_threshold', '0', '-force_key_frames', 'expr:gte(t,0)',
-                '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000',
-                '-muxdelay', '0', '-muxpreload', '0', '-vsync', 'cfr',
-                '-mpegts_start_pid', '256', '-mpegts_copyts', '1',
-                '-output_ts_offset', startOffset.toString(),
-                '-f', 'mpegts', '-y', outputPath
-            );
-            return args;
-        };
+        const args = [
+            '-hide_banner', '-loglevel', 'warning',
+            '-fflags', '+igndts',  // 去掉 genpts，避免 PTS 被乱改
+        ];
+
+        if (inputSeek > 0) args.push('-ss', inputSeek.toString());
+
+        args.push(
+            '-i', videoPath,
+            '-ss', outputSeek.toString(),
+            '-t', HLS_SEGMENT_DURATION.toString(),
+            '-map', '0:v:0', '-map', '0:a:0?',
+
+            // 视频
+            '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
+            '-preset', useNvenc ? 'p4' : 'fast',
+            '-b:v', '2M',
+            '-g', '30', '-keyint_min', '30',
+            '-sc_threshold', '0',
+            '-force_key_frames', `expr:gte(t,${outputSeek})`,
+
+            // 音频
+            '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000',
+
+            // 时序控制
+            '-fps_mode', 'cfr',
+            '-muxdelay', '0', '-muxpreload', '0',
+
+            // mpegts 时间戳：让每个分片的 PTS 从正确的 offset 开始
+            '-output_ts_offset', startOffset.toString(),
+            '-mpegts_start_pid', '256',
+            '-mpegts_copyts', '0',
+            '-mpegts_flags', 'resend_headers',
+            '-flush_packets', '1',
+
+            '-f', 'mpegts', '-y', outputPath
+        );
+
+        return args;
+    };
 
         const runFFmpeg = (useNvenc) => {
             const ffmpeg = spawn('ffmpeg', buildArgs(useNvenc));
@@ -3706,7 +3754,20 @@ server.listen(PORT, () => {
 // --- 新增：批量刮削功能 ---
 async function findVideoFilesRecursively(dir) {
     let videoFiles = [];
-    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.ts'];
+    const videoExtensions = [
+                                // 现代网络格式 (多数浏览器原生支持)
+                                '.mp4', '.webm', '.ogv', 
+                                // Apple 格式
+                                '.mov', '.m4v', 
+                                // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                                '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                                // 高清/光盘/流格式
+                                '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                                // 移动端/老旧格式
+                                '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                                // 专业级
+                                '.mxf', '.dv'
+                            ];
     try {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {

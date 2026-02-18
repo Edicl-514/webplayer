@@ -487,10 +487,23 @@
                        resultItem.onclick = () => navigateToFolder(result.full_path, result.media_dir_root);
                    } else {
                        // 为文件创建缩略图或图标
-                       const extension = result.filename.split('.').pop().toLowerCase();
-                       const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
-                       const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ts', 'flv','wmv'].includes(extension);
-                       const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
+                                             const extension = result.filename.split('.').pop().toLowerCase();
+                                             const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
+                                             const isVideo = [
+                                                                // 现代网络格式 (多数浏览器原生支持)
+                                                                '.mp4', '.webm', '.ogv', 
+                                                                // Apple 格式
+                                                                '.mov', '.m4v', 
+                                                                // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                                                                '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                                                                // 高清/光盘/流格式
+                                                                '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                                                                // 移动端/老旧格式
+                                                                '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                                                                // 专业级
+                                                                '.mxf', '.dv'
+                                                            ].includes('.' + extension.toLowerCase());
+                                             const isAudio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
 
                        if (isImage) {
                            // 图片文件显示缩略图，并用 a 标签包裹以支持 Fancybox
