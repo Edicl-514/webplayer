@@ -1842,6 +1842,112 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // ============================================================
+    // HLS 代理播放 API
+    // ============================================================
+    if (pathname === '/api/init-hls-video' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const { mediaDir: hlsMediaDir, relativePath: hlsRelPath } = JSON.parse(body);
+                if (!hlsMediaDir || !hlsRelPath) {
+                    res.statusCode = 400;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ error: '缺少 mediaDir 或 relativePath 参数' }));
+                    return;
+                }
+                const videoPath = path.join(hlsMediaDir, hlsRelPath);
+                if (!fs.existsSync(videoPath)) {
+                    res.statusCode = 404;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ error: '视频文件不存在' }));
+                    return;
+                }
+                const videoId = Buffer.from(videoPath).toString('base64').replace(/[/+=]/g, '');
+                if (hlsTranscodeTasks.has(videoId)) {
+                    const task = hlsTranscodeTasks.get(videoId);
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: true, videoId, m3u8Url: `/hls/${videoId}.m3u8`, videoInfo: task.videoInfo }));
+                    return;
+                }
+                const videoInfo = await getVideoInfoHLS(videoPath);
+                try {
+                    const st = fs.statSync(videoPath);
+                    videoInfo.mtime = st.mtime.getTime();
+                } catch (e) { /* ignore */ }
+                const m3u8Path = generateHLSM3U8(videoId, videoInfo);
+                hlsTranscodeTasks.set(videoId, { videoPath, m3u8Path, videoInfo, segments: new Map() });
+                console.log(`[HLS] 初始化完成: ${path.basename(videoPath)} -> ${videoId}`);
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, videoId, m3u8Url: `/hls/${videoId}.m3u8`, videoInfo }));
+            } catch (err) {
+                console.error('[HLS] 初始化失败:', err);
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
+        return;
+    }
+
+    // 提供 HLS m3u8 清单文件
+    if (pathname.startsWith('/hls/') && pathname.endsWith('.m3u8')) {
+        const videoId = pathname.slice('/hls/'.length, -'.m3u8'.length);
+        const task = hlsTranscodeTasks.get(videoId);
+        if (!task) {
+            res.statusCode = 404;
+            res.end('HLS task not found');
+            return;
+        }
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        fs.createReadStream(task.m3u8Path).pipe(res);
+        return;
+    }
+
+    // 提供 HLS ts 分片（按需实时转码）
+    if (pathname.startsWith('/hls/') && pathname.includes('/segment-') && pathname.endsWith('.ts')) {
+        const parts = pathname.split('/');
+        const filename = parts[parts.length - 1]; // segment-N.ts
+        const videoId = parts[parts.length - 2];
+        const segmentIndex = parseInt(filename.replace('segment-', '').replace('.ts', ''), 10);
+        const task = hlsTranscodeTasks.get(videoId);
+        if (!task || isNaN(segmentIndex)) {
+            res.statusCode = 404;
+            res.end('HLS segment not found');
+            return;
+        }
+        const segmentPath = path.join(HLS_CACHE_DIR, `${videoId}-segment-${segmentIndex}.ts`);
+        let segmentInfo = task.segments.get(segmentIndex);
+        if (!segmentInfo) {
+            segmentInfo = {
+                status: 'transcoding',
+                path: segmentPath,
+                promise: transcodeHLSSegment(task.videoPath, segmentIndex, segmentPath, task.videoInfo)
+                    .then(result => { segmentInfo.status = 'ready'; return result; })
+                    .catch(err => { segmentInfo.status = 'error'; segmentInfo.error = err; throw err; })
+            };
+            task.segments.set(segmentIndex, segmentInfo);
+        }
+        try {
+            await segmentInfo.promise;
+            if (!fs.existsSync(segmentPath)) throw new Error('Segment file missing after transcode');
+            const stat = fs.statSync(segmentPath);
+            res.setHeader('Content-Type', 'video/mp2t');
+            res.setHeader('Content-Length', stat.size);
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            fs.createReadStream(segmentPath).pipe(res);
+        } catch (err) {
+            console.error(`[HLS] segment-${segmentIndex} 服务失败:`, err.message);
+            res.statusCode = 500;
+            res.end('Transcode error');
+        }
+        return;
+    }
+
     if (pathname === '/api/convert-video' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => {
@@ -2245,6 +2351,11 @@ const server = http.createServer(async (req, res) => {
                 const stat = await fs.promises.stat(targetPath);
                 if (stat.isDirectory()) {
                     await fs.promises.rm(targetPath, { recursive: true, force: true });
+                    // 如果删除的是 HLS 缓存，清空内存中的转码任务
+                    if (item === 'hls') {
+                        hlsTranscodeTasks.clear();
+                        console.log('[HLS] HLS 缓存目录已删除，内存任务已清空');
+                    }
                     res.statusCode = 200;
                     res.end(JSON.stringify({ success: true, message: `Cache directory '${item}' deleted.` }));
                 } else {
@@ -2751,6 +2862,14 @@ const server = http.createServer(async (req, res) => {
                     const start = parseInt(positions[0], 10);
                     const total = stats.size;
                     const end = positions[1] ? parseInt(positions[1], 10) : total - 1;
+
+                    if (start >= total) {
+                        res.statusCode = 416;
+                        res.setHeader('Content-Range', `bytes */${total}`);
+                        res.end();
+                        return;
+                    }
+
                     const chunksize = (end - start) + 1;
 
                     res.statusCode = 206;
@@ -2947,6 +3066,14 @@ const server = http.createServer(async (req, res) => {
                 const start = parseInt(positions[0], 10);
                 const total = stats.size;
                 const end = positions[1] ? parseInt(positions[1], 10) : total - 1;
+
+                if (start >= total) {
+                    res.statusCode = 416;
+                    res.setHeader('Content-Range', `bytes */${total}`);
+                    res.end();
+                    return;
+                }
+
                 const chunksize = (end - start) + 1;
 
                 res.statusCode = 206;
@@ -3206,9 +3333,122 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
 // 缓略图缓存目录 — 启动时 launcher 会先 `cd` 到 `src`，因此缓存目录位于项目根的 `cache`，即 __dirname 的上一级
 const CACHE_DIR = path.join(__dirname, 'cache');
-const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo', 'musicdata'];
+const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo', 'musicdata', 'hls'];
 const CACHE_FILES = ['foldercache.db'];
 const THUMBNAIL_DIR = path.join(CACHE_DIR, 'thumbnails');
+
+// ============================================================
+// HLS 代理转码：常量、任务管理与辅助函数
+// ============================================================
+const HLS_CACHE_DIR = path.join(CACHE_DIR, 'hls');
+const HLS_SEGMENT_DURATION = 10;
+const hlsTranscodeTasks = new Map(); // videoId -> { videoPath, m3u8Path, videoInfo, segments: Map }
+
+function getVideoInfoHLS(videoPath) {
+    return new Promise((resolve, reject) => {
+        const ffprobe = spawn('ffprobe', [
+            '-v', 'quiet', '-print_format', 'json',
+            '-show_format', '-show_streams', videoPath
+        ]);
+        let output = '';
+        ffprobe.stdout.on('data', data => output += data);
+        ffprobe.on('close', (code) => {
+            if (code !== 0) { reject(new Error('ffprobe failed')); return; }
+            try {
+                const info = JSON.parse(output);
+                const vs = info.streams.find(s => s.codec_type === 'video');
+                const duration = parseFloat(info.format.duration);
+                resolve({
+                    duration,
+                    totalSegments: Math.ceil(duration / HLS_SEGMENT_DURATION),
+                    width: vs ? vs.width : 0,
+                    height: vs ? vs.height : 0,
+                    codec: vs ? vs.codec_name : 'unknown',
+                });
+            } catch (e) { reject(e); }
+        });
+        ffprobe.on('error', reject);
+    });
+}
+
+function generateHLSM3U8(videoId, videoInfo) {
+    // 确保 HLS 缓存目录存在
+    if (!fs.existsSync(HLS_CACHE_DIR)) {
+        fs.mkdirSync(HLS_CACHE_DIR, { recursive: true });
+    }
+    const m3u8Path = path.join(HLS_CACHE_DIR, `${videoId}.m3u8`);
+    const cacheToken = videoInfo.mtime ? String(videoInfo.mtime) : String(Date.now());
+    let content = '#EXTM3U\n#EXT-X-VERSION:3\n';
+    content += `#EXT-X-TARGETDURATION:${HLS_SEGMENT_DURATION}\n#EXT-X-MEDIA-SEQUENCE:0\n\n`;
+    for (let i = 0; i < videoInfo.totalSegments; i++) {
+        const isLast = (i === videoInfo.totalSegments - 1);
+        const dur = isLast
+            ? (videoInfo.duration - i * HLS_SEGMENT_DURATION).toFixed(3)
+            : HLS_SEGMENT_DURATION.toFixed(3);
+        content += `#EXTINF:${dur},\n${videoId}/segment-${i}.ts?v=${cacheToken}\n`;
+    }
+    content += '#EXT-X-ENDLIST\n';
+    fs.writeFileSync(m3u8Path, content);
+    return m3u8Path;
+}
+
+function transcodeHLSSegment(videoPath, segmentIndex, outputPath, videoInfo) {
+    return new Promise((resolve, reject) => {
+        const startOffset = segmentIndex * HLS_SEGMENT_DURATION;
+        const inputSeek = Math.max(0, startOffset - 2);
+        const outputSeek = startOffset - inputSeek;
+
+        const buildArgs = (useNvenc) => {
+            const args = ['-hide_banner', '-loglevel', 'warning'];
+            if (inputSeek > 0) args.push('-ss', inputSeek.toString());
+            args.push(
+                '-i', videoPath,
+                '-ss', outputSeek.toString(),
+                '-t', HLS_SEGMENT_DURATION.toString(),
+                '-map', '0:v:0', '-map', '0:a:0?',
+                '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
+                '-preset', useNvenc ? 'p4' : 'fast',
+                '-b:v', '2M', '-g', '60', '-keyint_min', '60',
+                '-sc_threshold', '0', '-force_key_frames', 'expr:gte(t,0)',
+                '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000',
+                '-muxdelay', '0', '-muxpreload', '0', '-vsync', 'cfr',
+                '-mpegts_start_pid', '256', '-mpegts_copyts', '1',
+                '-output_ts_offset', startOffset.toString(),
+                '-f', 'mpegts', '-y', outputPath
+            );
+            return args;
+        };
+
+        const runFFmpeg = (useNvenc) => {
+            const ffmpeg = spawn('ffmpeg', buildArgs(useNvenc));
+            let stderr = '';
+            ffmpeg.stderr.on('data', data => stderr += data.toString());
+            ffmpeg.on('close', (code) => {
+                if (code !== 0) {
+                    if (useNvenc) {
+                        console.warn(`[HLS] segment-${segmentIndex} nvenc 失败，回退到 libx264`);
+                        runFFmpeg(false);
+                    } else {
+                        console.error(`[HLS] segment-${segmentIndex} 转码失败 (code ${code}):`, stderr);
+                        reject(new Error(`Transcode failed (code ${code})`));
+                    }
+                } else {
+                    resolve({ segmentIndex });
+                }
+            });
+            ffmpeg.on('error', (err) => {
+                if (useNvenc) {
+                    console.warn(`[HLS] nvenc 进程错误，回退到 libx264:`, err.message);
+                    runFFmpeg(false);
+                } else {
+                    reject(err);
+                }
+            });
+        };
+
+        runFFmpeg(true); // 先尝试 NVENC 硬件加速
+    });
+}
 
 /**
  * 执行搜索操作
