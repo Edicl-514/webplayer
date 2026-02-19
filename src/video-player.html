@@ -21,7 +21,49 @@
         .searchable-link:hover {
             color: var(--accent-text-color, #1a1a1a);
             background-color: var(--accent-color, #00bcd4);
-            border-bottom-style: solid;
+        }
+
+        .hls-proxy-warning {
+            color: #ff9800;
+            /* Warning Orange */
+            font-size: 16px;
+            cursor: help;
+            display: flex;
+            align-items: center;
+            background: rgba(255, 152, 0, 0.15);
+            padding: 5px 12px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 152, 0, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .hls-proxy-warning:hover {
+            background: rgba(255, 152, 0, 0.25);
+        }
+
+        .hls-proxy-warning i {
+            color: #ff9800 !important;
+            margin-right: 6px;
+        }
+
+        .warning-text {
+            font-size: 14px;
+            font-weight: 500;
+            color: #ff9800;
+        }
+
+        @media (max-width: 768px) {
+            .warning-text {
+                display: none;
+            }
+
+            .hls-proxy-warning i {
+                margin-right: 0;
+            }
+
+            .hls-proxy-warning {
+                padding: 5px 8px;
+            }
         }
     </style>
     <style>
@@ -59,7 +101,16 @@
 
         <div class="player-main">
             <div class="video-header">
-                <h2 id="videoTitle" class="video-title">加载中...</h2>
+                <div class="header-left"
+                    style="display: flex; align-items: center; gap: 15px; flex-grow: 1; min-width: 0;">
+                    <h2 id="videoTitle" class="video-title"
+                        style="margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">加载中...</h2>
+                    <div id="hlsProxyWarning" class="hls-proxy-warning" style="display: none;"
+                        title="当前正在使用实时HLS代理转码播放。可能会出现起播慢、无法精准拖动进度条、服务器负载高等问题。">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span class="warning-text">代理转码中</span>
+                    </div>
+                </div>
                 <div class="video-controls-right">
                     <div class="scraper-dropdown">
                         <button id="scraperBtn" class="control-btn extra-btn" title="刮削视频信息"><i
@@ -368,6 +419,62 @@
                 //videoTitle.textContent = '视频加载失败，请检查控制台获取更多信息。';
             });
 
+            player.on('quality_start', function (item) {
+                const warningEl = document.getElementById('hlsProxyWarning');
+                if (warningEl) {
+                    if (item && item.type === 'customHls') {
+                        warningEl.style.display = 'flex';
+                    } else {
+                        warningEl.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+
+        function showToast(message, duration = 4000, type = 'info') {
+            let container = document.getElementById('toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toast-container';
+                container.className = 'toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+
+            const icon = document.createElement('i');
+            // Choose icon based on type
+            let iconClass = 'fa-info-circle';
+            if (type === 'warning') iconClass = 'fa-exclamation-triangle';
+            else if (type === 'error') iconClass = 'fa-times-circle';
+            else if (type === 'success') iconClass = 'fa-check-circle';
+
+            icon.className = `toast-icon fas ${iconClass}`;
+
+            const content = document.createElement('div');
+            content.className = 'toast-content';
+            content.textContent = message;
+
+            toast.appendChild(icon);
+            toast.appendChild(content);
+            container.appendChild(toast);
+
+            // Force reflow
+            void toast.offsetHeight;
+
+            // Show
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.addEventListener('transitionend', () => {
+                    if (toast.parentNode) toast.remove();
+                });
+            }, duration);
         }
 
         async function checkAndLoadScrapedInfo() {
@@ -446,47 +553,129 @@
                 // --- End: Set initial background to thumbnail ---
 
                 decodedVideoSrc = decodeURIComponent(videoSrc); // 赋值给全局变量
-                                // 检测需要 HLS 代理播放的格式（浏览器无法直接播放）
-                                const _hlsProxyExts = [
-                                                        '.avi',    // 微软早期格式
-                                                        '.mkv',    // 多媒体封装格式
-                                                        '.flv',    // Adobe Flash (浏览器已弃用)
-                                                        '.f4v',    // Adobe Flash
-                                                        '.wmv',    // Windows Media
-                                                        '.asf',    // Windows Media
-                                                        '.rmvb',   // RealMedia
-                                                        '.rm',     // RealMedia
-                                                        '.vob',    // DVD 视频格式
-                                                        '.mpg',    // MPEG-1/2
-                                                        '.mpeg',   // MPEG-1/2
-                                                        '.ts',     // 传输流 (虽 HLS 常用，但 .ts 文件不能直接在 <video> src 播放，需 hls.js)
-                                                        '.mts',    // AVCHD 高清
-                                                        '.m2ts',   // 蓝光/AVCHD
-                                                        '.3gp',    // 旧版手机格式
-                                                        '.mxf'     // 广播级格式
-                                                    ];
+                // 检测需要 HLS 代理播放的格式（浏览器无法直接播放）
+                const _hlsProxyExts = [
+                    '.avi',    // 微软早期格式
+                    '.flv',    // Adobe Flash (浏览器已弃用)
+                    '.f4v',    // Adobe Flash
+                    '.wmv',    // Windows Media
+                    '.asf',    // Windows Media
+                    '.rmvb',   // RealMedia
+                    '.rm',     // RealMedia
+                    '.vob',    // DVD 视频格式
+                    '.mpg',    // MPEG-1/2
+                    '.mpeg',   // MPEG-1/2
+                    '.ts',     // 传输流 (虽 HLS 常用，但 .ts 文件不能直接在 <video> src 播放，需 hls.js)
+                    '.mts',    // AVCHD 高清
+                    '.m2ts',   // 蓝光/AVCHD
+                    '.3gp',    // 旧版手机格式
+                    '.mxf'     // 广播级格式
+                ];
                 const _videoExtLower = '.' + decodedVideoSrc.split('.').pop().toLowerCase();
-                let finalVideoUrl = buildVideoUrl(videoSrc, mediaDir);
-                let _useHlsProxy = false;
-                if (_hlsProxyExts.includes(_videoExtLower)) {
+                let _requiresHlsForOriginal = _hlsProxyExts.includes(_videoExtLower);
+
+                // 如果扩展名允许直接播放，进一步检查编码格式
+                if (!_requiresHlsForOriginal) {
                     try {
-                        const _hlsInitResp = await fetch('/api/init-hls-video', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ mediaDir, relativePath: decodedVideoSrc })
-                        });
-                        const _hlsInitData = await _hlsInitResp.json();
-                        if (_hlsInitData.success) {
-                            finalVideoUrl = _hlsInitData.m3u8Url;
-                            _useHlsProxy = true;
-                            console.log('[HLS Proxy] 使用 HLS 代理播放:', finalVideoUrl);
-                        } else {
-                            console.warn('[HLS Proxy] 初始化失败，回退到直接播放');
+                        const vInfoResp = await fetch(`/api/video-basic-info?path=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
+                        if (vInfoResp.ok) {
+                            const vInfo = await vInfoResp.json();
+                            if (vInfo.success && vInfo.data && vInfo.data.codec) {
+                                const codec = vInfo.data.codec.toLowerCase();
+                                // 浏览器普遍支持的编码白名单
+                                // 注意：HEVC (h.265) 支持取决于浏览器和硬件，但在 MP4 容器中通常比 mpeg4 更安全。
+                                // 如果用户遇到的问题是 mpeg4 (DivX/Xvid) 黑屏，则排除 mpeg4 即可。
+                                const supportedCodecs = ['h264', 'vp8', 'vp9', 'av1', 'hevc'];
+                                if (!supportedCodecs.includes(codec)) {
+                                    console.warn(`[VideoPlayer] 检测到不支持的编码: ${codec}，强制启用 HLS 代理。`);
+                                    _requiresHlsForOriginal = true;
+                                } else {
+                                    console.log(`[VideoPlayer] 编码格式支持: ${codec}`);
+                                }
+                            }
                         }
                     } catch (e) {
-                        console.warn('[HLS Proxy] 出错，回退到直接播放:', e);
+                        console.warn('[VideoPlayer] 获取视频编码信息失败，仅使用扩展名判断:', e);
                     }
                 }
+                const _directOriginalUrl = buildVideoUrl(videoSrc, mediaDir);
+                const _hlsQualityType = (typeof Hls !== 'undefined' && Hls.isSupported()) ? 'customHls' : 'auto';
+                let finalVideoUrl = _directOriginalUrl;
+                let _useHlsProxy = false;
+                let _hlsInitOriginalData = null;
+
+                const initHlsQuality = async (qualityKey) => {
+                    const resp = await fetch('/api/init-hls-video', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mediaDir, relativePath: decodedVideoSrc, quality: qualityKey })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data || !data.success || !data.m3u8Url) {
+                        throw new Error(data?.error || `init hls failed (${qualityKey})`);
+                    }
+                    return data;
+                };
+
+                try {
+                    _hlsInitOriginalData = await initHlsQuality('original');
+                    if (_requiresHlsForOriginal) {
+                        finalVideoUrl = _hlsInitOriginalData.m3u8Url;
+                        _useHlsProxy = true;
+                        console.log('[HLS Proxy] 原画使用 HLS 代理播放:', finalVideoUrl);
+                        // 显示 HLS 代理警告
+                        const warningEl = document.getElementById('hlsProxyWarning');
+                        if (warningEl) {
+                            warningEl.style.display = 'flex';
+                        }
+                    }
+                } catch (e) {
+                    if (_requiresHlsForOriginal) {
+                        console.warn('[HLS Proxy] 原画初始化失败，回退到直接播放:', e);
+                    } else {
+                        console.warn('[HLS Proxy] 清晰度信息获取失败，继续直接播放:', e);
+                    }
+                }
+
+                const dplayerQualities = [
+                    {
+                        name: '原画',
+                        url: finalVideoUrl,
+                        type: _useHlsProxy ? _hlsQualityType : 'auto'
+                    }
+                ];
+
+                const _availableQualities = Array.isArray(_hlsInitOriginalData?.availableQualities)
+                    ? _hlsInitOriginalData.availableQualities
+                    : [];
+                const _extraQualityMetas = _availableQualities.filter(q => q && q.key && q.key !== 'original');
+                if (_extraQualityMetas.length > 0) {
+                    const _extraQualityResults = await Promise.all(_extraQualityMetas.map(async (q) => {
+                        try {
+                            const qData = await initHlsQuality(q.key);
+                            return {
+                                ok: true,
+                                name: q.label || q.key,
+                                url: qData.m3u8Url,
+                                type: _hlsQualityType
+                            };
+                        } catch (err) {
+                            console.warn(`[HLS Proxy] 清晰度 ${q.key} 初始化失败，已忽略`, err);
+                            return { ok: false };
+                        }
+                    }));
+
+                    _extraQualityResults.forEach(item => {
+                        if (item && item.ok) {
+                            dplayerQualities.push({
+                                name: item.name,
+                                url: item.url,
+                                type: item.type
+                            });
+                        }
+                    });
+                }
+
                 const subtitleResponse = await fetch(`/api/find-subtitles?src=${encodeURIComponent(decodedVideoSrc)}&mediaDir=${encodeURIComponent(mediaDir)}`);
                 const subtitleData = await subtitleResponse.json();
                 console.log('Received subtitle data from server:', subtitleData);
@@ -506,6 +695,11 @@
                     playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 2],
                     loop: false,
                 };
+
+                if (dplayerQualities.length > 1) {
+                    dpOptions.video.quality = dplayerQualities;
+                    dpOptions.video.defaultQuality = 0;
+                }
 
                 const poster = urlParams.get('poster');
                 if (poster) {
@@ -545,12 +739,21 @@
                     };
                 }
 
-                // 若使用 HLS 代理，配置 hls.js 自定义播放器类型
-                if (_useHlsProxy && typeof Hls !== 'undefined' && Hls.isSupported()) {
-                    dpOptions.video.type = 'customHls';
+                const _hasCustomHlsQuality = dplayerQualities.some(q => q.type === 'customHls');
+
+                // 若存在 HLS 代理清晰度，配置 hls.js 自定义播放器类型
+                if (_hasCustomHlsQuality && typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    if (!dpOptions.video.quality) {
+                        dpOptions.video.type = 'customHls';
+                    }
                     dpOptions.video.customType = {
-                        customHls: function(video, player) {
+                        customHls: function (video, player) {
+                            if (video._hlsInstance) {
+                                try { video._hlsInstance.destroy(); } catch (e) { }
+                                video._hlsInstance = null;
+                            }
                             const hls = new Hls({ enableWorker: false });
+                            video._hlsInstance = hls;
                             hls.loadSource(video.src);
                             hls.attachMedia(video);
                         }
@@ -560,6 +763,16 @@
                 function initDPlayer() {
                     dp = new DPlayer(dpOptions);
                     bindDPlayerEvents(dp);
+
+                    const warningEl = document.getElementById('hlsProxyWarning');
+                    if (warningEl) {
+                        warningEl.style.cursor = 'help'; // Use help cursor as default, or pointer if clickable
+                        warningEl.onclick = () => {
+                            const msg = warningEl.getAttribute('title');
+                            showToast(msg, 5000, 'warning');
+                        };
+                    }
+
                     loadAllSubtitles();
                     checkAndLoadScrapedInfo(); // Replace the original auto-scrape logic
                     // Set background image only if we don't already have one from scraping

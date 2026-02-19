@@ -855,21 +855,21 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
 
-                                const extension = path.extname(fullPath).toLowerCase();
-                                const isVideo = [
-                                                    // 现代网络格式 (多数浏览器原生支持)
-                                                    '.mp4', '.webm', '.ogv', 
-                                                    // Apple 格式
-                                                    '.mov', '.m4v', 
-                                                    // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
-                                                    '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
-                                                    // 高清/光盘/流格式
-                                                    '.ts', '.mts', '.m2ts', '.vob', '.m2p',
-                                                    // 移动端/老旧格式
-                                                    '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
-                                                    // 专业级
-                                                    '.mxf', '.dv'
-                                                ].includes(extension.toLowerCase());
+                const extension = path.extname(fullPath).toLowerCase();
+                const isVideo = [
+                    // 现代网络格式 (多数浏览器原生支持)
+                    '.mp4', '.webm', '.ogv',
+                    // Apple 格式
+                    '.mov', '.m4v',
+                    // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                    '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                    // 高清/光盘/流格式
+                    '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                    // 移动端/老旧格式
+                    '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                    // 专业级
+                    '.mxf', '.dv'
+                ].includes(extension.toLowerCase());
                 const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(extension);
 
                 if (isVideo) {
@@ -994,19 +994,19 @@ const server = http.createServer(async (req, res) => {
             const coverNames = ['cover', 'folder', 'front', 'back'];
             const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
             const videoExtensions = [
-                                        // 现代网络格式 (多数浏览器原生支持)
-                                        '.mp4', '.webm', '.ogv', 
-                                        // Apple 格式
-                                        '.mov', '.m4v', 
-                                        // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
-                                        '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
-                                        // 高清/光盘/流格式
-                                        '.ts', '.mts', '.m2ts', '.vob', '.m2p',
-                                        // 移动端/老旧格式
-                                        '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
-                                        // 专业级
-                                        '.mxf', '.dv'
-                                    ];
+                // 现代网络格式 (多数浏览器原生支持)
+                '.mp4', '.webm', '.ogv',
+                // Apple 格式
+                '.mov', '.m4v',
+                // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+                '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+                // 高清/光盘/流格式
+                '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+                // 移动端/老旧格式
+                '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+                // 专业级
+                '.mxf', '.dv'
+            ];
 
             // 1. 查找专辑封面
             for (const name of coverNames) {
@@ -1876,7 +1876,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { mediaDir: hlsMediaDir, relativePath: hlsRelPath } = JSON.parse(body);
+                const { mediaDir: hlsMediaDir, relativePath: hlsRelPath, quality: requestedQuality } = JSON.parse(body);
                 if (!hlsMediaDir || !hlsRelPath) {
                     res.statusCode = 400;
                     res.setHeader('Content-Type', 'application/json');
@@ -1890,24 +1890,60 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: '视频文件不存在' }));
                     return;
                 }
-                // 使用路径的哈希值作为 videoId，避免文件名过长
-                const videoId = crypto.createHash('sha256').update(videoPath).digest('hex');
-                if (hlsTranscodeTasks.has(videoId)) {
-                    const task = hlsTranscodeTasks.get(videoId);
+
+                const stat = fs.statSync(videoPath);
+                const qualityKey = normalizeHlsQualityKey(requestedQuality);
+
+                // 使用文件路径+尺寸+mtime 生成稳定且可刷新的视频基准ID
+                const videoFingerprint = `${videoPath}|${stat.size}|${Math.floor(stat.mtimeMs)}`;
+                const videoBaseId = crypto.createHash('sha256').update(videoFingerprint).digest('hex');
+                const taskId = `${videoBaseId}-${qualityKey}`;
+                // 生成短 id（16 hex），用于文件名前缀，减小路径长度
+                const shortId = crypto.createHash('md5').update(taskId).digest('hex').slice(0, 16);
+
+                if (hlsTranscodeTasks.has(taskId)) {
+                    const task = hlsTranscodeTasks.get(taskId);
+                    const qualityProfiles = buildHlsQualityProfiles(task.videoInfo);
+                    const respShortId = task.shortId || shortId;
                     res.setHeader('Content-Type', 'application/json');
-                    res.end(JSON.stringify({ success: true, videoId, m3u8Url: `/hls/${videoId}.m3u8`, videoInfo: task.videoInfo }));
+                    res.end(JSON.stringify({
+                        success: true,
+                        videoId: taskId,
+                        m3u8Url: `/hls/${respShortId}.m3u8`,
+                        videoInfo: task.videoInfo,
+                        selectedQuality: qualityKey,
+                        availableQualities: qualityProfiles.map(p => ({ key: p.key, label: p.label, isOriginal: p.isOriginal }))
+                    }));
                     return;
                 }
+
                 const videoInfo = await getVideoInfoHLS(videoPath);
-                try {
-                    const st = fs.statSync(videoPath);
-                    videoInfo.mtime = st.mtime.getTime();
-                } catch (e) { /* ignore */ }
-                const m3u8Path = generateHLSM3U8(videoId, videoInfo);
-                hlsTranscodeTasks.set(videoId, { videoPath, m3u8Path, videoInfo, segments: new Map() });
-                console.log(`[HLS] 初始化完成: ${path.basename(videoPath)} -> ${videoId}`);
+                videoInfo.mtime = stat.mtime.getTime();
+
+                const qualityProfiles = buildHlsQualityProfiles(videoInfo);
+                const selectedProfile = qualityProfiles.find(p => p.key === qualityKey) || qualityProfiles[0];
+
+                const m3u8Path = generateHLSM3U8(taskId, videoInfo, shortId);
+                hlsTranscodeTasks.set(taskId, {
+                    videoPath,
+                    m3u8Path,
+                    videoInfo,
+                    qualityProfile: selectedProfile,
+                    segments: new Map(),
+                    shortId
+                });
+                hlsShortIdMap.set(shortId, taskId);
+
+                console.log(`[HLS] 初始化完成: ${path.basename(videoPath)} -> ${taskId} (${selectedProfile.label})`);
                 res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ success: true, videoId, m3u8Url: `/hls/${videoId}.m3u8`, videoInfo }));
+                res.end(JSON.stringify({
+                    success: true,
+                    videoId: taskId,
+                    m3u8Url: `/hls/${shortId}.m3u8`,
+                    videoInfo,
+                    selectedQuality: selectedProfile.key,
+                    availableQualities: qualityProfiles.map(p => ({ key: p.key, label: p.label, isOriginal: p.isOriginal }))
+                }));
             } catch (err) {
                 console.error('[HLS] 初始化失败:', err);
                 res.statusCode = 500;
@@ -1920,8 +1956,13 @@ const server = http.createServer(async (req, res) => {
 
     // 提供 HLS m3u8 清单文件
     if (pathname.startsWith('/hls/') && pathname.endsWith('.m3u8')) {
-        const videoId = pathname.slice('/hls/'.length, -'.m3u8'.length);
-        const task = hlsTranscodeTasks.get(videoId);
+        const reqId = pathname.slice('/hls/'.length, -'.m3u8'.length);
+        // 支持短 id 或者完整 taskId
+        let task = hlsTranscodeTasks.get(reqId);
+        if (!task && hlsShortIdMap.has(reqId)) {
+            const mapped = hlsShortIdMap.get(reqId);
+            task = hlsTranscodeTasks.get(mapped);
+        }
         if (!task) {
             res.statusCode = 404;
             res.end('HLS task not found');
@@ -1938,21 +1979,26 @@ const server = http.createServer(async (req, res) => {
     if (pathname.startsWith('/hls/') && pathname.includes('/segment-') && pathname.endsWith('.ts')) {
         const parts = pathname.split('/');
         const filename = parts[parts.length - 1]; // segment-N.ts
-        const videoId = parts[parts.length - 2];
+        const reqId = parts[parts.length - 2];
         const segmentIndex = parseInt(filename.replace('segment-', '').replace('.ts', ''), 10);
-        const task = hlsTranscodeTasks.get(videoId);
+        // 支持短 id 或完整 taskId
+        let task = hlsTranscodeTasks.get(reqId);
+        if (!task && hlsShortIdMap.has(reqId)) {
+            const mapped = hlsShortIdMap.get(reqId);
+            task = hlsTranscodeTasks.get(mapped);
+        }
         if (!task || isNaN(segmentIndex)) {
             res.statusCode = 404;
             res.end('HLS segment not found');
             return;
         }
-        const segmentPath = path.join(HLS_CACHE_DIR, `${videoId}-segment-${segmentIndex}.ts`);
+        const segmentPath = path.join(HLS_CACHE_DIR, `${task.shortId || reqId}-segment-${segmentIndex}.ts`);
         let segmentInfo = task.segments.get(segmentIndex);
         if (!segmentInfo) {
             segmentInfo = {
                 status: 'transcoding',
                 path: segmentPath,
-                promise: transcodeHLSSegment(task.videoPath, segmentIndex, segmentPath, task.videoInfo)
+                promise: transcodeHLSSegment(task.videoPath, segmentIndex, segmentPath, task.videoInfo, task.qualityProfile)
                     .then(result => { segmentInfo.status = 'ready'; return result; })
                     .catch(err => { segmentInfo.status = 'error'; segmentInfo.error = err; throw err; })
             };
@@ -2194,6 +2240,37 @@ const server = http.createServer(async (req, res) => {
                 res.end(JSON.stringify({ error: 'Invalid JSON' }));
             }
         });
+        return;
+    }
+
+    if (pathname === '/api/video-basic-info' && req.method === 'GET') {
+        const relativePath = parsedUrl.query.path;
+        const mediaDir = parsedUrl.query.mediaDir;
+
+        if (!relativePath || !mediaDir) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, error: 'Missing path or mediaDir' }));
+            return;
+        }
+
+        const fullPath = path.join(mediaDir, relativePath);
+
+        if (!fs.existsSync(fullPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ success: false, error: 'File not found' }));
+            return;
+        }
+
+        getVideoInfoHLS(fullPath)
+            .then(info => {
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, data: info }));
+            })
+            .catch(err => {
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: false, error: err.message }));
+            });
         return;
     }
 
@@ -3368,8 +3445,81 @@ const THUMBNAIL_DIR = path.join(CACHE_DIR, 'thumbnails');
 // HLS 代理转码：常量、任务管理与辅助函数
 // ============================================================
 const HLS_CACHE_DIR = path.join(CACHE_DIR, 'hls');
+// 映射短 id 到完整 taskId，用于在文件名中使用较短前缀，避免 Windows 路径过长问题
+const hlsShortIdMap = new Map();
 const HLS_SEGMENT_DURATION = 10;
 const hlsTranscodeTasks = new Map(); // videoId -> { videoPath, m3u8Path, videoInfo, segments: Map }
+
+const HLS_QUALITY_PRESETS = [
+    { key: '8k', label: '8k', shortEdge: 4320, videoBitrateK: 38000, audioBitrateK: 320 },
+    { key: '4k', label: '4k', shortEdge: 2160, videoBitrateK: 18000, audioBitrateK: 256 },
+    { key: '2k', label: '2k', shortEdge: 1440, videoBitrateK: 9000, audioBitrateK: 192 },
+    { key: '1080p', label: '1080p', shortEdge: 1080, videoBitrateK: 5000, audioBitrateK: 160 },
+    { key: '720p', label: '720p', shortEdge: 720, videoBitrateK: 2500, audioBitrateK: 128 },
+    { key: '480p', label: '480p', shortEdge: 480, videoBitrateK: 1200, audioBitrateK: 96 }
+];
+
+function parseFps(value) {
+    if (!value) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value !== 'string') return 0;
+    if (value.includes('/')) {
+        const [num, den] = value.split('/').map(v => parseFloat(v));
+        if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return 0;
+        return num / den;
+    }
+    const val = parseFloat(value);
+    return Number.isFinite(val) ? val : 0;
+}
+
+function normalizeBitrateK(value, fallback) {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return Math.round(n / 1000);
+}
+
+function buildHlsQualityProfiles(videoInfo) {
+    const width = Number(videoInfo.width) || 0;
+    const height = Number(videoInfo.height) || 0;
+    const shortEdge = Math.max(1, Math.min(width || height || 1, height || width || 1));
+
+    const sourceVideoBitrateK = Math.max(1200, normalizeBitrateK(videoInfo.videoBitrate, 6000));
+    const sourceAudioBitrateK = Math.min(320, Math.max(96, normalizeBitrateK(videoInfo.audioBitrate, 160)));
+
+    const profiles = [
+        {
+            key: 'original',
+            label: '原画',
+            isOriginal: true,
+            shortEdge,
+            videoBitrateK: sourceVideoBitrateK,
+            audioBitrateK: sourceAudioBitrateK
+        }
+    ];
+
+    for (const preset of HLS_QUALITY_PRESETS) {
+        if (preset.shortEdge <= shortEdge) {
+            profiles.push({
+                key: preset.key,
+                label: preset.label,
+                isOriginal: false,
+                shortEdge: preset.shortEdge,
+                videoBitrateK: preset.videoBitrateK,
+                audioBitrateK: preset.audioBitrateK
+            });
+        }
+    }
+
+    return profiles;
+}
+
+function normalizeHlsQualityKey(value) {
+    if (!value) return 'original';
+    const key = String(value).toLowerCase();
+    if (key === 'original') return 'original';
+    const matched = HLS_QUALITY_PRESETS.find(p => p.key === key);
+    return matched ? matched.key : 'original';
+}
 
 function getVideoInfoHLS(videoPath) {
     return new Promise((resolve, reject) => {
@@ -3384,13 +3534,19 @@ function getVideoInfoHLS(videoPath) {
             try {
                 const info = JSON.parse(output);
                 const vs = info.streams.find(s => s.codec_type === 'video');
+                const as = info.streams.find(s => s.codec_type === 'audio');
                 const duration = parseFloat(info.format.duration);
+                const fps = parseFps(vs ? (vs.avg_frame_rate || vs.r_frame_rate) : 0);
                 resolve({
                     duration,
                     totalSegments: Math.ceil(duration / HLS_SEGMENT_DURATION),
                     width: vs ? vs.width : 0,
                     height: vs ? vs.height : 0,
                     codec: vs ? vs.codec_name : 'unknown',
+                    fps,
+                    videoBitrate: vs ? parseInt(vs.bit_rate || 0, 10) : 0,
+                    audioBitrate: as ? parseInt(as.bit_rate || 0, 10) : 0,
+                    formatBitrate: info.format ? parseInt(info.format.bit_rate || 0, 10) : 0
                 });
             } catch (e) { reject(e); }
         });
@@ -3398,12 +3554,14 @@ function getVideoInfoHLS(videoPath) {
     });
 }
 
-function generateHLSM3U8(videoId, videoInfo) {
+function generateHLSM3U8(videoId, videoInfo, shortId) {
     // 确保 HLS 缓存目录存在
     if (!fs.existsSync(HLS_CACHE_DIR)) {
         fs.mkdirSync(HLS_CACHE_DIR, { recursive: true });
     }
-    const m3u8Path = path.join(HLS_CACHE_DIR, `${videoId}.m3u8`);
+    // 使用短 id（如果提供）作为文件名前缀，回退到 videoId
+    const filePrefix = shortId || videoId;
+    const m3u8Path = path.join(HLS_CACHE_DIR, `${filePrefix}.m3u8`);
     const cacheToken = videoInfo.mtime ? String(videoInfo.mtime) : String(Date.now());
     let content = '#EXTM3U\n#EXT-X-VERSION:3\n';
     content += `#EXT-X-TARGETDURATION:${HLS_SEGMENT_DURATION}\n#EXT-X-MEDIA-SEQUENCE:0\n\n`;
@@ -3412,60 +3570,78 @@ function generateHLSM3U8(videoId, videoInfo) {
         const dur = isLast
             ? (videoInfo.duration - i * HLS_SEGMENT_DURATION).toFixed(3)
             : HLS_SEGMENT_DURATION.toFixed(3);
-        content += `#EXTINF:${dur},\n${videoId}/segment-${i}.ts?v=${cacheToken}\n`;
+        content += `#EXTINF:${dur},\n${filePrefix}/segment-${i}.ts?v=${cacheToken}\n`;
     }
     content += '#EXT-X-ENDLIST\n';
     fs.writeFileSync(m3u8Path, content);
     return m3u8Path;
 }
 
-function transcodeHLSSegment(videoPath, segmentIndex, outputPath, videoInfo) {
+function transcodeHLSSegment(videoPath, segmentIndex, outputPath, videoInfo, qualityProfile) {
     return new Promise((resolve, reject) => {
         const startOffset = segmentIndex * HLS_SEGMENT_DURATION;
         const inputSeek = Math.max(0, startOffset - 5); // 提前 5 秒开始转码，增加 GOP 兼容性
         const outputSeek = startOffset - inputSeek;
+        const profile = qualityProfile || { key: 'original', isOriginal: true, videoBitrateK: 6000, audioBitrateK: 160, shortEdge: 0 };
+        const fps = Number(videoInfo.fps) > 0 ? Number(videoInfo.fps) : 30;
+        const gopSize = Math.max(24, Math.round(fps * 2));
+
+        let scaleFilter = null;
+        if (!profile.isOriginal && Number(profile.shortEdge) > 0) {
+            const isLandscape = (Number(videoInfo.width) || 0) >= (Number(videoInfo.height) || 0);
+            scaleFilter = isLandscape
+                ? `scale=-2:${profile.shortEdge}:flags=lanczos`
+                : `scale=${profile.shortEdge}:-2:flags=lanczos`;
+        }
 
         const buildArgs = (useNvenc) => {
-        const args = [
-            '-hide_banner', '-loglevel', 'warning',
-            '-fflags', '+igndts',  // 去掉 genpts，避免 PTS 被乱改
-        ];
+            const targetVbK = Math.max(400, Number(profile.videoBitrateK) || 2000);
+            const targetAbK = Math.max(64, Number(profile.audioBitrateK) || 128);
+            const maxrateK = Math.round(targetVbK * 1.15);
+            const bufsizeK = Math.round(targetVbK * 2);
 
-        if (inputSeek > 0) args.push('-ss', inputSeek.toString());
+            const args = [
+                '-hide_banner', '-loglevel', 'warning',
+                '-fflags', '+igndts',  // 去掉 genpts，避免 PTS 被乱改
+            ];
 
-        args.push(
-            '-i', videoPath,
-            '-ss', outputSeek.toString(),
-            '-t', HLS_SEGMENT_DURATION.toString(),
-            '-map', '0:v:0', '-map', '0:a:0?',
+            if (inputSeek > 0) args.push('-ss', inputSeek.toString());
 
-            // 视频
-            '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
-            '-preset', useNvenc ? 'p4' : 'fast',
-            '-b:v', '2M',
-            '-g', '30', '-keyint_min', '30',
-            '-sc_threshold', '0',
-            '-force_key_frames', `expr:gte(t,${outputSeek})`,
+            args.push(
+                '-i', videoPath,
+                '-ss', outputSeek.toString(),
+                '-t', HLS_SEGMENT_DURATION.toString(),
+                '-map', '0:v:0', '-map', '0:a:0?',
 
-            // 音频
-            '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000',
+                // 视频
+                '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
+                '-preset', useNvenc ? 'p4' : 'fast',
+                '-b:v', `${targetVbK}k`,
+                '-maxrate', `${maxrateK}k`,
+                '-bufsize', `${bufsizeK}k`,
+                '-g', String(gopSize), '-keyint_min', String(gopSize),
+                '-sc_threshold', '0',
 
-            // 时序控制
-            '-fps_mode', 'cfr',
-            '-muxdelay', '0', '-muxpreload', '0',
+                // 音频
+                '-c:a', 'aac', '-b:a', `${targetAbK}k`, '-ac', '2', '-ar', '48000',
+                '-muxdelay', '0', '-muxpreload', '0',
 
-            // mpegts 时间戳：让每个分片的 PTS 从正确的 offset 开始
-            '-output_ts_offset', startOffset.toString(),
-            '-mpegts_start_pid', '256',
-            '-mpegts_copyts', '0',
-            '-mpegts_flags', 'resend_headers',
-            '-flush_packets', '1',
+                // mpegts 时间戳：让每个分片的 PTS 从正确的 offset 开始
+                '-output_ts_offset', startOffset.toString(),
+                '-mpegts_start_pid', '256',
+                '-mpegts_copyts', '0',
+                '-mpegts_flags', 'resend_headers',
+                '-flush_packets', '1',
 
-            '-f', 'mpegts', '-y', outputPath
-        );
+                '-f', 'mpegts', '-y', outputPath
+            );
 
-        return args;
-    };
+            if (scaleFilter) {
+                args.splice(args.indexOf('-c:a'), 0, '-vf', scaleFilter);
+            }
+
+            return args;
+        };
 
         const runFFmpeg = (useNvenc) => {
             const ffmpeg = spawn('ffmpeg', buildArgs(useNvenc));
@@ -3755,19 +3931,19 @@ server.listen(PORT, () => {
 async function findVideoFilesRecursively(dir) {
     let videoFiles = [];
     const videoExtensions = [
-                                // 现代网络格式 (多数浏览器原生支持)
-                                '.mp4', '.webm', '.ogv', 
-                                // Apple 格式
-                                '.mov', '.m4v', 
-                                // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
-                                '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
-                                // 高清/光盘/流格式
-                                '.ts', '.mts', '.m2ts', '.vob', '.m2p',
-                                // 移动端/老旧格式
-                                '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
-                                // 专业级
-                                '.mxf', '.dv'
-                            ];
+        // 现代网络格式 (多数浏览器原生支持)
+        '.mp4', '.webm', '.ogv',
+        // Apple 格式
+        '.mov', '.m4v',
+        // 常见封装格式 (浏览器支持度不一，通常需要插件或转码)
+        '.avi', '.mkv', '.flv', '.f4v', '.wmv', '.asf',
+        // 高清/光盘/流格式
+        '.ts', '.mts', '.m2ts', '.vob', '.m2p',
+        // 移动端/老旧格式
+        '.3gp', '.3g2', '.rmvb', '.rm', '.mpg', '.mpeg', '.m1v', '.m4p',
+        // 专业级
+        '.mxf', '.dv'
+    ];
     try {
         const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const dirent of dirents) {
