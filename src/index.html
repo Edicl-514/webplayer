@@ -2239,13 +2239,21 @@
                 }
             };
 
-            // WebSocket for progress updates
+            // WebSocket for progress updates — 支持自动重连
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+            let ws = null;
+            let wsReconnectTimer = null;
 
-            ws.onopen = () => {
-                console.log('WebSocket connection established for scraping updates.');
-            };
+            function connectWebSocket() {
+                if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+                    return;
+                }
+                ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+
+                ws.onopen = () => {
+                    console.log('WebSocket connection established for scraping updates.');
+                    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+                };
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -2266,10 +2274,12 @@
                 } else if (data.type === 'scrape_complete') {
                     const taskItem = document.getElementById(`task-${data.file.id}`);
                     if (taskItem) {
-                        if (data.result.success) {
+                        if (data.result.skipped) {
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
+                        } else if (data.result.success) {
                             taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
                         } else {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '"')}">失败: ${data.result.error || data.result.message}</span>`;
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
                         }
                     }
                 } else if (data.type === 'scrape_finished_all') {
@@ -2305,10 +2315,12 @@
                 } else if (data.type === 'music_scrape_complete') {
                     const taskItem = document.getElementById(`music-task-${data.file.id}`);
                     if (taskItem) {
-                        if (data.result.success) {
+                        if (data.result.skipped) {
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
+                        } else if (data.result.success) {
                             taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
                         } else {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '"')}">失败: ${data.result.error || data.result.message}</span>`;
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
                         }
                     }
                 } else if (data.type === 'music_scrape_finished_all') {
@@ -2323,12 +2335,16 @@
             };
 
             ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
+                    console.error('WebSocket error:', error);
+                };
 
-            ws.onclose = () => {
-                console.log('WebSocket connection closed.');
-            };
+                ws.onclose = () => {
+                    console.log('WebSocket connection closed. Reconnecting in 3s...');
+                    wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+                };
+            }
+
+            connectWebSocket();
 
             // 音乐刮削
             const musicScraperManagerButton = document.getElementById('musicScraperManagerButton');
@@ -2351,8 +2367,9 @@
                     alert('无法确定当前目录，请先进入一个媒体目录。');
                     return;
                 }
-                // 启动时先清空队列
-                musicScraperTaskList.innerHTML = '';
+                // 先显示"正在启动"提示，让 WebSocket 的 music_scrape_start 消息来覆盖它，
+                // 避免 fetch resolve 时机晚于 WS 消息导致覆盖已渲染的任务列表
+                musicScraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动音乐刮削任务...</span></li>';
                 try {
                     const response = await fetch('/api/scrape-music-directory', {
                         method: 'POST',
@@ -2368,10 +2385,8 @@
                     const result = await response.json();
                     if (!result.success) {
                         musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
-                    } else {
-                        // 启动成功时显示启动提示
-                        musicScraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动音乐刮削任务...</span></li>';
                     }
+                    // 成功时不设置任何内容，由 WebSocket music_scrape_start 消息接管
                 } catch (error) {
                     musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动音乐刮削任务时出错: ${error.message}</span></li>`;
                 }

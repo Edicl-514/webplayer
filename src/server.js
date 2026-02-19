@@ -2778,7 +2778,7 @@ const server = http.createServer(async (req, res) => {
                             broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
 
                             const result = await new Promise((resolve) => {
-                                const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType];
+                                const args = [path.join(__dirname, 'video_scraper.py'), fileTask.path, videoType, '--skip-existing'];
                                 const pythonProcess = spawn('python', args, {
                                     env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
                                 });
@@ -2795,7 +2795,9 @@ const server = http.createServer(async (req, res) => {
                                             const jsonMatch = stdoutData.match(/({[\s\S]*})/);
                                             if (jsonMatch && jsonMatch[1]) {
                                                 const scrapedData = JSON.parse(jsonMatch[1]);
-                                                if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
+                                                if (scrapedData.skipped) {
+                                                    resolve({ success: true, skipped: true });
+                                                } else if (scrapedData.error || (scrapedData.hasOwnProperty('jav_results') && !scrapedData.jav_results)) {
                                                     resolve({ success: false, error: scrapedData.error || '未找到结果', details: JSON.stringify(scrapedData) });
                                                 } else {
                                                     resolve({ success: true, data: scrapedData });
@@ -2874,7 +2876,7 @@ const server = http.createServer(async (req, res) => {
                             broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
 
                             const result = await new Promise((resolve) => {
-                                const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db'];
+                                const args = [path.join(__dirname, 'get_music_info.py'), fileTask.path, '--source', source, '--json-output', '--no-write', '--write-db', '--skip-existing'];
                                 // Optionally forward 'type' in scraping requests (defaults to all)
                                 const scrapeType = 'all';
                                 if (scrapeType && ['lyrics', 'cover', 'info', 'all'].includes(scrapeType)) {
@@ -2897,7 +2899,9 @@ const server = http.createServer(async (req, res) => {
                                             const jsonMatch = stdoutData.match(/({[\s\S]*})/);
                                             if (jsonMatch && jsonMatch[1]) {
                                                 const parsedData = JSON.parse(jsonMatch[1]);
-                                                if (parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
+                                                if (parsedData.skipped) {
+                                                    resolve({ success: true, skipped: true });
+                                                } else if (parsedData.error || (parsedData.hasOwnProperty('title') && !parsedData.title)) {
                                                     resolve({ success: false, error: parsedData.error || '未找到结果', details: JSON.stringify(parsedData) });
                                                 } else {
                                                     resolve({ success: true, data: parsedData });

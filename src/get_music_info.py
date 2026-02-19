@@ -266,6 +266,7 @@ def main():
     parser.add_argument("--query", type=str, default="{artist} {title}", help="Keywords to use for searching.")
     parser.add_argument("--force-fetch", action="store_true", help="Force re-fetching from the internet and overwrite local cache.")
     parser.add_argument("--only", choices=['all', 'lyrics', 'cover', 'info'], default='all', help="Only fetch a specific type: lyrics, cover, info, or all.")
+    parser.add_argument("--skip-existing", action="store_true", help="Skip files that already exist in the database.")
     
     args = parser.parse_args()
 
@@ -276,6 +277,19 @@ def main():
     os.makedirs(CACHE_LYRICS_DIR, exist_ok=True)
     os.makedirs(CACHE_COVERS_DIR, exist_ok=True)
     init_db()
+
+    # 跳过数据库中已存在的记录（批量刮削时使用）
+    if args.skip_existing:
+        abs_fp = os.path.abspath(args.filepath)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT filepath FROM music_info WHERE filepath = ?", (abs_fp,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            if args.json_output:
+                print(json.dumps({"skipped": True, "reason": "already_in_db"}))
+            sys.exit(0)
     
     # Setup MusicBrainz client if needed
     if args.source == 'musicbrainz':

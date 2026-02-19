@@ -1861,6 +1861,11 @@ def main():
     if '--check-only' in args:
         check_only = True
         args.remove('--check-only')
+
+    skip_existing = False
+    if '--skip-existing' in args:
+        skip_existing = True
+        args.remove('--skip-existing')
     
     if '--delete' in args:
         delete_record = True
@@ -1941,7 +1946,16 @@ def main():
        print(json.dumps({"success": success, "message": message}))
        cache.close()
        sys.exit(0)
- 
+
+    # 跳过已存在的记录
+    if skip_existing:
+        filename = os.path.basename(scrape_target)
+        cached_data, _ = cache.get_info(filename)
+        if cached_data:
+            print(json.dumps({"skipped": True, "reason": "already_in_db"}))
+            cache.close()
+            sys.exit(0)
+
     # --- 开始刮削 ---
     print(f"\n正在处理: {scrape_target}", file=sys.stderr)
     if force_online:
