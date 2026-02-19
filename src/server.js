@@ -208,8 +208,10 @@ const server = http.createServer(async (req, res) => {
                     resolve(null);
                     return;
                 }
-                // 从 ebur128 输出中提取 Integrated loudness
-                const match = stderrOutput.match(/I:\s+(-?[\d.]+)\s+LUFS/);
+                // 从 ebur128 输出末尾 Summary 中提取 Integrated loudness
+                // 注意：逐帧实时输出的 "I: -70.0 LUFS" 是初始门限值，不能使用
+                // Summary 中的格式为行首缩进："    I:         -14.3 LUFS"
+                const match = stderrOutput.match(/^\s+I:\s+(-?[\d.]+)\s+LUFS/m);
                 if (match) {
                     resolve(parseFloat(match[1]));
                 } else {
@@ -2758,6 +2760,7 @@ const server = http.createServer(async (req, res) => {
                 // Run scraping in the background
                 (async () => {
                     try {
+                        console.log(`[VideoScraper] scanning for video files in ${fullPath}`);
                         const videoFiles = await findVideoFilesRecursively(fullPath);
                         console.log(`[VideoScraper] Found ${videoFiles.length} video files`);
 
@@ -2767,9 +2770,11 @@ const server = http.createServer(async (req, res) => {
                             name: path.relative(fullPath, filePath) || path.basename(filePath)
                         }));
 
+                        console.log(`[VideoScraper] Broadcasting scrape_start with ${fileTasks.length} files`);
                         broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
                         for (const fileTask of fileTasks) {
+                            console.log(`[VideoScraper] Processing file: ${fileTask.name}`);
                             broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
 
                             const result = await new Promise((resolve) => {
@@ -2805,8 +2810,10 @@ const server = http.createServer(async (req, res) => {
                                 });
                             });
 
+                            console.log(`[VideoScraper] Finished file: ${fileTask.name}, success: ${result.success}`);
                             broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
                         }
+                        console.log(`[VideoScraper] All tasks finished`);
                         broadcast({ type: 'scrape_finished_all' });
                     } catch (bgError) {
                         console.error('[VideoScraper] Background task error:', bgError);
@@ -2850,6 +2857,7 @@ const server = http.createServer(async (req, res) => {
                 // Run scraping in the background
                 (async () => {
                     try {
+                        console.log(`[MusicScraper] scanning for music files in ${fullPath}`);
                         const musicFiles = await findMusicFilesRecursively(fullPath);
                         console.log(`[MusicScraper] Found ${musicFiles.length} music files`);
 
@@ -2859,6 +2867,7 @@ const server = http.createServer(async (req, res) => {
                             name: path.relative(fullPath, filePath) || path.basename(filePath)
                         }));
 
+                        console.log(`[MusicScraper] Broadcasting music_scrape_start with ${fileTasks.length} files`);
                         broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
                         for (const fileTask of fileTasks) {
@@ -3306,6 +3315,7 @@ wss.on('connection', ws => {
 });
 
 function broadcast(data) {
+    if (VERBOSE) console.log('[WebSocket] Broadcasting:', data.type);
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify(data));
@@ -3616,11 +3626,13 @@ function transcodeHLSSegment(videoPath, segmentIndex, outputPath, videoInfo, qua
                 // 视频
                 '-c:v', useNvenc ? 'h264_nvenc' : 'libx264',
                 '-preset', useNvenc ? 'p4' : 'fast',
+                '-profile:v', 'high', '-level:v', '4.1',
                 '-b:v', `${targetVbK}k`,
                 '-maxrate', `${maxrateK}k`,
                 '-bufsize', `${bufsizeK}k`,
                 '-g', String(gopSize), '-keyint_min', String(gopSize),
                 '-sc_threshold', '0',
+                ...(useNvenc ? ['-bf', '0'] : ['-x264opts', 'bframes=2:b-adapt=1']),
 
                 // 音频
                 '-c:a', 'aac', '-b:a', `${targetAbK}k`, '-ac', '2', '-ar', '48000',

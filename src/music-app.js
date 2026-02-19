@@ -1405,6 +1405,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyNormalizationGain(lufs) {
         if (!normGainNode) return;
 
+        // -70 LUFS 是 EBU R128 绝对门限值，表示测量结果无效（通常是正则误匹配了逐帧初始值）
+        if (lufs <= -70) {
+            console.warn(`[Normalization] LUFS=${lufs} 处于绝对门限值，测量结果无效，跳过归一化`);
+            normGainNode.gain.value = 1.0;
+            return;
+        }
+
         currentTrackLufs = lufs;
         const setting = autoGainSelect ? autoGainSelect.value : 'auto';
 
