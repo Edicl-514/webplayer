@@ -226,12 +226,14 @@ def search_database(search_query):
                 if video_id == "番号未找到":
                     video_id = scraped_data.get('product_id', video_id)
 
-                results.append({
-                    "title": title,
-                    "id": video_id,
-                    "local_poster_path": local_poster_path if local_poster_path else "无本地海报",
-                    "filepath": authoritative_filepath
-                })
+                # 检查文件是否确实存在
+                if os.path.exists(authoritative_filepath):
+                    results.append({
+                        "title": title,
+                        "id": video_id,
+                        "local_poster_path": local_poster_path if local_poster_path else "无本地海报",
+                        "filepath": authoritative_filepath
+                    })
 
         return results
 

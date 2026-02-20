@@ -2255,86 +2255,86 @@
                     if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
                 };
 
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                console.log('[WebSocket] Received:', data.type, data);
-                if (data.type === 'scrape_start') {
-                    scraperTaskList.innerHTML = ''; // Clear previous messages
-                    data.files.forEach(file => {
-                        const li = document.createElement('li');
-                        li.id = `task-${file.id}`;
-                        li.innerHTML = `<span class="task-name">${file.name}</span> <span class="task-status task-status-waiting">等待中</span>`;
-                        scraperTaskList.appendChild(li);
-                    });
-                } else if (data.type === 'scrape_progress') {
-                    const taskItem = document.getElementById(`task-${data.file.id}`);
-                    if (taskItem) {
-                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
-                    }
-                } else if (data.type === 'scrape_complete') {
-                    const taskItem = document.getElementById(`task-${data.file.id}`);
-                    if (taskItem) {
-                        if (data.result.skipped) {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
-                        } else if (data.result.success) {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
-                        } else {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
-                        }
-                    }
-                } else if (data.type === 'scrape_finished_all') {
-                    const li = document.createElement('li');
-                    li.innerHTML = `<strong>所有任务已完成!</strong>`;
-                    scraperTaskList.appendChild(li);
-                } else if (data.type === 'scrape_error') {
-                    scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '"')}">错误: ${data.message}</span></li>`;
-                } else if (data.type === 'music_scrape_start') {
-                    const musicScraperTaskList = document.getElementById('music-scraper-task-list');
-                    // 始终清空并渲染所有文件项，防止被“正在启动”提示覆盖
-                    musicScraperTaskList.innerHTML = '';
-                    if (data.files && data.files.length > 0) {
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    console.log('[WebSocket] Received:', data.type, data);
+                    if (data.type === 'scrape_start') {
+                        scraperTaskList.innerHTML = ''; // Clear previous messages
                         data.files.forEach(file => {
                             const li = document.createElement('li');
-                            li.id = `music-task-${file.id}`;
-                            // 文件名显示为相对路径（带子目录），更直观
-                            let displayName = file.name;
-                            if (displayName.startsWith('./') || displayName.startsWith('.\\')) {
-                                displayName = displayName.slice(2);
-                            }
-                            li.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">等待中</span>`;
-                            musicScraperTaskList.appendChild(li);
+                            li.id = `task-${file.id}`;
+                            li.innerHTML = `<span class="task-name">${file.name}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                            scraperTaskList.appendChild(li);
                         });
-                    } else {
-                        musicScraperTaskList.innerHTML = '<li><span class="task-status-failed">未找到任何音乐文件</span></li>';
-                    }
-                } else if (data.type === 'music_scrape_progress') {
-                    const taskItem = document.getElementById(`music-task-${data.file.id}`);
-                    if (taskItem) {
-                        taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
-                    }
-                } else if (data.type === 'music_scrape_complete') {
-                    const taskItem = document.getElementById(`music-task-${data.file.id}`);
-                    if (taskItem) {
-                        if (data.result.skipped) {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
-                        } else if (data.result.success) {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
-                        } else {
-                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
+                    } else if (data.type === 'scrape_progress') {
+                        const taskItem = document.getElementById(`task-${data.file.id}`);
+                        if (taskItem) {
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
                         }
+                    } else if (data.type === 'scrape_complete') {
+                        const taskItem = document.getElementById(`task-${data.file.id}`);
+                        if (taskItem) {
+                            if (data.result.skipped) {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
+                            } else if (data.result.success) {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
+                            } else {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
+                            }
+                        }
+                    } else if (data.type === 'scrape_finished_all') {
+                        const li = document.createElement('li');
+                        li.innerHTML = `<strong>所有任务已完成!</strong>`;
+                        scraperTaskList.appendChild(li);
+                    } else if (data.type === 'scrape_error') {
+                        scraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '"')}">错误: ${data.message}</span></li>`;
+                    } else if (data.type === 'music_scrape_start') {
+                        const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                        // 始终清空并渲染所有文件项，防止被“正在启动”提示覆盖
+                        musicScraperTaskList.innerHTML = '';
+                        if (data.files && data.files.length > 0) {
+                            data.files.forEach(file => {
+                                const li = document.createElement('li');
+                                li.id = `music-task-${file.id}`;
+                                // 文件名显示为相对路径（带子目录），更直观
+                                let displayName = file.name;
+                                if (displayName.startsWith('./') || displayName.startsWith('.\\')) {
+                                    displayName = displayName.slice(2);
+                                }
+                                li.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                                musicScraperTaskList.appendChild(li);
+                            });
+                        } else {
+                            musicScraperTaskList.innerHTML = '<li><span class="task-status-failed">未找到任何音乐文件</span></li>';
+                        }
+                    } else if (data.type === 'music_scrape_progress') {
+                        const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                        if (taskItem) {
+                            taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-scraping">刮削中...</span>`;
+                        }
+                    } else if (data.type === 'music_scrape_complete') {
+                        const taskItem = document.getElementById(`music-task-${data.file.id}`);
+                        if (taskItem) {
+                            if (data.result.skipped) {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status" style="color:#aaa">已跳过(已存在)</span>`;
+                            } else if (data.result.success) {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-success">完成</span>`;
+                            } else {
+                                taskItem.innerHTML = `<span class="task-name">${data.file.name}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || data.result.message}</span>`;
+                            }
+                        }
+                    } else if (data.type === 'music_scrape_finished_all') {
+                        const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                        const li = document.createElement('li');
+                        li.innerHTML = `<strong>所有音乐刮削任务已完成!</strong>`;
+                        musicScraperTaskList.appendChild(li);
+                    } else if (data.type === 'music_scrape_error') {
+                        const musicScraperTaskList = document.getElementById('music-scraper-task-list');
+                        musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '&quot;')}">错误: ${data.message}</span></li>`;
                     }
-                } else if (data.type === 'music_scrape_finished_all') {
-                    const musicScraperTaskList = document.getElementById('music-scraper-task-list');
-                    const li = document.createElement('li');
-                    li.innerHTML = `<strong>所有音乐刮削任务已完成!</strong>`;
-                    musicScraperTaskList.appendChild(li);
-                } else if (data.type === 'music_scrape_error') {
-                    const musicScraperTaskList = document.getElementById('music-scraper-task-list');
-                    musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '&quot;')}">错误: ${data.message}</span></li>`;
-                }
-            };
+                };
 
-            ws.onerror = (error) => {
+                ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
                 };
 
@@ -2345,6 +2345,51 @@
             }
 
             connectWebSocket();
+
+            // 新增：刷新时恢复进度
+            fetch('/api/scrape-status').then(r => r.json()).then(data => {
+                const scraperTaskList = document.getElementById('scraper-task-list');
+                const musicScraperTaskList = document.getElementById('music-scraper-task-list'); // Ensure fetched early
+
+                if (data.videoScrape && !data.videoScrape.isFinished && scraperTaskList) {
+                    scraperTaskList.innerHTML = '';
+                    data.videoScrape.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.id = `task-${file.id}`;
+                        let statusHtml = '';
+                        if (file.status === 'waiting') statusHtml = '<span class="task-status task-status-waiting">等待中</span>';
+                        else if (file.status === 'scraping') statusHtml = '<span class="task-status task-status-scraping">刮削中...</span>';
+                        else if (file.status === 'complete') {
+                            if (file.result && file.result.skipped) statusHtml = '<span class="task-status" style="color:#aaa">已跳过(已存在)</span>';
+                            else if (file.result && file.result.success) statusHtml = '<span class="task-status task-status-success">完成</span>';
+                            else statusHtml = `<span class="task-status task-status-failed" title="${(file.result?.details || '').replace(/"/g, '&quot;')}">失败: ${file.result?.error || file.result?.message || '未知错误'}</span>`;
+                        }
+                        li.innerHTML = `<span class="task-name">${file.name}</span> ${statusHtml}`;
+                        scraperTaskList.appendChild(li);
+                    });
+                }
+                if (data.musicScrape && !data.musicScrape.isFinished && musicScraperTaskList) {
+                    musicScraperTaskList.innerHTML = '';
+                    data.musicScrape.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.id = `music-task-${file.id}`;
+                        let displayName = file.name;
+                        if (displayName.startsWith('./') || displayName.startsWith('.\\')) {
+                            displayName = displayName.slice(2);
+                        }
+                        let statusHtml = '';
+                        if (file.status === 'waiting') statusHtml = '<span class="task-status task-status-waiting">等待中</span>';
+                        else if (file.status === 'scraping') statusHtml = '<span class="task-status task-status-scraping">刮削中...</span>';
+                        else if (file.status === 'complete') {
+                            if (file.result && file.result.skipped) statusHtml = '<span class="task-status" style="color:#aaa">已跳过(已存在)</span>';
+                            else if (file.result && file.result.success) statusHtml = '<span class="task-status task-status-success">完成</span>';
+                            else statusHtml = `<span class="task-status task-status-failed" title="${(file.result?.details || '').replace(/"/g, '&quot;')}">失败: ${file.result?.error || file.result?.message || '未知错误'}</span>`;
+                        }
+                        li.innerHTML = `<span class="task-name">${displayName}</span> ${statusHtml}`;
+                        musicScraperTaskList.appendChild(li);
+                    });
+                }
+            }).catch(e => console.error('[Scraping Status] Failed to fetch:', e));
 
             // 音乐刮削
             const musicScraperManagerButton = document.getElementById('musicScraperManagerButton');
@@ -2371,6 +2416,11 @@
                 // 避免 fetch resolve 时机晚于 WS 消息导致覆盖已渲染的任务列表
                 musicScraperTaskList.innerHTML = '<li><span class="task-status-waiting">正在启动音乐刮削任务...</span></li>';
                 try {
+                    // 获取音乐播放器的设置，使用相同的searchResultsLimit
+                    const settingsStr = localStorage.getItem('musicSettings');
+                    const settings = settingsStr ? JSON.parse(settingsStr) : {};
+                    const searchResultsLimit = settings.searchResultsLimit || 5;
+
                     const response = await fetch('/api/scrape-music-directory', {
                         method: 'POST',
                         headers: {
@@ -2379,7 +2429,8 @@
                         body: JSON.stringify({
                             path: currentPath,
                             mediaDir: currentMediaDir,
-                            source: selectedSource
+                            source: selectedSource,
+                            limit: searchResultsLimit
                         })
                     });
                     const result = await response.json();
@@ -2410,7 +2461,7 @@
                 <label><input type="radio" name="scrapeType" value="movie"> 电影</label>
                 <label><input type="radio" name="scrapeType" value="tv"> 电视剧</label>
                 <label><input type="radio" name="scrapeType" value="anime"> 动漫</label>
-                <label><input type="radio" name="scrapeType" value="jav" checked> JAV</label>
+                <label><input type="radio" name="scrapeType" value="jav"> JAV</label>
                 <label><input type="radio" name="scrapeType" value="fc2"> FC2</label>
             </div>
             <button id="startScrapingButton">开始刮削当前目录</button>
@@ -2433,9 +2484,9 @@
             <p>请选择刮削源：</p>
             <div class="scraper-type-options"
                 style="display: flex; flex-wrap: wrap; gap: 15px; margin: 10px 0; justify-content: center;">
-                <label><input type="radio" name="musicScrapeSource" value="netease" checked> 网易云</label>
+                <label><input type="radio" name="musicScrapeSource" value="netease"> 网易云</label>
                 <label><input type="radio" name="musicScrapeSource" value="musicbrainz"> MusicBrainz</label>
-                <label><input type="radio" name="musicScrapeSource" value="local"> 仅本地</label>
+                <label><input type="radio" name="musicScrapeSource" value="local" checked> 仅本地(推荐)</label>
             </div>
             <button id="startMusicScrapingButton"
                 style="width: 100%; padding: 10px; background: linear-gradient(to right, #28a745, #218838); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: all 0.3s ease;">开始刮削当前目录</button>

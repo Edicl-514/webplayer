@@ -2648,7 +2648,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     song.userModified = true;
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                 } else if (type === 'cover' && info.cover_url) {
-                    const coverUrl = `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`;
+                    // 如果cover_url是本地路径，直接使用；否则通过proxy-image
+                    const coverUrl = info.cover_url.startsWith('http')
+                        ? `/api/proxy-image?url=${encodeURIComponent(info.cover_url)}`
+                        : info.cover_url;
                     albumCover.src = getCacheBustedUrl(coverUrl);
                     playerBg.style.backgroundImage = `url("${getCacheBustedUrl(coverUrl)}")`;
                     setThemeColor(albumCover);

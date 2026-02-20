@@ -494,6 +494,13 @@ const server = http.createServer(async (req, res) => {
                 const jsonMatch = stdoutData.match(/({[\s\S]*})/);
                 if (jsonMatch && jsonMatch[1]) {
                     const musicInfo = JSON.parse(jsonMatch[1]);
+                    
+                    // 如果有 cover_filename 但没有 cover_url，则生成 cover_url
+                    if (musicInfo.cover_filename && !musicInfo.cover_url) {
+                        const safeCoverFilename = musicInfo.cover_filename.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+                        musicInfo.cover_url = `/cache/covers/${safeCoverFilename}`;
+                    }
+                    
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ success: true, data: musicInfo }));
                 } else {
@@ -2742,6 +2749,24 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // --- 全局变量用于保存刮削状态 ---
+    if (typeof global.activeVideoScrapeTask === 'undefined') {
+        global.activeVideoScrapeTask = null;
+    }
+    if (typeof global.activeMusicScrapeTask === 'undefined') {
+        global.activeMusicScrapeTask = null;
+    }
+
+    if (pathname === '/api/scrape-status' && req.method === 'GET') {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+            videoScrape: global.activeVideoScrapeTask,
+            musicScrape: global.activeMusicScrapeTask
+        }));
+        return;
+    }
+
     if (pathname === '/api/scrape-directory' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });
@@ -2770,11 +2795,18 @@ const server = http.createServer(async (req, res) => {
                             name: path.relative(fullPath, filePath) || path.basename(filePath)
                         }));
 
+                        global.activeVideoScrapeTask = {
+                            files: fileTasks.map(f => ({ id: f.id, name: f.name, status: 'waiting', result: null })),
+                            isFinished: false
+                        };
+
                         console.log(`[VideoScraper] Broadcasting scrape_start with ${fileTasks.length} files`);
                         broadcast({ type: 'scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
                         for (const fileTask of fileTasks) {
                             console.log(`[VideoScraper] Processing file: ${fileTask.name}`);
+                            const activeTaskFile = global.activeVideoScrapeTask.files.find(f => f.id === fileTask.id);
+                            if (activeTaskFile) activeTaskFile.status = 'scraping';
                             broadcast({ type: 'scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
 
                             const result = await new Promise((resolve) => {
@@ -2813,12 +2845,18 @@ const server = http.createServer(async (req, res) => {
                             });
 
                             console.log(`[VideoScraper] Finished file: ${fileTask.name}, success: ${result.success}`);
+                            if (activeTaskFile) {
+                                activeTaskFile.status = 'complete';
+                                activeTaskFile.result = result;
+                            }
                             broadcast({ type: 'scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
                         }
                         console.log(`[VideoScraper] All tasks finished`);
+                        if (global.activeVideoScrapeTask) global.activeVideoScrapeTask.isFinished = true;
                         broadcast({ type: 'scrape_finished_all' });
                     } catch (bgError) {
                         console.error('[VideoScraper] Background task error:', bgError);
+                        if (global.activeVideoScrapeTask) global.activeVideoScrapeTask.isFinished = true;
                         broadcast({
                             type: 'scrape_error',
                             message: '刮削过程出错',
@@ -2846,11 +2884,11 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => { body += chunk.toString(); });
         req.on('end', async () => {
             try {
-                const { path: relativePath, mediaDir, source } = JSON.parse(body);
+                const { path: relativePath, mediaDir, source, limit } = JSON.parse(body);
                 const fullPath = path.join(mediaDir, relativePath);
 
                 console.log(`[MusicScraper] Starting scrape for path: ${fullPath}`);
-                console.log(`[MusicScraper] Relative path: ${relativePath}, Media dir: ${mediaDir}, Source: ${source}`);
+                console.log(`[MusicScraper] Relative path: ${relativePath}, Media dir: ${mediaDir}, Source: ${source}, Limit: ${limit}`);
 
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
@@ -2869,10 +2907,17 @@ const server = http.createServer(async (req, res) => {
                             name: path.relative(fullPath, filePath) || path.basename(filePath)
                         }));
 
+                        global.activeMusicScrapeTask = {
+                            files: fileTasks.map(f => ({ id: f.id, name: f.name, status: 'waiting', result: null })),
+                            isFinished: false
+                        };
+
                         console.log(`[MusicScraper] Broadcasting music_scrape_start with ${fileTasks.length} files`);
                         broadcast({ type: 'music_scrape_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
 
                         for (const fileTask of fileTasks) {
+                            const activeTaskFile = global.activeMusicScrapeTask.files.find(f => f.id === fileTask.id);
+                            if (activeTaskFile) activeTaskFile.status = 'scraping';
                             broadcast({ type: 'music_scrape_progress', file: { id: fileTask.id, name: fileTask.name } });
 
                             const result = await new Promise((resolve) => {
@@ -2881,6 +2926,10 @@ const server = http.createServer(async (req, res) => {
                                 const scrapeType = 'all';
                                 if (scrapeType && ['lyrics', 'cover', 'info', 'all'].includes(scrapeType)) {
                                     args.push('--only', scrapeType);
+                                }
+                                // Forward limit parameter
+                                if (limit) {
+                                    args.push('--limit', limit.toString());
                                 }
                                 console.log(`[spawn] python ${args.join(' ')}`);
                                 const pythonProcess = spawn('python', args, {
@@ -2916,11 +2965,17 @@ const server = http.createServer(async (req, res) => {
                                 });
                             });
 
+                            if (activeTaskFile) {
+                                activeTaskFile.status = 'complete';
+                                activeTaskFile.result = result;
+                            }
                             broadcast({ type: 'music_scrape_complete', file: { id: fileTask.id, name: fileTask.name }, result });
                         }
+                        if (global.activeMusicScrapeTask) global.activeMusicScrapeTask.isFinished = true;
                         broadcast({ type: 'music_scrape_finished_all' });
                     } catch (bgError) {
                         console.error('[MusicScraper] Background task error:', bgError);
+                        if (global.activeMusicScrapeTask) global.activeMusicScrapeTask.isFinished = true;
                         broadcast({
                             type: 'music_scrape_error',
                             message: '刮削过程出错',

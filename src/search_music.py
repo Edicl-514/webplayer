@@ -55,13 +55,15 @@ def search_database(search_query):
         results = []
         for row in rows:
             filepath, title, artist, album, cover_path = row
-            results.append({
-                "filepath": filepath,
-                "title": title,
-                "artist": artist,
-                "album": album,
-                "cover_path": cover_path
-            })
+            # 过滤掉库中不存在的文件
+            if os.path.exists(filepath):
+                results.append({
+                    "filepath": filepath,
+                    "title": title,
+                    "artist": artist,
+                    "album": album,
+                    "cover_path": cover_path
+                })
 
         return results
 
