@@ -3409,7 +3409,9 @@ function getContentType(filePath) {
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         '.srt': 'application/x-subrip',
         '.vtt': 'text/vtt',
-        '.ass': 'text/plain'
+        '.ass': 'text/plain',
+        // WebAssembly — 浏览器要求此 MIME 才能正确流式编译 WASM 模块
+        '.wasm': 'application/wasm'
     };
     return mimeTypes[extname] || 'application/octet-stream';
 }
