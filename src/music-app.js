@@ -555,6 +555,14 @@ document.addEventListener('DOMContentLoaded', () => {
             normCompressorNode.ratio.value = 20;        // 高压缩比，接近 limiter
             normCompressorNode.attack.value = 0.001;    // 1ms 快速响应
             normCompressorNode.release.value = 0.1;     // 100ms 释放
+            // 如果在节点初始化之前已从后端拿到 LUFS，则立即应用
+            if (typeof currentTrackLufs === 'number') {
+                try {
+                    applyNormalizationGain(currentTrackLufs);
+                } catch (e) {
+                    console.warn('[Normalization] Failed to apply pending LUFS on setup:', e);
+                }
+            }
         }
 
         // Always update canvas size for responsiveness
@@ -1473,6 +1481,8 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(resp => resp.json())
             .then(data => {
                 if (data.lufs !== undefined && data.lufs !== null) {
+                    // 保存 LUFS 以便在节点初始化后仍可应用
+                    currentTrackLufs = data.lufs;
                     applyNormalizationGain(data.lufs);
                 } else {
                     console.log('[Normalization] No LUFS data available, skipping normalization');
@@ -1608,9 +1618,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const artistEl = item.querySelector('.artist');
                 const albumEl = item.querySelector('.album');
 
-                if (titleEl) titleEl.classList.remove('marquee');
-                if (artistEl) artistEl.classList.remove('marquee');
-                if (albumEl) albumEl.classList.remove('marquee');
+                if (titleEl) {
+                    titleEl.classList.remove('marquee');
+                    titleEl.style.removeProperty('--scroll-distance');
+                    titleEl.style.removeProperty('--scroll-duration');
+                }
+                if (artistEl) {
+                    artistEl.classList.remove('marquee');
+                    artistEl.style.removeProperty('--scroll-distance');
+                    artistEl.style.removeProperty('--scroll-duration');
+                }
+                if (albumEl) {
+                    albumEl.classList.remove('marquee');
+                    albumEl.style.removeProperty('--scroll-distance');
+                    albumEl.style.removeProperty('--scroll-duration');
+                }
             }
         });
     }
@@ -1618,11 +1640,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function checkPlaylistItemMarquee(element) {
         // 移除marquee类以重置状态
         element.classList.remove('marquee');
+        element.style.removeProperty('--scroll-distance');
+        element.style.removeProperty('--scroll-duration');
 
         // 等待浏览器重新计算布局
         requestAnimationFrame(() => {
             const isOverflowing = element.scrollWidth > element.clientWidth;
             if (isOverflowing) {
+                const overflowAmount = element.scrollWidth - element.clientWidth;
+                const targetDistance = overflowAmount + 10;
+                let totalTime = (targetDistance / 30) / 0.3;
+                totalTime = Math.max(8, Math.min(totalTime, 20));
+
+                element.style.setProperty('--scroll-distance', `-${targetDistance}px`);
+                element.style.setProperty('--scroll-duration', `${totalTime.toFixed(1)}s`);
                 element.classList.add('marquee');
             }
         });
@@ -2042,12 +2073,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function checkMarquee(element) {
         // 1. 总是先移除类，将元素重置到一个已知的基准状态。
         element.classList.remove('marquee');
+        element.style.removeProperty('--scroll-distance');
+        element.style.removeProperty('--scroll-duration');
 
         // 2. 使用 requestAnimationFrame 来确保浏览器有时间应用上面的样式更改（移除类）
         //    并重新计算布局，然后再进行宽度检查。
         requestAnimationFrame(() => {
             const isOverflowing = element.scrollWidth > element.clientWidth;
             if (isOverflowing) {
+                const overflowAmount = element.scrollWidth - element.clientWidth;
+                const targetDistance = overflowAmount + 10;
+                let totalTime = (targetDistance / 30) / 0.3;
+                totalTime = Math.max(8, Math.min(totalTime, 20));
+
+                element.style.setProperty('--scroll-distance', `-${targetDistance}px`);
+                element.style.setProperty('--scroll-duration', `${totalTime.toFixed(1)}s`);
                 // 3. 如果确实溢出，现在才添加 marquee 类来启动动画。
                 element.classList.add('marquee');
             }
