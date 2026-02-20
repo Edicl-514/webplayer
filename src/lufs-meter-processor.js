@@ -2,20 +2,20 @@
  * lufs-meter-processor.js — AudioWorklet 处理器
  *
  * 职责：
- *   1. 在 AudioWorklet 线程中加载 Rust/WASM 编译的 LufsMeter 模块
+ *   1. 接收主线程发来的 WASM ArrayBuffer（initSync 初始化）
  *   2. 接收 Web Audio API 的音频帧（每次 128 采样），传入 WASM 计算
  *   3. 将 LUFS/Peak 结果通过 MessagePort 推送到主线程
  *
- * 使用链路（主线程侧）：
- *   await audioContext.audioWorklet.addModule('/lufs-meter-processor.js');
- *   const lufsNode = new AudioWorkletNode(audioContext, 'lufs-meter-processor');
- *   lufsNode.port.onmessage = (e) => {
- *     if (e.data.type === 'lufs-update') {
- *       const { momentaryLufs, shortTermLufs, peakLDb, peakRDb } = e.data;
- *       // 更新 UI ...
- *     }
- *   };
- *   normCompressorNode.connect(lufsNode);   // 只读分析，不需要连 destination
+ * 初始化流程：
+ *   主线程：
+ *     await audioContext.audioWorklet.addModule('/lufs-meter-processor.js');
+ *     const lufsNode = new AudioWorkletNode(audioContext, 'lufs-meter-processor');
+ *     const wasmBuffer = await fetch('audio_processor/pkg/audio_processor_bg.wasm').then(r => r.arrayBuffer());
+ *     lufsNode.port.postMessage({ type: 'init-wasm', wasmBuffer });
+ *   
+ *   Worklet:
+ *     port.onmessage({ type: 'init-wasm', wasmBuffer }) → initSync(wasmBuffer)
+ *     → 计算 LUFS 并通过 port.postMessage() 推送结果
  *
  * 浏览器兼容性：
  *   要求支持 AudioWorklet Module (Chrome 80+, Firefox 76+, Edge 80+)
@@ -27,16 +27,12 @@
  */
 
 // ============================================================
-// 顶层 await：在任何处理器实例化之前初始化 WASM
-// AudioWorklet 模块脚本支持顶层 await
+// 导入：initSync 和 LufsMeter class
+// 注意：不使用 async init()（会调用 new URL() 和 fetch()，都在 AudioWorklet 中不可用），
+//       而是导入 initSync，待接收主线程的 WASM ArrayBuffer 后再手动初始化
 // ============================================================
 
-import init, { LufsMeter } from './audio_processor/pkg/audio_processor.js';
-
-// init() 不传参数时，wasm-bindgen 通过 import.meta.url 自动推断 .wasm 文件路径
-// (即 ./audio_processor/pkg/audio_processor_bg.wasm)
-// AudioWorkletGlobalScope 支持 import.meta.url 和 fetch()，所以此处可以正常工作
-await init();
+import { initSync, LufsMeter } from './audio_processor/pkg/audio_processor.js';
 
 // ============================================================
 // LufsMeterProcessor —— AudioWorkletProcessor 实现
@@ -50,23 +46,39 @@ class LufsMeterProcessor extends AudioWorkletProcessor {
     constructor(options) {
         super();
 
-        // 在 AudioWorkletGlobalScope 中，sampleRate 是全局变量
-        this._meter = new LufsMeter(sampleRate);
+        this._meter = null;  // LufsMeter 实例，待初始化后才创建
+        this._ready = false; // 是否已初始化完毕
 
         // 节流：用于控制消息推送频率（额外保险，Rust 侧已有内置节流）
         this._lastPostTime = -1;
         this._updateIntervalSec = (options?.processorOptions?.updateIntervalMs ?? 50) / 1000;
 
-        // 处理来自主线程的控制指令
+        // 处理来自主线程的消息
         this.port.onmessage = (event) => {
-            const { type } = event.data;
+            const { type, wasmBuffer } = event.data;
             switch (type) {
+                case 'init-wasm':
+                    // 主线程发来 WASM ArrayBuffer，用 initSync 初始化
+                    if (wasmBuffer) {
+                        try {
+                            // 使用推荐的对象参数形式以避免弃用警告
+                            initSync({ module: wasmBuffer });
+                            this._meter = new LufsMeter(sampleRate);
+                            this._ready = true;
+                            this.port.postMessage({ type: 'ready', sampleRate });
+                            console.log('[LUFS Worklet] Initialized with WASM, sampleRate:', sampleRate);
+                        } catch (e) {
+                            console.error('[LUFS Worklet] Failed to init WASM:', e);
+                            this.port.postMessage({ type: 'error', message: e.message });
+                        }
+                    }
+                    break;
                 case 'reset-peak':
-                    this._meter.reset_peak();
+                    if (this._meter) this._meter.reset_peak();
                     break;
                 case 'reset-all':
                     // 切换曲目时调用：清除历史数据（滤波器状态、缓冲区、峰值）
-                    this._meter.reset_all();
+                    if (this._meter) this._meter.reset_all();
                     break;
                 case 'ping':
                     // 健康检查
@@ -74,9 +86,6 @@ class LufsMeterProcessor extends AudioWorkletProcessor {
                     break;
             }
         };
-
-        // 通知主线程：处理器已就绪，WASM 已初始化
-        this.port.postMessage({ type: 'ready', sampleRate });
     }
 
     /**
@@ -87,6 +96,8 @@ class LufsMeterProcessor extends AudioWorkletProcessor {
      * @returns {boolean} 始终返回 true 以保持处理器活跃
      */
     process(inputs, _outputs, _parameters) {
+        if (!this._ready || !this._meter) return true; // 未初始化，跳过处理
+
         const inputBus = inputs[0];
 
         // 无输入数据时（节点未连接或已结束）跳过

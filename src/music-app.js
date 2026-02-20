@@ -483,6 +483,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 音频可视化 ---
     let audioContext, analyser, dataArray;
+    let analyserL = null;       // 左声道独立分析仪（2048 FFT，用于 L 电平表/声场图）
+    let analyserR = null;       // 右声道独立分析仪（2048 FFT，用于 R 电平表/声场图）
+    let analyserMixed = null;   // 高精度混合频谱分析仪（8192 FFT，用于频谱/瀑布图）
+    let channelSplitter = null; // 声道分离器（将立体声拆为左右两路）
+    let lufsNode = null;        // LUFS 计量 AudioWorklet 节点
     let visualizerCtx;
 
     function draw() {
@@ -529,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function setupVisualizer() {
+    async function setupVisualizer() {
         if (!Howler.ctx) return; // Howler not ready
 
         // Initialize only once
@@ -538,24 +543,83 @@ document.addEventListener('DOMContentLoaded', () => {
             if (audioContext.state === 'suspended') {
                 audioContext.resume();
             }
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
+
+            // --- 创建高精度混合频谱分析仪 (8192 FFT，用于频谱/瀑布图) ---
+            analyserMixed = audioContext.createAnalyser();
+            analyserMixed.fftSize = 8192;
+            analyserMixed.smoothingTimeConstant = 0.8;
+
+            // --- 创建左右声道独立分析仪 (2048 FFT，用于 L/R 电平表和李萨如声场图) ---
+            analyserL = audioContext.createAnalyser();
+            analyserL.fftSize = 2048;
+            analyserR = audioContext.createAnalyser();
+            analyserR.fftSize = 2048;
+
+            // --- 创建声道分离器（stereo → L/R 两路） ---
+            channelSplitter = audioContext.createChannelSplitter(2);
+
+            // --- 向后兼容：analyser 指向 analyserMixed，供旧版 draw() 使用 ---
+            analyser = analyserMixed;
             const bufferLength = analyser.frequencyBinCount;
             dataArray = new Uint8Array(bufferLength);
             visualizerCtx = canvas.getContext('2d');
 
-            // 创建归一化增益节点
+            // --- 创建归一化增益节点 ---
             normGainNode = audioContext.createGain();
             normGainNode.gain.value = 1.0; // 默认不调整
 
-            // 创建防削波压缩器（作为 limiter 使用）
+            // --- 创建防削波压缩器（作为 limiter 使用）---
             normCompressorNode = audioContext.createDynamicsCompressor();
             normCompressorNode.threshold.value = -1;   // -1 dBFS 开始压缩
             normCompressorNode.knee.value = 0;          // 硬拐点，严格限制
             normCompressorNode.ratio.value = 20;        // 高压缩比，接近 limiter
             normCompressorNode.attack.value = 0.001;    // 1ms 快速响应
             normCompressorNode.release.value = 0.1;     // 100ms 释放
-            // 如果在节点初始化之前已从后端拿到 LUFS，则立即应用
+
+            // --- 加载 LUFS AudioWorklet 模块（异步，失败时降级为无 LUFS 计量）---
+            try {
+                await audioContext.audioWorklet.addModule('lufs-meter-processor.js');
+                
+                // 在主线程加载 WASM（AudioWorklet 中无网络 API），再传给 Worklet
+                let wasmBuffer = null;
+                try {
+                    const wasmResp = await fetch('audio_processor/pkg/audio_processor_bg.wasm');
+                    wasmBuffer = await wasmResp.arrayBuffer();
+                } catch (e) {
+                    console.warn('[LUFS Worklet] Failed to preload WASM, will attempt to use initSync:', e);
+                }
+                
+                lufsNode = new AudioWorkletNode(audioContext, 'lufs-meter-processor');
+                
+                // 如果成功加载 WASM，发送给 Worklet 用 initSync 初始化
+                if (wasmBuffer) {
+                    // 通过 Transferable 将 ArrayBuffer 传入 Worklet，避免复制
+                    try {
+                        lufsNode.port.postMessage({ type: 'init-wasm', wasmBuffer }, [wasmBuffer]);
+                    } catch (e) {
+                        // 如果浏览器不支持传输，则回退到普通 postMessage
+                        lufsNode.port.postMessage({ type: 'init-wasm', wasmBuffer });
+                    }
+                }
+                
+                lufsNode.port.onmessage = (event) => {
+                    const { type } = event.data;
+                    if (type === 'ready') {
+                        console.log('[LUFS Worklet] Processor ready, sampleRate:', event.data.sampleRate);
+                    } else if (type === 'lufs-update') {
+                        const { momentaryLufs, shortTermLufs, peakLDb, peakRDb } = event.data;
+                        if (window.audioMeters) {
+                            window.audioMeters.lufsData = { momentaryLufs, shortTermLufs, peakLDb, peakRDb };
+                        }
+                    }
+                };
+                console.log('[LUFS Worklet] Module loaded successfully');
+            } catch (e) {
+                console.warn('[LUFS Worklet] Failed to load, LUFS metering disabled:', e);
+                lufsNode = null;
+            }
+
+            // --- 如果在节点初始化之前已从后端拿到 LUFS，则立即应用 ---
             if (typeof currentTrackLufs === 'number') {
                 try {
                     applyNormalizationGain(currentTrackLufs);
@@ -563,6 +627,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.warn('[Normalization] Failed to apply pending LUFS on setup:', e);
                 }
             }
+
+            // --- 暴露所有分析节点供 Canvas 绘制（步骤C）和外部调试使用 ---
+            window.audioMeters = {
+                analyserL,
+                analyserR,
+                analyserMixed,
+                lufsNode,
+                lufsData: {
+                    momentaryLufs: -Infinity,
+                    shortTermLufs: -Infinity,
+                    peakLDb: -Infinity,
+                    peakRDb: -Infinity
+                }
+            };
         }
 
         // Always update canvas size for responsiveness
@@ -583,6 +661,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadSong(index, playOnLoad = false, fromFolderLoad = false) {
         if (sound) {
             sound.unload();
+        }
+        // 换曲时重置 LUFS 计量历史（清除滤波器状态、缓冲区和峰值）
+        if (lufsNode) {
+            try { lufsNode.port.postMessage({ type: 'reset-all' }); } catch (e) { }
         }
         albumCover.classList.remove('playing');
 
@@ -762,36 +844,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 cancelAnimationFrame(lyricRAF);
                 lyricRAF = requestAnimationFrame(updateLyrics);
                 if (canvas.getContext) {
-                    setupVisualizer();
+                    (async () => {
+                        await setupVisualizer();
 
-                    // 处理 HTML5 Audio 模式下的音频可视化 + 归一化连接
-                    if (sound._html5) {
-                        try {
-                            const audioNode = sound._sounds[0]._node;
-                            if (audioNode) {
-                                if (!audioNode.crossOrigin) {
-                                    audioNode.crossOrigin = 'anonymous';
-                                }
+                        // 处理 HTML5 Audio 模式下的音频可视化 + 归一化连接
+                        if (sound._html5) {
+                            try {
+                                const audioNode = sound._sounds[0]._node;
+                                if (audioNode) {
+                                    if (!audioNode.crossOrigin) {
+                                        audioNode.crossOrigin = 'anonymous';
+                                    }
 
-                                if (!audioNode._webAudioSource) {
-                                    const source = Howler.ctx.createMediaElementSource(audioNode);
-                                    audioNode._webAudioSource = source;
-                                    connectAudioChain(source);
-                                } else {
-                                    connectAudioChain(audioNode._webAudioSource);
+                                    if (!audioNode._webAudioSource) {
+                                        const source = Howler.ctx.createMediaElementSource(audioNode);
+                                        audioNode._webAudioSource = source;
+                                        connectAudioChain(source);
+                                    } else {
+                                        connectAudioChain(audioNode._webAudioSource);
+                                    }
                                 }
+                            } catch (e) {
+                                console.warn('Visualization setup failed for HTML5 audio:', e);
                             }
-                        } catch (e) {
-                            console.warn('Visualization setup failed for HTML5 audio:', e);
+                        } else {
+                            connectAudioChain(Howler.masterGain);
                         }
-                    } else {
-                        connectAudioChain(Howler.masterGain);
-                    }
 
-                    if (isVisualizerVisible) {
-                        cancelAnimationFrame(visualizerRAF);
-                        draw();
-                    }
+                        if (isVisualizerVisible) {
+                            cancelAnimationFrame(visualizerRAF);
+                            draw();
+                        }
+                    })();
                 }
             },
             onpause: () => {
@@ -1326,30 +1410,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 lyricRAF = requestAnimationFrame(updateLyrics);
 
                 if (canvas.getContext) {
-                    setupVisualizer();
-                    if (sound._html5) {
-                        try {
-                            const audioNode = sound._sounds[0]._node;
-                            if (audioNode) {
-                                if (!audioNode.crossOrigin) audioNode.crossOrigin = 'anonymous';
-                                if (!audioNode._webAudioSource) {
-                                    const source = Howler.ctx.createMediaElementSource(audioNode);
-                                    audioNode._webAudioSource = source;
-                                    connectAudioChain(source);
-                                } else {
-                                    connectAudioChain(audioNode._webAudioSource);
+                    (async () => {
+                        await setupVisualizer();
+                        if (sound._html5) {
+                            try {
+                                const audioNode = sound._sounds[0]._node;
+                                if (audioNode) {
+                                    if (!audioNode.crossOrigin) audioNode.crossOrigin = 'anonymous';
+                                    if (!audioNode._webAudioSource) {
+                                        const source = Howler.ctx.createMediaElementSource(audioNode);
+                                        audioNode._webAudioSource = source;
+                                        connectAudioChain(source);
+                                    } else {
+                                        connectAudioChain(audioNode._webAudioSource);
+                                    }
                                 }
+                            } catch (e) {
+                                console.warn('VBR seek: Visualization setup failed:', e);
                             }
-                        } catch (e) {
-                            console.warn('VBR seek: Visualization setup failed:', e);
+                        } else {
+                            connectAudioChain(Howler.masterGain);
                         }
-                    } else {
-                        connectAudioChain(Howler.masterGain);
-                    }
-                    if (isVisualizerVisible) {
-                        cancelAnimationFrame(visualizerRAF);
-                        draw();
-                    }
+                        if (isVisualizerVisible) {
+                            cancelAnimationFrame(visualizerRAF);
+                            draw();
+                        }
+                    })();
                 }
             },
             onpause: () => {
@@ -1375,8 +1461,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 将音频源连接到 归一化增益 → 压缩器(limiter) → 可视化(analyser) → 输出(destination)
-     * 如果归一化节点未初始化，则回退到直连
+     * 将音频源连接到完整的多路分析链路：
+     *
+     *   source → normGainNode → normCompressorNode ──► analyserMixed (8192 FFT，频谱/瀑布图)
+     *                                              ├──► channelSplitter → analyserL (ch0，L 电平表/声场)
+     *                                              │                   → analyserR (ch1，R 电平表/声场)
+     *                                              ├──► lufsNode (LUFS 计量 Worklet，终端节点)
+     *                                              └──► destination (扬声器)
+     *
+     * 如果归一化节点未初始化，则回退到直连。
      */
     function connectAudioChain(sourceNode) {
         try {
@@ -1384,17 +1477,37 @@ document.addEventListener('DOMContentLoaded', () => {
             try { sourceNode.disconnect(); } catch (e) { /* 可能未连接，忽略 */ }
             if (normGainNode) try { normGainNode.disconnect(); } catch (e) { }
             if (normCompressorNode) try { normCompressorNode.disconnect(); } catch (e) { }
+            if (channelSplitter) try { channelSplitter.disconnect(); } catch (e) { }
 
-            if (normGainNode && normCompressorNode && analyser) {
-                // 完整链路: source → normGain → compressor → analyser → destination
-                //                                           └→ destination
+            if (normGainNode && normCompressorNode) {
+                // 串联增益和压缩器
                 sourceNode.connect(normGainNode);
                 normGainNode.connect(normCompressorNode);
-                normCompressorNode.connect(analyser);
+
+                // 1. 高精度混合频谱分析仪（8192 FFT）— 频谱图/瀑布图（终端节点）
+                if (analyserMixed) {
+                    normCompressorNode.connect(analyserMixed);
+                }
+
+                // 2. 左右声道独立分析 — L/R 电平表和李萨如声场图（终端节点）
+                if (channelSplitter && analyserL && analyserR) {
+                    normCompressorNode.connect(channelSplitter);
+                    channelSplitter.connect(analyserL, 0); // 左声道 → analyserL
+                    channelSplitter.connect(analyserR, 1); // 右声道 → analyserR
+                }
+
+                // 3. LUFS 计量 Worklet（终端节点，不连 destination）
+                if (lufsNode) {
+                    normCompressorNode.connect(lufsNode);
+                }
+
+                // 4. 最终输出到扬声器
                 normCompressorNode.connect(Howler.ctx.destination);
-            } else if (analyser) {
-                // 回退: source → analyser → destination
-                sourceNode.connect(analyser);
+
+                console.log('[AudioChain] Connected: source → normGain → compressor → [analyserMixed, splitter(L/R), lufsNode, destination]');
+            } else if (analyserMixed) {
+                // 回退: source → analyserMixed + destination
+                sourceNode.connect(analyserMixed);
                 sourceNode.connect(Howler.ctx.destination);
             } else {
                 sourceNode.connect(Howler.ctx.destination);
