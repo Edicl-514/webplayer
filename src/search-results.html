@@ -487,7 +487,7 @@
                        resultItem.onclick = () => navigateToFolder(result.full_path, result.media_dir_root);
                    } else {
                        // 为文件创建缩略图或图标
-                                             const extension = result.filename.split('.').pop().toLowerCase();
+                                             const extension = (result.filename.includes('.') && result.filename.lastIndexOf('.') > 0) ? result.filename.slice(result.filename.lastIndexOf('.') + 1).toLowerCase() : '';
                                              const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
                                              const isVideo = [
                                                                 // 现代网络格式 (多数浏览器原生支持)
@@ -561,7 +561,7 @@
                            if (isImage) {
                                e.preventDefault();
                                const imageFiles = searchResults.filter(r => {
-                                   const ext = r.filename.split('.').pop().toLowerCase();
+                                  const ext = (r.filename.includes('.') && r.filename.lastIndexOf('.') > 0) ? r.filename.slice(r.filename.lastIndexOf('.') + 1).toLowerCase() : '';
                                    return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
                                });
 

@@ -1020,6 +1020,58 @@
                 }
             }
 
+            // 中文本地化比较器 + 中文数字识别（用于“第一章”、“二十集”等）
+            const zhCollator = new Intl.Collator('zh', { sensitivity: 'base', numeric: true });
+
+            function chineseToNumber(s) {
+                if (!s) return null;
+                if (/^\d+$/.test(s)) return parseInt(s, 10);
+                const digits = { '零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+                const units = { '十':10,'百':100,'千':1000,'万':10000,'亿':100000000 };
+                let section = 0, number = 0;
+                for (let i = 0; i < s.length; i++) {
+                    const ch = s[i];
+                    if (digits[ch] !== undefined) {
+                        number = digits[ch];
+                    } else if (units[ch]) {
+                        const unitVal = units[ch];
+                        if (number === 0 && ch === '十') number = 1;
+                        section += number * unitVal;
+                        number = 0;
+                    } else if (ch === '零') {
+                        number = 0;
+                    } else {
+                        // 不认识的字符，跳过
+                    }
+                }
+                const val = section + number;
+                return isNaN(val) || val === 0 ? (val === 0 ? 0 : null) : val;
+            }
+
+            function parseLeadingChineseNumber(name) {
+                if (!name) return null;
+                const trimmed = name.trim();
+                // 匹配形式：第十二章、二十集、12话、十
+                const m = /^第?([零一二三四五六七八九十百千两万亿\d]+)(章|集|节|话)?/.exec(trimmed);
+                if (m) {
+                    return chineseToNumber(m[1]);
+                }
+                return null;
+            }
+
+            function compareNamesLocalized(aName, bName) {
+                // 优先识别前缀中文数字
+                const numA = parseLeadingChineseNumber(aName);
+                const numB = parseLeadingChineseNumber(bName);
+                if (numA !== null && numB !== null) {
+                    return numA - numB;
+                }
+                if (numA !== null && numB === null) return -1;
+                if (numA === null && numB !== null) return 1;
+                // 回退到 Intl.Collator 做本地化比较（支持拼音/笔画更合适）
+                return zhCollator.compare(aName, bName);
+            }
+
             const fileGrid = document.getElementById('fileGrid');
             const rootDirsGrid = document.getElementById('rootDirsGrid');
             const currentPathSpan = document.getElementById('currentPath');
@@ -1246,41 +1298,50 @@
                                 return sortOrderValue === 'asc' ? indexA - indexB : indexB - indexA;
                             }
 
-                            // 同一分组内按文件名排序
-                            const compareA = a.name.toLowerCase();
-                            const compareB = b.name.toLowerCase();
-
-                            if (compareA < compareB) {
-                                return -1;
-                            }
-                            if (compareA > compareB) {
-                                return 1;
-                            }
+                            // 同一分组内按文件名排序（使用中文本地化比较，带中文数字识别）
+                            const nameCmp = compareNamesLocalized(a.name, b.name);
+                            if (nameCmp < 0) return -1;
+                            if (nameCmp > 0) return 1;
                             return 0;
+                        }
+
+                        // 非混合排序时（默认行为），如果选择按名称排序，先按文件类型分组再按名称排序
+                        if (!mixSort && sortTypeValue === 'name') {
+                            const extA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
+                            const extB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
+
+                            if (extA !== extB) {
+                                return sortOrderValue === 'asc' ? extA.localeCompare(extB) : extB.localeCompare(extA);
+                            }
+                            // 同类型则继续按名称比较（下面的通用比较会处理）
                         }
 
                         let compareA, compareB;
                         switch (sortTypeValue) {
                             case 'name':
-                                compareA = a.name.toLowerCase();
-                                compareB = b.name.toLowerCase();
+                                compareA = a.name;
+                                compareB = b.name;
                                 break;
                             case 'type':
-                                compareA = a.isDirectory ? '' : a.name.split('.').pop().toLowerCase();
-                                compareB = b.isDirectory ? '' : b.name.split('.').pop().toLowerCase();
+                                compareA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
+                                compareB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
                                 break;
                             default: // default to name sort
-                                compareA = a.name.toLowerCase();
-                                compareB = b.name.toLowerCase();
+                                compareA = a.name;
+                                compareB = b.name;
                         }
 
-                        if (compareA < compareB) {
-                            return sortOrderValue === 'asc' ? -1 : 1;
+                        if (sortTypeValue === 'name') {
+                            const cmp = compareNamesLocalized(compareA, compareB);
+                            if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
+                            if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
+                            return 0;
+                        } else {
+                            const cmp = zhCollator.compare(String(compareA).toLowerCase(), String(compareB).toLowerCase());
+                            if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
+                            if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
+                            return 0;
                         }
-                        if (compareA > compareB) {
-                            return sortOrderValue === 'asc' ? 1 : -1;
-                        }
-                        return 0;
                     });
                 }
 
@@ -1327,7 +1388,7 @@
                         gridItem.classList.add('is-directory');
                     } else {
                         gridItem.classList.add('is-file');
-                        const extension = file.name.split('.').pop().toLowerCase();
+                        const extension = (file.name.includes('.') && file.name.lastIndexOf('.') > 0) ? file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase() : '';
                         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
                         const isVideo = [
                             // 现代网络格式 (多数浏览器原生支持)
@@ -1402,7 +1463,7 @@
                         gridItem.onclick = () => navigateTo(file.name);
                     } else {
                         // 为文件创建缩略图或图标
-                        const extension = file.name.split('.').pop().toLowerCase();
+                        const extension = (file.name.includes('.') && file.name.lastIndexOf('.') > 0) ? file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase() : '';
                         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension);
                         const isVideo = [
                             // 现代网络格式 (多数浏览器原生支持)
@@ -1476,7 +1537,7 @@
                             if (isImage) {
                                 e.preventDefault(); // 阻止 a 标签的默认跳转行为
                                 const imageFiles = currentFiles.filter(f => {
-                                    const ext = f.name.split('.').pop().toLowerCase();
+                                    const ext = (f.name.includes('.') && f.name.lastIndexOf('.') > 0) ? f.name.slice(f.name.lastIndexOf('.') + 1).toLowerCase() : '';
                                     return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext);
                                 });
 
