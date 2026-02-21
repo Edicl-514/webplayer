@@ -518,7 +518,9 @@ document.addEventListener('DOMContentLoaded', () => {
         polarLevelBins: null,  // Float32Array(360)，用于极坐标电平的帧间累积
         lissajousTrailCanvas: null, // 离屏 canvas，用于 Lissajous 余辉/持久性效果
         lissajousPeakSmooth: 0.001, // 平滑峰值跟踪器，用于 Lissajous 动态自动增益
+        lissajousRmsSmooth: 0.02,   // 平滑 RMS 跟踪器：让自动增益更偏向“整体能量”而非瞬时峰值
         polarPeakSmooth: 0.001,     // 平滑峰值跟踪器，用于 Polar Level/Sample 动态自动增益
+        polarRmsSmooth: 0.02,       // 平滑 RMS 跟踪器：让 Polar 自动增益更稳定，减少贴边饱和
         polarSampleTrailCanvas: null // 离屏 canvas，用于 Polar Sample 余辉效果
     };
 
@@ -541,14 +543,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
     }
 
-    function resizeVisualizerCanvas() {
+    function resizeVisualizerCanvas(mode) {
         const rect = canvas.getBoundingClientRect();
-        const w = Math.max(1, Math.floor(rect.width));
-        const h = Math.max(1, Math.floor(rect.height));
+        let dpr = window.devicePixelRatio || 1;
+
+        // 由于 3D 频谱图会绘制大量线条和阴影，在高分屏（如手机）上容易卡顿
+        // 因此为其单独限制 dpr
+        if (mode === 'spectrogram3d') {
+            dpr = Math.min(dpr, 1);
+        }
+
+        const w = Math.max(1, Math.floor(rect.width * dpr));
+        const h = Math.max(1, Math.floor(rect.height * dpr));
         if (canvas.width !== w || canvas.height !== h) {
             canvas.width = w;
             canvas.height = h;
         }
+        return {
+            width: Math.max(1, Math.floor(rect.width)),
+            height: Math.max(1, Math.floor(rect.height)),
+            dpr: dpr
+        };
     }
 
     function ensureVisualizerBuffers() {
@@ -1020,7 +1035,7 @@ document.addEventListener('DOMContentLoaded', () => {
         analyserR.getFloatTimeDomainData(timeDomainRData);
 
         const accent = parseAccentColor();
-        const pad = 28;
+        const pad = window.innerWidth <= 768 ? 42 : 28;
         const cx = width / 2, cy = height / 2;
         const radius = Math.min(cx, cy) - pad;
 
@@ -1033,20 +1048,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ─ 1. 自动增益与能量处理 ─
         let framePeak = 0;
+        let sumSq = 0;
+        let n = 0;
         for (let i = 0; i < pts; i++) {
-            const al = Math.abs(timeDomainLData[i]);
-            const ar = Math.abs(timeDomainRData[i]);
+            const l = timeDomainLData[i];
+            const r = timeDomainRData[i];
+            const al = Math.abs(l);
+            const ar = Math.abs(r);
             if (al > framePeak) framePeak = al;
             if (ar > framePeak) framePeak = ar;
+            sumSq += l * l + r * r;
+            n += 2;
         }
-        const prevPeak = soundFieldState.polarPeakSmooth || 0.001;
-        if (framePeak > prevPeak) {
-            soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.3;
-        } else {
-            soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.005;
+        const frameRms = Math.sqrt(sumSq / Math.max(1, n));
+
+        // 平滑：峰值快起慢落，RMS 稍慢，减少画面呼吸与饱和贴边
+        {
+            const prevPeak = soundFieldState.polarPeakSmooth || 0.001;
+            if (framePeak > prevPeak) {
+                soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.35;
+            } else {
+                soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.01;
+            }
         }
+        {
+            const prevRms = soundFieldState.polarRmsSmooth || 0.02;
+            if (frameRms > prevRms) {
+                soundFieldState.polarRmsSmooth = prevRms + (frameRms - prevRms) * 0.18;
+            } else {
+                soundFieldState.polarRmsSmooth = prevRms + (frameRms - prevRms) * 0.02;
+            }
+        }
+
         const peakSmooth = Math.max(soundFieldState.polarPeakSmooth, 0.001);
-        const gain = clamp(4.0 / peakSmooth, 2.0, 40);
+        const rmsSmooth = Math.max(soundFieldState.polarRmsSmooth, 0.002);
+
+        // RMS 主导铺开中部，峰值限幅防止多数样本被 tanh 推到边缘
+        const gainFromRms = 1.0 / rmsSmooth;
+        const gainFromPeak = 2.2 / peakSmooth;
+        const gain = clamp(Math.min(gainFromRms, gainFromPeak), 1.5, 18);
 
         // ─ 2. 准备 Level 形状数据 (平滑衰减) ─
         for (let i = 0; i < NUM_BINS; i++) soundFieldState.polarLevelBins[i] *= 0.88;
@@ -1083,10 +1123,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ─ 4. 绘制余辉点云 (Sample 层) - 弱化背景 ─
         let trail = soundFieldState.polarSampleTrailCanvas;
-        if (!trail || trail.width !== width || trail.height !== height) {
+        const dpr = window.devicePixelRatio || 1;
+        const physicalW = Math.floor(width * dpr);
+        const physicalH = Math.floor(height * dpr);
+        if (!trail || trail.width !== physicalW || trail.height !== physicalH) {
             trail = document.createElement('canvas');
-            trail.width = width;
-            trail.height = height;
+            trail.width = physicalW;
+            trail.height = physicalH;
+            const tCtx = trail.getContext('2d');
+            tCtx.scale(dpr, dpr);
             soundFieldState.polarSampleTrailCanvas = trail;
         }
         const tCtx = trail.getContext('2d');
@@ -1123,7 +1168,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.drawImage(trail, 0, 0);
+        ctx.drawImage(trail, 0, 0, width, height);
         ctx.restore();
 
         // ─ 5. 绘制渐变填充形状 (Level 层) - 放在顶层 ─
@@ -1162,7 +1207,7 @@ document.addEventListener('DOMContentLoaded', () => {
         analyserR.getFloatTimeDomainData(timeDomainRData);
 
         const accent = parseAccentColor();
-        const pad = 28;
+        const pad = window.innerWidth <= 768 ? 42 : 28;
         const size = Math.min(width, height) - pad * 2;
         const cx = width / 2, cy = height / 2;
         const half = size / 2;
@@ -1220,10 +1265,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ─ 余辉层：离屏 canvas 实现多帧叠加淡出（Ozone 云雾效果）─
         let trail = soundFieldState.lissajousTrailCanvas;
-        if (!trail || trail.width !== width || trail.height !== height) {
+        const dpr = window.devicePixelRatio || 1;
+        const physicalW = Math.floor(width * dpr);
+        const physicalH = Math.floor(height * dpr);
+        if (!trail || trail.width !== physicalW || trail.height !== physicalH) {
             trail = document.createElement('canvas');
-            trail.width = width;
-            trail.height = height;
+            trail.width = physicalW;
+            trail.height = physicalH;
+            const tCtx = trail.getContext('2d');
+            tCtx.scale(dpr, dpr);
             soundFieldState.lissajousTrailCanvas = trail;
         }
         const tCtx = trail.getContext('2d');
@@ -1247,24 +1297,47 @@ document.addEventListener('DOMContentLoaded', () => {
         const pts = Math.min(timeDomainLData.length, timeDomainRData.length);
         const step = 2; // 跳帧以提升性能
 
-        // ─ 动态自动增益：测量当前帧峰值，动态调整 gain 使点云始终填充菱形 ~100% ─
+        // ─ 动态自动增益：RMS 主导 + 峰值限幅，避免 tanh 饱和导致边缘/角落堆积 ─
         let framePeak = 0;
+        let sumSq = 0;
+        let n = 0;
         for (let i = 0; i < pts; i += step) {
-            const al = Math.abs(timeDomainLData[i]);
-            const ar = Math.abs(timeDomainRData[i]);
+            const l = timeDomainLData[i];
+            const r = timeDomainRData[i];
+            const al = Math.abs(l);
+            const ar = Math.abs(r);
             if (al > framePeak) framePeak = al;
             if (ar > framePeak) framePeak = ar;
+            sumSq += l * l + r * r;
+            n += 2;
         }
-        // 平滑峰值跟踪：快速上升（attack）、缓慢下降（release），避免闪烁
-        const prev = soundFieldState.lissajousPeakSmooth;
-        if (framePeak > prev) {
-            soundFieldState.lissajousPeakSmooth = prev + (framePeak - prev) * 0.3;  // 快速响应突发峰值
-        } else {
-            soundFieldState.lissajousPeakSmooth = prev + (framePeak - prev) * 0.005; // 缓慢释放，保持稳定
+        const frameRms = Math.sqrt(sumSq / Math.max(1, n));
+
+        // 平滑：峰值快起慢落，RMS 稍慢，整体观感更稳
+        {
+            const prevPeak = soundFieldState.lissajousPeakSmooth;
+            if (framePeak > prevPeak) {
+                soundFieldState.lissajousPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.35;
+            } else {
+                soundFieldState.lissajousPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.01;
+            }
         }
+        {
+            const prevRms = soundFieldState.lissajousRmsSmooth;
+            if (frameRms > prevRms) {
+                soundFieldState.lissajousRmsSmooth = prevRms + (frameRms - prevRms) * 0.18;
+            } else {
+                soundFieldState.lissajousRmsSmooth = prevRms + (frameRms - prevRms) * 0.02;
+            }
+        }
+
         const peakSmooth = Math.max(soundFieldState.lissajousPeakSmooth, 0.001);
-        // gain 使峰值映射到 tanh(4.0) ≈ 0.999，即填充 ~100%
-        const gain = clamp(4.0 / peakSmooth, 2.0, 40);
+        const rmsSmooth = Math.max(soundFieldState.lissajousRmsSmooth, 0.002);
+
+        // 目标：让“平均能量”把点云铺满中部，同时限制峰值不把多数点推到边缘
+        const gainFromRms = 1 / rmsSmooth;   // tanh(1.25)≈0.85，适合点云铺开但不贴边
+        const gainFromPeak = 2.8 / peakSmooth;  // tanh(2.8)≈0.99，给峰值留余量
+        const gain = clamp(Math.min(gainFromRms, gainFromPeak), 1.5, 18);
 
         for (let i = 0; i < pts; i += step) {
             // tanh 软饱和：输出 ∈ (-1, 1)，永远不会被菱形裁剪
@@ -1276,9 +1349,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const px = cx + side * half;
             const py = cy - mid * half;
 
-            // 根据离中心的距离调节亮度，中心更亮、边缘更暗
-            const dist = Math.sqrt(mid * mid + side * side);
-            const alpha = clamp(0.06 + dist * 0.35, 0.04, 0.5);
+            // 根据离中心的距离调节亮度：中心更亮、边缘更暗（避免视觉上“边缘堆积”）
+            const dist = Math.sqrt(mid * mid + side * side); // 0..~1.4
+            const w = clamp(1.0 - dist, 0, 1);
+            const alpha = clamp(0.06 + w * 0.28, 0.04, 0.34);
 
             tCtx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${alpha.toFixed(3)})`;
             tCtx.fillRect(px - 1, py - 1, 2, 2); // 2px 散点，用 fillRect 替代 arc 提高性能
@@ -1288,7 +1362,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // ─ 将余辉层合成到主 canvas ─
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.drawImage(trail, 0, 0);
+        ctx.drawImage(trail, 0, 0, width, height);
         ctx.restore();
 
         // ─ 绘制相关度与平衡游标 ─
@@ -1459,13 +1533,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         visualizerRAF = requestAnimationFrame(draw);
 
-        resizeVisualizerCanvas();
+        const mode = visualizationModes[currentVisualizationModeIndex]?.key;
+        const dims = resizeVisualizerCanvas(mode);
         ensureVisualizerBuffers();
 
-        const { width, height } = canvas;
+        const { width, height, dpr } = dims;
+
+        visualizerCtx.save();
+        visualizerCtx.scale(dpr, dpr);
         visualizerCtx.clearRect(0, 0, width, height);
 
-        const mode = visualizationModes[currentVisualizationModeIndex]?.key;
         if (mode === 'spectrum') {
             drawSpectrum(visualizerCtx, width, height);
         } else if (mode === 'spectrogram3d') {
@@ -1481,6 +1558,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         drawOverlayLabels(visualizerCtx, width);
+        visualizerCtx.restore();
+    }
+
+    function updateMobileVisualizerLayout() {
+        if (window.innerWidth <= 768) {
+            const mode = visualizationModes[currentVisualizationModeIndex]?.key;
+            if (isVisualizerVisible && (mode === 'polar' || mode === 'lissajous')) {
+                playerContainer.classList.add('visualizer-fullscreen-mode');
+            } else {
+                playerContainer.classList.remove('visualizer-fullscreen-mode');
+            }
+        } else {
+            playerContainer.classList.remove('visualizer-fullscreen-mode');
+        }
     }
 
     function cycleVisualizationMode() {
@@ -1492,6 +1583,7 @@ document.addEventListener('DOMContentLoaded', () => {
             cancelAnimationFrame(visualizerRAF);
             draw();
         }
+        updateMobileVisualizerLayout();
     }
 
     async function setupVisualizer() {
@@ -1603,7 +1695,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Always update canvas size for responsiveness
-        resizeVisualizerCanvas();
+        const mode = visualizationModes[currentVisualizationModeIndex]?.key;
+        resizeVisualizerCanvas(mode);
         ensureVisualizerBuffers();
     }
 
@@ -3061,6 +3154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function enterLyricScrollState() {
+        if (isVisualizerVisible) return;
         if (!isLyricScrolling) {
             isLyricScrolling = true;
             // 从当前的transform获取初始滚动位置
@@ -3087,7 +3181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleLyricScroll(delta) {
-        if (currentLyrics.length === 0) return;
+        if (currentLyrics.length === 0 || isVisualizerVisible) return;
         enterLyricScrollState();
 
         lyricScrollTop -= delta;
@@ -3497,6 +3591,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 窗口大小改变时重置音量条状态
     window.addEventListener('resize', () => {
+        const mode = visualizationModes[currentVisualizationModeIndex]?.key;
+        resizeVisualizerCanvas(mode);
+        renderLyrics();
         if (window.innerWidth > 768) {
             collapseVolumeControl();
             // 切换到PC端时移除lyrics-mode class
@@ -3509,6 +3606,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 playerContainer.classList.remove('lyrics-mode');
             }
         }
+        updateMobileVisualizerLayout();
     });
 
     modeBtn.addEventListener('click', changePlayMode);
@@ -3654,6 +3752,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showVisualizer() {
+        exitLyricScrollState();
         lyricsWrapper.style.display = 'none';
         visualizationContainer.style.display = 'flex';
         lyricsContainer.classList.remove('masked'); // 移除遮罩
@@ -3663,6 +3762,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.innerWidth <= 768) {
             playerContainer.classList.remove('lyrics-mode');
         }
+
+        updateMobileVisualizerLayout();
 
         // Ensure canvas is correctly sized before drawing
         setupVisualizer();
@@ -3674,6 +3775,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showLyrics() {
+        exitLyricScrollState();
         lyricsWrapper.style.display = 'block';
         visualizationContainer.style.display = 'none';
         lyricsContainer.classList.add('masked'); // 添加遮罩
@@ -3683,6 +3785,45 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.innerWidth <= 768) {
             playerContainer.classList.add('lyrics-mode');
         }
+
+        updateMobileVisualizerLayout();
+
+        // 切换回歌词时，强制同步一次滚动位置
+        requestAnimationFrame(() => {
+            if (currentLyrics.length > 0) {
+                const currentTime = getCorrectedSeekTime();
+                let activeIndex = -1;
+                for (let i = 0; i < currentLyrics.length; i++) {
+                    if (currentTime >= currentLyrics[i].time) {
+                        activeIndex = i;
+                    } else {
+                        break;
+                    }
+                }
+                if (activeIndex !== -1) {
+                    const activeGroup = lyricsWrapper.querySelector(`.lyric-group[data-index='${activeIndex}']`);
+                    if (activeGroup) {
+                        const prevActive = lyricsWrapper.querySelector('.lyric-group.active');
+                        if (prevActive) prevActive.classList.remove('active');
+                        activeGroup.classList.add('active');
+
+                        const containerHeight = lyricsWrapper.parentElement.offsetHeight;
+                        const visualizationHeight = 0; // 已隐藏
+                        const effectiveContainerHeight = containerHeight - visualizationHeight;
+
+                        const activeLineHeight = activeGroup.offsetHeight;
+                        const lineTop = activeGroup.offsetTop;
+                        const lineCenter = lineTop + (activeLineHeight / 2);
+                        const containerCenter = effectiveContainerHeight / 2;
+
+                        const scrollOffset = lineCenter - containerCenter;
+
+                        lyricsWrapper.style.transition = 'transform 0.5s ease-out';
+                        lyricsWrapper.style.transform = `translateY(-${scrollOffset}px)`;
+                    }
+                }
+            }
+        });
 
         cancelAnimationFrame(visualizerRAF);
     }

@@ -949,9 +949,10 @@ body {
         display: none;
     }
 
-    /* 移动端显示歌词时隐藏封面，让歌词区域更大 */
-    /* 通过JS添加lyrics-mode class来控制 */
-    .player-container.lyrics-mode .info-container {
+    /* 移动端显示全屏歌词或可视化时隐藏歌曲信息(封面等)，让区域更大 */
+    /* 通过JS添加lyrics-mode或visualizer-fullscreen-mode class来控制 */
+    .player-container.lyrics-mode .info-container,
+    .player-container.visualizer-fullscreen-mode .info-container {
         display: none !important;
     }
 
