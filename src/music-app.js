@@ -489,48 +489,630 @@ document.addEventListener('DOMContentLoaded', () => {
     let channelSplitter = null; // 声道分离器（将立体声拆为左右两路）
     let lufsNode = null;        // LUFS 计量 AudioWorklet 节点
     let visualizerCtx;
+    let mixedFreqFloatData = null;
+    let mixedFreqByteData = null;
+    let timeDomainLData = null;
+    let timeDomainRData = null;
+
+    const visualizationModes = [
+        { key: 'spectrum', label: '频谱仪' },
+        { key: 'spectrogram3d', label: '3D频谱' },
+        { key: 'soundfield', label: '声场图' },
+        { key: 'loudness', label: '响度计' },
+        { key: 'levels', label: '电平表' }
+    ];
+    let currentVisualizationModeIndex = 0;
+
+    const SPECTROGRAM_BINS = 120;
+    const SPECTROGRAM_HISTORY_SIZE = 160;
+    let spectrogramHistory = [];
+
+    const levelMeterState = {
+        peakHoldL: -60,
+        peakHoldR: -60,
+        peakHoldDecayPerFrame: 0.8
+    };
+
+    const soundFieldState = {
+        smoothPan: 0   // 平滑后的声像位置 [-1, 1]，-1=全L，0=中，+1=全R
+    };
+
+    function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    function ampToDb(amp) {
+        return 20 * Math.log10(Math.max(1e-6, amp));
+    }
+
+    function dbToNorm(db, minDb = -60, maxDb = 0) {
+        return clamp((db - minDb) / (maxDb - minDb), 0, 1);
+    }
+
+    function parseAccentColor() {
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(accent);
+        if (!m) return { r: 0, g: 188, b: 212 };
+        return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+    }
+
+    function resizeVisualizerCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const w = Math.max(1, Math.floor(rect.width));
+        const h = Math.max(1, Math.floor(rect.height));
+        if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+        }
+    }
+
+    function ensureVisualizerBuffers() {
+        if (analyserMixed) {
+            const mixedLen = analyserMixed.frequencyBinCount;
+            if (!mixedFreqFloatData || mixedFreqFloatData.length !== mixedLen) {
+                mixedFreqFloatData = new Float32Array(mixedLen);
+                mixedFreqByteData = new Uint8Array(mixedLen);
+                dataArray = mixedFreqByteData; // 向后兼容
+            }
+        }
+
+        if (analyserL) {
+            const lLen = analyserL.fftSize;
+            if (!timeDomainLData || timeDomainLData.length !== lLen) {
+                timeDomainLData = new Float32Array(lLen);
+            }
+        }
+
+        if (analyserR) {
+            const rLen = analyserR.fftSize;
+            if (!timeDomainRData || timeDomainRData.length !== rLen) {
+                timeDomainRData = new Float32Array(rLen);
+            }
+        }
+    }
+
+    function drawOverlayLabels(ctx, width) {
+        const modeLabel = visualizationModes[currentVisualizationModeIndex]?.label || '可视化';
+        ctx.save();
+        ctx.font = '500 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(235, 242, 255, 0.9)';
+        ctx.fillText(modeLabel, 10, 8);
+
+        const hint = '点击切换';
+        const hintWidth = ctx.measureText(hint).width;
+        ctx.fillStyle = 'rgba(180, 192, 214, 0.78)';
+        ctx.fillText(hint, width - hintWidth - 10, 8);
+        ctx.restore();
+    }
+
+    function drawSpectrum(ctx, width, height) {
+        if (!analyserMixed || !mixedFreqFloatData) return;
+
+        analyserMixed.getFloatFrequencyData(mixedFreqFloatData);
+
+        const accent = parseAccentColor();
+        const left = 24;
+        const right = width - 14;
+        const top = 26;
+        const bottom = height - 24;
+        const plotW = Math.max(10, right - left);
+        const plotH = Math.max(10, bottom - top);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        [50, 100, 200, 500, 1000, 2000, 5000, 10000, 16000].forEach(freq => {
+            const x = left + (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20)) * plotW;
+            ctx.beginPath();
+            ctx.moveTo(x, top);
+            ctx.lineTo(x, bottom);
+            ctx.stroke();
+        });
+
+        for (let db = -72; db <= 0; db += 12) {
+            const y = top + (1 - dbToNorm(db, -72, 0)) * plotH;
+            ctx.beginPath();
+            ctx.moveTo(left, y);
+            ctx.lineTo(right, y);
+            ctx.stroke();
+        }
+
+        ctx.beginPath();
+        const samplePoints = Math.min(360, Math.max(120, Math.floor(plotW)));
+        const nyquist = audioContext ? audioContext.sampleRate / 2 : 22050;
+        for (let i = 0; i < samplePoints; i++) {
+            const t = i / (samplePoints - 1);
+            const freq = 20 * Math.pow(nyquist / 20, t);
+            const bin = clamp(Math.round(freq / nyquist * (mixedFreqFloatData.length - 1)), 0, mixedFreqFloatData.length - 1);
+            const db = clamp(mixedFreqFloatData[bin], -90, 0);
+            const x = left + t * plotW;
+            const y = top + (1 - dbToNorm(db, -90, 0)) * plotH;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        const spectrumGradient = ctx.createLinearGradient(left, top, left, bottom);
+        spectrumGradient.addColorStop(0, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.95)`);
+        spectrumGradient.addColorStop(1, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.2)`);
+        ctx.strokeStyle = spectrumGradient;
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.6)`;
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawSpectrogram3D(ctx, width, height) {
+        if (!analyserMixed || !mixedFreqByteData) return;
+
+        analyserMixed.getByteFrequencyData(mixedFreqByteData);
+
+        const frame = new Uint8Array(SPECTROGRAM_BINS);
+        const len = mixedFreqByteData.length;
+        const nyquist = audioContext ? audioContext.sampleRate / 2 : 22050;
+        for (let i = 0; i < SPECTROGRAM_BINS; i++) {
+            const t = i / Math.max(1, SPECTROGRAM_BINS - 1);
+            const freq = 20 * Math.pow(nyquist / 20, t);
+            const idx = clamp(Math.round(freq / nyquist * (len - 1)), 0, len - 1);
+            frame[i] = mixedFreqByteData[idx];
+        }
+        spectrogramHistory.unshift(frame);
+        if (spectrogramHistory.length > SPECTROGRAM_HISTORY_SIZE) {
+            spectrogramHistory.length = SPECTROGRAM_HISTORY_SIZE;
+        }
+
+        const accent = parseAccentColor();
+        const originX = width * 0.75;
+        const originY = height * 0.85;
+        const spanX = width * 0.65;
+        const depthX = width * 0.2;
+        const depthY = height * 0.55;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(originX - spanX, originY);
+        ctx.lineTo(originX, originY);
+        ctx.lineTo(originX + depthX, originY - depthY);
+        ctx.lineTo(originX - spanX + depthX, originY - depthY);
+        ctx.closePath();
+        ctx.stroke();
+
+        for (let z = spectrogramHistory.length - 1; z >= 0; z--) {
+            const row = spectrogramHistory[z];
+            const zNorm = z / Math.max(1, SPECTROGRAM_HISTORY_SIZE - 1);
+            const baseX = originX - zNorm * spanX;
+            const rowAlpha = 0.05 + (1 - zNorm) * 0.4;
+
+            ctx.beginPath();
+            for (let i = 0; i < row.length; i++) {
+                const iNorm = i / (row.length - 1);
+                const x = baseX + iNorm * depthX;
+                const baseY = originY - iNorm * depthY;
+                const amp = row[i] / 255;
+                const peak = Math.pow(amp, 1.35) * (height * 0.22);
+                const y = baseY - peak;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
+            ctx.lineWidth = 1.5;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            if (z < 10) {
+                ctx.shadowBlur = 12 - z;
+                ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
+            } else {
+                ctx.shadowBlur = 0;
+            }
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    function drawSoundField(ctx, width, height) {
+        if (!analyserL || !analyserR || !timeDomainLData || !timeDomainRData) return;
+
+        analyserL.getFloatTimeDomainData(timeDomainLData);
+        analyserR.getFloatTimeDomainData(timeDomainRData);
+
+        const accent = parseAccentColor();
+        const INV_SQRT2 = 0.7071067811865476;
+
+        // --- 布局：半圆底边贴近画布底部 ---
+        const cursorAreaH = 22; // 游标区高度
+        const labelPad = 14;   // 左右标签留白
+        const topPad = 20;     // 顶部留白
+        const cx = width * 0.5;
+        // 半圆圆心在底边
+        const cy = height - cursorAreaH - 4;
+        // 半径：水平方向不超过画布，垂直方向不超过可用高度
+        const radius = Math.min(cx - labelPad - 4, cy - topPad);
+
+        // ============ 1. 绘制背景网格 ============
+        ctx.save();
+
+        // 同心参考弧（25% / 50% / 75%）
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
+        [0.25, 0.5, 0.75].forEach(r => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * r, Math.PI, 0);
+            ctx.stroke();
+        });
+
+        // 外圆弧
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, Math.PI, 0);
+        ctx.stroke();
+
+        // 水平基线（直径）
+        ctx.beginPath();
+        ctx.moveTo(cx - radius, cy);
+        ctx.lineTo(cx + radius, cy);
+        ctx.stroke();
+
+        // 垂直中轴（Mono 轴）
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx, cy - radius);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 纯 L / 纯 R 对角参考线（45°）
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+        const diagLen = radius * INV_SQRT2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx - diagLen, cy - diagLen); // 纯 L 方向（上左）
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + diagLen, cy - diagLen); // 纯 R 方向（上右）
+        ctx.stroke();
+
+        // --- 标签 ---
+        ctx.font = '500 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.textBaseline = 'middle';
+        // L 标签（左端）
+        ctx.fillStyle = 'rgba(180, 200, 255, 0.75)';
+        ctx.textAlign = 'right';
+        ctx.fillText('L', cx - radius - 4, cy);
+        // R 标签（右端）
+        ctx.textAlign = 'left';
+        ctx.fillText('R', cx + radius + 4, cy);
+        // M 标签（顶部）
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(180, 192, 214, 0.55)';
+        ctx.fillText('M', cx, cy - radius - 10);
+        // L / R 对角标签
+        ctx.font = '500 10px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = 'rgba(160, 176, 210, 0.45)';
+        ctx.textAlign = 'right';
+        ctx.fillText('L', cx - diagLen * 0.72 - 4, cy - diagLen * 0.72);
+        ctx.textAlign = 'left';
+        ctx.fillText('R', cx + diagLen * 0.72 + 4, cy - diagLen * 0.72);
+
+        ctx.restore();
+
+        // ============ 2. 绘制粒子（裁剪到半圆内） ============
+        ctx.save();
+
+        // 裁剪路径：上半圆区域
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, Math.PI, 0); // 从左到右，顺时针画上半圆弧
+        ctx.closePath();                      // 直线闭合（直径线）
+        ctx.clip();
+
+        const points = Math.min(timeDomainLData.length, timeDomainRData.length);
+        // 每帧最多采 1200 个点，步长取整
+        const step = Math.max(1, Math.floor(points / 1200));
+
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.7)`;
+
+        for (let i = 0; i < points; i += step) {
+            const l = timeDomainLData[i];
+            const r = timeDomainRData[i];
+
+            // M/S Goniometer 变换：
+            //   s（Side）= (R − L) / √2  →  正值偏右（R声道为主），负值偏左（L声道为主）
+            //   m（Mid） = (L + R) / √2  →  正值同相，负值反相（仅显示上半圆）
+            const s = (r - l) * INV_SQRT2;
+            const m = (l + r) * INV_SQRT2;
+
+            // 仅显示同相部分（上半圆，m >= 0）
+            if (m < 0) continue;
+
+            const px = cx + s * radius;
+            const py = cy - m * radius;
+
+            // 根据信号能量决定粒子透明度
+            const energy = Math.sqrt(l * l + r * r);
+            const alpha = clamp(0.25 + energy * 0.8, 0.15, 1.0);
+
+            ctx.fillStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${alpha.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+
+        // ============ 3. 底部声像游标 ============
+        ctx.save();
+
+        // 用 RMS 计算当前帧的左右声道能量比，得出声像位置
+        const nCalc = Math.min(512, points);
+        let sumL = 0, sumR = 0;
+        for (let i = 0; i < nCalc; i++) {
+            sumL += timeDomainLData[i] * timeDomainLData[i];
+            sumR += timeDomainRData[i] * timeDomainRData[i];
+        }
+        const rmsL = Math.sqrt(sumL / nCalc);
+        const rmsR = Math.sqrt(sumR / nCalc);
+        const total = rmsL + rmsR;
+        // rawPan: -1 = 全L, 0 = 中, +1 = 全R
+        const rawPan = total > 1e-5 ? (rmsR - rmsL) / total : 0;
+
+        // 低通平滑，避免游标跳动
+        soundFieldState.smoothPan += (rawPan - soundFieldState.smoothPan) * 0.15;
+        const cursorX = cx + clamp(soundFieldState.smoothPan, -1, 1) * radius;
+
+        // 游标轨道线
+        const trackY = cy + 10;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx - radius, trackY);
+        ctx.lineTo(cx + radius, trackY);
+        ctx.stroke();
+
+        // 中心刻度
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx, trackY - 3);
+        ctx.lineTo(cx, trackY + 4);
+        ctx.stroke();
+
+        // 四分之一刻度
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        [-0.5, 0.5].forEach(pos => {
+            const tx = cx + pos * radius;
+            ctx.beginPath();
+            ctx.moveTo(tx, trackY - 2);
+            ctx.lineTo(tx, trackY + 3);
+            ctx.stroke();
+        });
+
+        // 游标三角形（向上指）
+        const triH = 7, triW = 5;
+        ctx.fillStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.95)`;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.85)`;
+        ctx.beginPath();
+        ctx.moveTo(cursorX, trackY - 5);            // 尖端朝上
+        ctx.lineTo(cursorX - triW, trackY + triH);  // 左底角
+        ctx.lineTo(cursorX + triW, trackY + triH);  // 右底角
+        ctx.closePath();
+        ctx.fill();
+
+        // 游标竖线（从圆心底边向上延伸到圆弧内）
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.35)`;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cursorX, cy);
+        ctx.lineTo(cursorX, trackY - 6);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.restore();
+    }
+
+    function drawLoudnessMeter(ctx, width, height) {
+        const accent = parseAccentColor();
+        const lufsData = (window.audioMeters && window.audioMeters.lufsData) ? window.audioMeters.lufsData : null;
+        const momentary = lufsData ? lufsData.momentaryLufs : -Infinity;
+        const shortTerm = lufsData ? lufsData.shortTermLufs : -Infinity;
+        const integrated = (typeof currentTrackLufs === 'number') ? currentTrackLufs : -Infinity;
+        const truePeak = lufsData ? Math.max(lufsData.peakLDb ?? -Infinity, lufsData.peakRDb ?? -Infinity) : -Infinity;
+
+        const bars = [
+            { label: 'Short Term', value: shortTerm, min: -50, max: 0 },
+            { label: 'Integrated', value: integrated, min: -50, max: 0 },
+            { label: 'Momentary', value: momentary, min: -50, max: 0 }
+        ];
+
+        const panelTop = 42;
+        const panelBottom = height - 38;
+        const panelH = Math.max(20, panelBottom - panelTop);
+        const groupW = Math.min(120, width / 4);
+        const gap = Math.max(18, (width - groupW * 3) / 4);
+
+        ctx.save();
+        for (let i = 0; i < bars.length; i++) {
+            const bar = bars[i];
+            const x = gap + i * (groupW + gap);
+            const meterW = Math.max(22, Math.min(34, groupW * 0.3));
+            const meterX = x + (groupW - meterW) / 2;
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.fillRect(meterX, panelTop, meterW, panelH);
+
+            const safeValue = Number.isFinite(bar.value) ? bar.value : bar.min;
+            const n = dbToNorm(safeValue, bar.min, bar.max);
+            const filledH = panelH * n;
+
+            const grad = ctx.createLinearGradient(0, panelBottom - filledH, 0, panelBottom);
+            grad.addColorStop(0, 'rgba(245, 86, 110, 0.98)');
+            grad.addColorStop(0.45, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.96)`);
+            grad.addColorStop(1, 'rgba(154, 210, 96, 0.9)');
+            ctx.fillStyle = grad;
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.5)`;
+            ctx.fillRect(meterX, panelBottom - filledH, meterW, filledH);
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = 'rgba(229, 236, 248, 0.92)';
+            ctx.font = '500 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(bar.label, x + groupW / 2, panelBottom + 10);
+
+            const valueText = Number.isFinite(bar.value) ? bar.value.toFixed(1) : '--';
+            ctx.font = '600 26px "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = i === 1 ? 'rgba(245, 86, 110, 0.95)' : 'rgba(224, 231, 124, 0.95)';
+            ctx.fillText(valueText, x + groupW / 2, panelTop - 10);
+            ctx.font = '500 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = 'rgba(180, 192, 214, 0.82)';
+            ctx.fillText('LUFS', x + groupW / 2 + 26, panelTop + 6);
+        }
+
+        ctx.textAlign = 'left';
+        ctx.font = '500 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = 'rgba(182, 195, 218, 0.9)';
+        const tpText = Number.isFinite(truePeak) ? `${truePeak.toFixed(1)} dBFS` : '--';
+        ctx.fillText(`True Peak: ${tpText}`, 14, height - 14);
+        ctx.restore();
+    }
+
+    function drawLevels(ctx, width, height) {
+        if (!analyserL || !analyserR || !timeDomainLData || !timeDomainRData) return;
+
+        analyserL.getFloatTimeDomainData(timeDomainLData);
+        analyserR.getFloatTimeDomainData(timeDomainRData);
+
+        const calcMetrics = (arr) => {
+            let peak = 0;
+            let sum = 0;
+            for (let i = 0; i < arr.length; i++) {
+                const v = Math.abs(arr[i]);
+                if (v > peak) peak = v;
+                sum += arr[i] * arr[i];
+            }
+            const rms = Math.sqrt(sum / arr.length);
+            return {
+                peakDb: clamp(ampToDb(peak), -60, 0),
+                rmsDb: clamp(ampToDb(rms), -60, 0)
+            };
+        };
+
+        const l = calcMetrics(timeDomainLData);
+        const r = calcMetrics(timeDomainRData);
+
+        levelMeterState.peakHoldL = Math.max(l.peakDb, levelMeterState.peakHoldL - levelMeterState.peakHoldDecayPerFrame);
+        levelMeterState.peakHoldR = Math.max(r.peakDb, levelMeterState.peakHoldR - levelMeterState.peakHoldDecayPerFrame);
+
+        const accent = parseAccentColor();
+        const top = 42;
+        const bottom = height - 38;
+        const meterH = Math.max(20, bottom - top);
+        const meterW = Math.min(86, width * 0.14);
+        const centerGap = Math.max(42, width * 0.16);
+        const xL = width * 0.5 - centerGap / 2 - meterW;
+        const xR = width * 0.5 + centerGap / 2;
+
+        const drawMeter = (x, label, metrics, peakHoldDb) => {
+            const rmsNorm = dbToNorm(metrics.rmsDb, -60, 0);
+            const peakNorm = dbToNorm(metrics.peakDb, -60, 0);
+            const holdNorm = dbToNorm(peakHoldDb, -60, 0);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.fillRect(x, top, meterW, meterH);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fillRect(x, bottom - meterH * rmsNorm, meterW, meterH * rmsNorm);
+
+            const peakGrad = ctx.createLinearGradient(0, top, 0, bottom);
+            peakGrad.addColorStop(0, 'rgba(242, 90, 110, 0.95)');
+            peakGrad.addColorStop(0.35, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.88)`);
+            peakGrad.addColorStop(1, 'rgba(114, 205, 124, 0.86)');
+            ctx.fillStyle = peakGrad;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.5)`;
+            ctx.fillRect(x, bottom - meterH * peakNorm, meterW, Math.max(2, meterH * (peakNorm - rmsNorm)));
+            ctx.shadowBlur = 0;
+
+            const holdY = bottom - meterH * holdNorm;
+            ctx.strokeStyle = 'rgba(245, 86, 110, 0.95)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x - 2, holdY);
+            ctx.lineTo(x + meterW + 2, holdY);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(229, 236, 248, 0.92)';
+            ctx.font = '600 15px "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + meterW / 2, bottom + 16);
+
+            ctx.font = '500 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.fillStyle = 'rgba(182, 195, 218, 0.86)';
+            ctx.fillText(`Peak ${metrics.peakDb.toFixed(1)} dB`, x + meterW / 2, top - 20);
+            ctx.fillText(`RMS ${metrics.rmsDb.toFixed(1)} dB`, x + meterW / 2, top - 6);
+        };
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        for (let db = -60; db <= 0; db += 10) {
+            const y = top + (1 - dbToNorm(db, -60, 0)) * meterH;
+            ctx.beginPath();
+            ctx.moveTo(xL - 8, y);
+            ctx.lineTo(xR + meterW + 8, y);
+            ctx.stroke();
+        }
+
+        drawMeter(xL, 'L', l, levelMeterState.peakHoldL);
+        drawMeter(xR, 'R', r, levelMeterState.peakHoldR);
+        ctx.restore();
+    }
 
     function draw() {
-        if (!isPlaying || !isVisualizerVisible || !analyser) {
+        if (!isPlaying || !isVisualizerVisible || !analyserMixed || !visualizerCtx) {
             cancelAnimationFrame(visualizerRAF);
             return;
         }
         visualizerRAF = requestAnimationFrame(draw);
 
-        analyser.getByteFrequencyData(dataArray);
+        resizeVisualizerCanvas();
+        ensureVisualizerBuffers();
 
         const { width, height } = canvas;
         visualizerCtx.clearRect(0, 0, width, height);
 
-        const bufferLength = analyser.frequencyBinCount;
-        const barWidth = (width / bufferLength) * 1.5;
-        let barHeight;
-        let x = 0;
+        const mode = visualizationModes[currentVisualizationModeIndex]?.key;
+        if (mode === 'spectrum') {
+            drawSpectrum(visualizerCtx, width, height);
+        } else if (mode === 'spectrogram3d') {
+            drawSpectrogram3D(visualizerCtx, width, height);
+        } else if (mode === 'soundfield') {
+            drawSoundField(visualizerCtx, width, height);
+        } else if (mode === 'loudness') {
+            drawLoudnessMeter(visualizerCtx, width, height);
+        } else if (mode === 'levels') {
+            drawLevels(visualizerCtx, width, height);
+        }
 
-        const gradient = visualizerCtx.createLinearGradient(0, 0, 0, height);
-        const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+        drawOverlayLabels(visualizerCtx, width);
+    }
 
-        // Helper to convert hex to rgb components
-        const hexToRgb = (hex) => {
-            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-            return result ? {
-                r: parseInt(result[1], 16),
-                g: parseInt(result[2], 16),
-                b: parseInt(result[3], 16)
-            } : null;
-        };
+    function cycleVisualizationMode() {
+        currentVisualizationModeIndex = (currentVisualizationModeIndex + 1) % visualizationModes.length;
+        const modeLabel = visualizationModes[currentVisualizationModeIndex].label;
+        showToast(`可视化: ${modeLabel}`, 'info', 1200);
 
-        const rgb = hexToRgb(accentColor);
-        const accentColorRgb = rgb ? `${rgb.r}, ${rgb.g}, ${rgb.b}` : '0, 188, 212'; // Fallback
-
-        gradient.addColorStop(0, `rgba(${accentColorRgb}, 0.9)`);
-        gradient.addColorStop(1, `rgba(${accentColorRgb}, 0.3)`);
-        visualizerCtx.fillStyle = gradient;
-
-        for (let i = 0; i < bufferLength; i++) {
-            barHeight = (dataArray[i] / 255) * height * 0.8; // Scale with height and normalize
-            visualizerCtx.fillRect(x, height - barHeight, barWidth, barHeight);
-            x += barWidth + 1;
+        if (isVisualizerVisible && isPlaying) {
+            cancelAnimationFrame(visualizerRAF);
+            draw();
         }
     }
 
@@ -558,10 +1140,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // --- 创建声道分离器（stereo → L/R 两路） ---
             channelSplitter = audioContext.createChannelSplitter(2);
 
-            // --- 向后兼容：analyser 指向 analyserMixed，供旧版 draw() 使用 ---
+            // --- 向后兼容：analyser 指向 analyserMixed ---
             analyser = analyserMixed;
-            const bufferLength = analyser.frequencyBinCount;
-            dataArray = new Uint8Array(bufferLength);
+            ensureVisualizerBuffers();
             visualizerCtx = canvas.getContext('2d');
 
             // --- 创建归一化增益节点 ---
@@ -579,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // --- 加载 LUFS AudioWorklet 模块（异步，失败时降级为无 LUFS 计量）---
             try {
                 await audioContext.audioWorklet.addModule('lufs-meter-processor.js');
-                
+
                 // 在主线程加载 WASM（AudioWorklet 中无网络 API），再传给 Worklet
                 let wasmBuffer = null;
                 try {
@@ -588,9 +1169,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (e) {
                     console.warn('[LUFS Worklet] Failed to preload WASM, will attempt to use initSync:', e);
                 }
-                
+
                 lufsNode = new AudioWorkletNode(audioContext, 'lufs-meter-processor');
-                
+
                 // 如果成功加载 WASM，发送给 Worklet 用 initSync 初始化
                 if (wasmBuffer) {
                     // 通过 Transferable 将 ArrayBuffer 传入 Worklet，避免复制
@@ -601,7 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         lufsNode.port.postMessage({ type: 'init-wasm', wasmBuffer });
                     }
                 }
-                
+
                 lufsNode.port.onmessage = (event) => {
                     const { type } = event.data;
                     if (type === 'ready') {
@@ -644,11 +1225,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Always update canvas size for responsiveness
-        const rect = canvas.getBoundingClientRect();
-        if (canvas.width !== rect.width || canvas.height !== rect.height) {
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-        }
+        resizeVisualizerCanvas();
+        ensureVisualizerBuffers();
     }
 
     // --- 核心功能函数 ---
@@ -2591,6 +3169,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchInfoNeteaseBtn.addEventListener('click', () => fetchFromNetwork('info', 'netease'));
     fetchInfoMbBtn.addEventListener('click', () => fetchFromNetwork('info', 'musicbrainz'));
     toggleLyricsVisualizerBtn.addEventListener('click', toggleLyricsVisualizer);
+    visualizationContainer.addEventListener('click', cycleVisualizationMode);
 
     // --- 设置功能 ---
     function saveSettings() {

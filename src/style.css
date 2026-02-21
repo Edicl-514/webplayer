@@ -614,6 +614,7 @@ body {
     justify-content: center;
     position: relative;
     z-index: 5;
+    cursor: pointer;
 }
 
 #visualizer {
