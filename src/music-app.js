@@ -598,32 +598,67 @@ document.addEventListener('DOMContentLoaded', () => {
         analyserMixed.getFloatFrequencyData(mixedFreqFloatData);
 
         const accent = parseAccentColor();
-        const left = 24;
+        const left = 36;   // 增加左边距以容纳 dB 标签
         const right = width - 14;
         const top = 26;
         const bottom = height - 24;
         const plotW = Math.max(10, right - left);
         const plotH = Math.max(10, bottom - top);
+        const floorDb = -90;
 
         ctx.save();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+
+        // 绘制网格和标签
+        ctx.font = '500 10px "Segoe UI", "Microsoft YaHei", sans-serif';
+
+        // 频率轴 (X)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1;
-        [50, 100, 200, 500, 1000, 2000, 5000, 10000, 16000].forEach(freq => {
+        const freqTicks = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+        freqTicks.forEach(freq => {
             const x = left + (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20)) * plotW;
+            if (x < left || x > right) return;
+
             ctx.beginPath();
             ctx.moveTo(x, top);
             ctx.lineTo(x, bottom);
             ctx.stroke();
+
+            // 频率标注
+            if ([100, 1000, 10000].includes(freq)) {
+                ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                const label = freq >= 1000 ? (freq / 1000) + 'k' : freq;
+                ctx.fillText(label, x, bottom + 6);
+            }
         });
 
-        for (let db = -72; db <= 0; db += 12) {
-            const y = top + (1 - dbToNorm(db, -72, 0)) * plotH;
+        // 响度轴 (Y - dB)
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let db = floorDb; db <= 0; db += 10) {
+            const y = top + (1 - dbToNorm(db, floorDb, 0)) * plotH;
             ctx.beginPath();
             ctx.moveTo(left, y);
             ctx.lineTo(right, y);
             ctx.stroke();
+
+            if (db % 20 === 0 || db === 0) {
+                ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
+                ctx.fillText(db, left - 6, y);
+            }
         }
 
+        // 坐标轴标题
+        ctx.fillStyle = 'rgba(180, 192, 214, 0.4)';
+        ctx.font = 'italic 10px "Segoe UI", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('dB', left - 6, top - 12);
+        ctx.textAlign = 'right';
+        ctx.fillText('Hz', right, bottom + 6);
+
+        // 绘制频谱曲线
         ctx.beginPath();
         const samplePoints = Math.min(360, Math.max(120, Math.floor(plotW)));
         const nyquist = audioContext ? audioContext.sampleRate / 2 : 22050;
@@ -631,15 +666,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const t = i / (samplePoints - 1);
             const freq = 20 * Math.pow(nyquist / 20, t);
             const bin = clamp(Math.round(freq / nyquist * (mixedFreqFloatData.length - 1)), 0, mixedFreqFloatData.length - 1);
-            const db = clamp(mixedFreqFloatData[bin], -90, 0);
-            const x = left + t * plotW;
-            const y = top + (1 - dbToNorm(db, -90, 0)) * plotH;
+            const db = clamp(mixedFreqFloatData[bin], floorDb, 0);
+            const x = left + (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20)) * plotW;
+            const y = top + (1 - dbToNorm(db, floorDb, 0)) * plotH;
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
         const spectrumGradient = ctx.createLinearGradient(left, top, left, bottom);
-        spectrumGradient.addColorStop(0, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.95)`);
-        spectrumGradient.addColorStop(1, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.2)`);
+        spectrumGradient.addColorStop(0, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 1)`);
+        spectrumGradient.addColorStop(0.6, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.6)`);
+        spectrumGradient.addColorStop(1, `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.1)`);
+
         ctx.strokeStyle = spectrumGradient;
         ctx.lineWidth = 2.5;
         ctx.lineJoin = 'round';
@@ -678,7 +715,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const depthY = height * 0.55;
 
         ctx.save();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+
+        // 绘制 3D 辅助地板与网格
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(originX - spanX, originY);
@@ -688,12 +727,79 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.closePath();
         ctx.stroke();
 
+        // 绘制内部网格与刻度
+        ctx.font = '500 9.5px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 1. 频率刻度 (Frequency Ticks) - 深度轴 (Z)
+        const freqTicks3D = [100, 1000, 10000];
+        const nyquist3D = audioContext ? audioContext.sampleRate / 2 : 22050;
+        const log20 = Math.log10(20);
+        const logNyquist = Math.log10(nyquist3D);
+
+        freqTicks3D.forEach(freq => {
+            const t = (Math.log10(freq) - log20) / (logNyquist - log20);
+            const dx = t * depthX;
+            const dy = t * depthY;
+
+            // 绘制横贯地板的频率线
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.beginPath();
+            ctx.moveTo(originX + dx, originY - dy);
+            ctx.lineTo(originX - spanX + dx, originY - dy);
+            ctx.stroke();
+
+            // 频率数字标注 (移动到外侧，避免与时间轴重叠)
+            ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
+            const label = freq >= 1000 ? (freq / 1000) + 'k' : freq;
+            ctx.fillText(label, originX + dx + 15, originY - dy);
+        });
+
+        // 2. 时间刻度 (Time Ticks) - 横轴 (X)
+        const timeTicks = [
+            { frame: 0, label: '0s' },
+            { frame: 60, label: '-1s' },
+            { frame: 120, label: '-2s' }
+        ];
+
+        timeTicks.forEach(tick => {
+            if (tick.frame >= SPECTROGRAM_HISTORY_SIZE) return;
+            const tx = (tick.frame / SPECTROGRAM_HISTORY_SIZE) * spanX;
+            const x = originX - tx;
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.beginPath();
+            ctx.moveTo(x, originY);
+            ctx.lineTo(x + depthX, originY - depthY);
+            ctx.stroke();
+
+            // 时间数字标注
+            ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
+            ctx.fillText(tick.label, x, originY + 16);
+        });
+
+        // 绘制整体标题 (仅保留时间单位)
+        ctx.font = '500 10px "Segoe UI", sans-serif';
+        ctx.fillStyle = 'rgba(180, 192, 214, 0.35)';
+        ctx.textAlign = 'center';
+        // ctx.fillText('秒 (Sec)', originX - spanX / 2, originY + 28);
+
+        // 边界刻度 (20 / 20k)
+        ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
+        ctx.textAlign = 'left';
+        ctx.fillText('20', originX + 15, originY + 2); // 统一偏移量，修复 0s 遮挡
+        ctx.textAlign = 'right';
+        ctx.fillText(Math.round(nyquist3D / 1000) + 'k', originX + depthX + 4, originY - depthY - 8);
+
+        // 3. 绘制频谱数据 (从远到近，带填充遮挡)
         for (let z = spectrogramHistory.length - 1; z >= 0; z--) {
             const row = spectrogramHistory[z];
             const zNorm = z / Math.max(1, SPECTROGRAM_HISTORY_SIZE - 1);
             const baseX = originX - zNorm * spanX;
-            const rowAlpha = 0.05 + (1 - zNorm) * 0.4;
+            const rowAlpha = 0.05 + (1 - zNorm) * 0.45;
 
+            // 建立路径：山脊线 + 地板封闭线
             ctx.beginPath();
             for (let i = 0; i < row.length; i++) {
                 const iNorm = i / (row.length - 1);
@@ -705,12 +811,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
             }
+
+            // 准备填充遮挡（密封底部）
+            const lastX = baseX + depthX;
+            const lastBaseY = originY - depthY;
+            const firstX = baseX;
+            const firstBaseY = originY;
+
+            ctx.lineTo(lastX, lastBaseY);
+            ctx.lineTo(firstX, firstBaseY);
+            ctx.closePath();
+
+            // 使用深色背景色进行遮挡填充，避免线条堆积造成的混乱
+            ctx.fillStyle = 'rgba(10, 11, 14, 0.88)';
+            ctx.fill();
+
+            // 绘制山脊线
+            ctx.beginPath();
+            for (let i = 0; i < row.length; i++) {
+                const iNorm = i / (row.length - 1);
+                const x = baseX + iNorm * depthX;
+                const baseY = originY - iNorm * depthY;
+                const amp = row[i] / 255;
+                const peak = Math.pow(amp, 1.35) * (height * 0.22);
+                const y = baseY - peak;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+
             ctx.strokeStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.3;
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             if (z < 10) {
-                ctx.shadowBlur = 12 - z;
+                ctx.shadowBlur = 10 - z;
                 ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
             } else {
                 ctx.shadowBlur = 0;
