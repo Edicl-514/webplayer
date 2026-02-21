@@ -497,7 +497,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const visualizationModes = [
         { key: 'spectrum', label: '频谱仪' },
         { key: 'spectrogram3d', label: '3D频谱' },
-        { key: 'soundfield', label: '声场图' },
+        { key: 'polar', label: '极坐标图' },
+        { key: 'lissajous', label: '李萨如' },
         { key: 'loudness', label: '响度计' },
         { key: 'levels', label: '电平表' }
     ];
@@ -514,7 +515,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const soundFieldState = {
-        smoothPan: 0   // 平滑后的声像位置 [-1, 1]，-1=全L，0=中，+1=全R
+        polarLevelBins: null,  // Float32Array(360)，用于极坐标电平的帧间累积
+        lissajousTrailCanvas: null, // 离屏 canvas，用于 Lissajous 余辉/持久性效果
+        lissajousPeakSmooth: 0.001, // 平滑峰值跟踪器，用于 Lissajous 动态自动增益
+        polarPeakSmooth: 0.001,     // 平滑峰值跟踪器，用于 Polar Level/Sample 动态自动增益
+        polarSampleTrailCanvas: null // 离屏 canvas，用于 Polar Sample 余辉效果
     };
 
     function clamp(v, min, max) {
@@ -579,10 +584,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = 'rgba(235, 242, 255, 0.9)';
         ctx.fillText(modeLabel, 10, 8);
 
-        const hint = '点击切换';
-        const hintWidth = ctx.measureText(hint).width;
-        ctx.fillStyle = 'rgba(180, 192, 214, 0.78)';
-        ctx.fillText(hint, width - hintWidth - 10, 8);
+        // const hint = '点击切换';
+        // const hintWidth = ctx.measureText(hint).width;
+        // ctx.fillStyle = 'rgba(180, 192, 214, 0.78)';
+        // // 避开右上角的切换按钮（约 45-50px 宽）
+        // ctx.fillText(hint, width - hintWidth - 60, 8);
         ctx.restore();
     }
 
@@ -715,208 +721,444 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
     }
 
-    function drawSoundField(ctx, width, height) {
-        if (!analyserL || !analyserR || !timeDomainLData || !timeDomainRData) return;
+    // ── 声场图公共辅助：全圆背景网格 ──────────────────────────────────────────
+    function _sfBackground(ctx, cx, cy, radius) {
+        ctx.save();
+        ctx.lineWidth = 1;
+        // 同心圆参考线
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        [0.25, 0.5, 0.75].forEach(r => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * r, 0, Math.PI * 2);
+            ctx.stroke();
+        });
+        // 外圆
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        // 水平 / 垂直中轴
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+        ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 45° 对角参考线
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        const d = radius * 0.7071;
+        ctx.beginPath();
+        ctx.moveTo(cx - d, cy - d); ctx.lineTo(cx + d, cy + d);
+        ctx.moveTo(cx + d, cy - d); ctx.lineTo(cx - d, cy + d);
+        ctx.stroke();
+        ctx.restore();
+    }
 
+    // 极坐标图标签（M / -M / L / R）
+    function _sfPolarLabels(ctx, cx, cy, radius) {
+        ctx.save();
+        ctx.font = '500 11px "Segoe UI","Microsoft YaHei",sans-serif';
+        ctx.fillStyle = 'rgba(180,200,255,0.7)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('M', cx, cy - radius - 6);
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(180,200,255,0.35)';
+        // 将 -M 标签稍微移入圆内，避免遮挡底部的 Balance 仪表
+        ctx.fillText('-M', cx, cy + radius - 15);
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = 'rgba(180,200,255,0.7)';
+        ctx.fillText('L', cx - radius - 6, cy);
+        ctx.textAlign = 'left';
+        ctx.fillText('R', cx + radius + 6, cy);
+        ctx.restore();
+    }
+
+    // ── 声场图附加组件：相关度与平衡游标 (iZotope Imager 风格) ────────────────
+    function _sfMeters(ctx, width, height, dataL, dataR) {
+        const pts = Math.min(dataL.length, dataR.length);
+        if (pts === 0) return;
+
+        let sumL = 0, sumR = 0, sumLR = 0;
+        for (let i = 0; i < pts; i++) {
+            const l = dataL[i];
+            const r = dataR[i];
+            sumL += l * l;
+            sumR += r * r;
+            sumLR += l * r;
+        }
+
+        const denom = Math.sqrt(sumL * sumR);
+        let correlation = denom > 1e-5 ? (sumLR / denom) : 0;
+        correlation = clamp(correlation, -1, 1);
+
+        const rmsL = Math.sqrt(sumL / pts);
+        const rmsR = Math.sqrt(sumR / pts);
+        let balance = (rmsL + rmsR) > 1e-5 ? ((rmsR - rmsL) / (rmsL + rmsR)) : 0;
+        balance = clamp(balance, -1, 1);
+
+        if (typeof soundFieldState.correlationSmooth === 'undefined') {
+            soundFieldState.correlationSmooth = 0;
+            soundFieldState.balanceSmooth = 0;
+        }
+        // 平滑过渡
+        soundFieldState.correlationSmooth += (correlation - soundFieldState.correlationSmooth) * 0.1;
+        soundFieldState.balanceSmooth += (balance - soundFieldState.balanceSmooth) * 0.1;
+
+        const corr = soundFieldState.correlationSmooth;
+        const bal = soundFieldState.balanceSmooth;
+
+        ctx.save();
+        const meterColor = 'rgba(255,255,255,0.2)';
+        const textColor = 'rgba(180,200,255,0.7)';
+        const activeColor = 'rgba(255,255,255,0.95)';
+
+        // --- 底部 Balance (水平游标) ---
+        const bottomY = height - 12;
+        const balLeft = 46;
+        const balRight = width - 46;
+        const balWidth = balRight - balLeft;
+        const balCenter = balLeft + balWidth / 2;
+
+        ctx.strokeStyle = meterColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(balLeft, bottomY);
+        ctx.lineTo(balRight, bottomY);
+        ctx.stroke();
+
+        ctx.fillStyle = meterColor;
+        ctx.fillRect(balCenter - 1, bottomY - 3, 2, 6); // 中点
+
+        ctx.font = '500 11px "Segoe UI","Microsoft YaHei",sans-serif';
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('L', balLeft - 14, bottomY);
+        ctx.fillText('R', balRight + 14, bottomY);
+
+        // 游标块
+        const balCursorX = balCenter + bal * (balWidth / 2);
+        ctx.fillStyle = activeColor;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = activeColor;
+        ctx.fillRect(balCursorX - 2.5, bottomY - 2.5, 5, 5); // 白色方形游标
+        ctx.shadowBlur = 0;
+
+        // --- 右侧 Correlation (垂直游标) ---
+        const rightX = width - 12;
+        const corrTop = 60; // 避开右上角按钮
+        const corrBottom = height - 60; // 保持对称，确保 0 点位于中心
+        const corrHeight = corrBottom - corrTop;
+        const corrCenter = corrTop + corrHeight / 2;
+
+        ctx.beginPath();
+        ctx.moveTo(rightX, corrTop);
+        ctx.lineTo(rightX, corrBottom);
+        ctx.stroke();
+
+        ctx.fillRect(rightX - 3, corrCenter - 1, 6, 2); // 0中点
+        ctx.fillRect(rightX - 2, corrTop, 4, 1);   // +1
+        ctx.fillRect(rightX - 2, corrBottom, 4, 1); // -1
+
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'right';
+        ctx.fillText('+1', rightX - 8, corrTop);
+        ctx.fillText('0', rightX - 8, corrCenter);
+        ctx.fillText('-1', rightX - 8, corrBottom);
+
+        // 游标块
+        const corrCursorY = corrCenter - corr * (corrHeight / 2);
+        ctx.fillStyle = activeColor;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = activeColor;
+        ctx.fillRect(rightX - 2.5, corrCursorY - 2.5, 5, 5);
+
+        ctx.restore();
+    }
+
+    // ── Polar：融合 Level (形状) 与 Sample (点云) 的综合型极坐标声场图 ──────────
+    function drawPolar(ctx, width, height) {
+        if (!analyserL || !analyserR || !timeDomainLData || !timeDomainRData) return;
         analyserL.getFloatTimeDomainData(timeDomainLData);
         analyserR.getFloatTimeDomainData(timeDomainRData);
 
         const accent = parseAccentColor();
-        const INV_SQRT2 = 0.7071067811865476;
+        const pad = 28;
+        const cx = width / 2, cy = height / 2;
+        const radius = Math.min(cx, cy) - pad;
 
-        // --- 布局：半圆底边贴近画布底部 ---
-        const cursorAreaH = 22; // 游标区高度
-        const labelPad = 14;   // 左右标签留白
-        const topPad = 20;     // 顶部留白
-        const cx = width * 0.5;
-        // 半圆圆心在底边
-        const cy = height - cursorAreaH - 4;
-        // 半径：水平方向不超过画布，垂直方向不超过可用高度
-        const radius = Math.min(cx - labelPad - 4, cy - topPad);
+        const NUM_BINS = 360;
+        if (!soundFieldState.polarLevelBins || soundFieldState.polarLevelBins.length !== NUM_BINS) {
+            soundFieldState.polarLevelBins = new Float32Array(NUM_BINS);
+        }
 
-        // ============ 1. 绘制背景网格 ============
+        const pts = Math.min(timeDomainLData.length, timeDomainRData.length);
+
+        // ─ 1. 自动增益与能量处理 ─
+        let framePeak = 0;
+        for (let i = 0; i < pts; i++) {
+            const al = Math.abs(timeDomainLData[i]);
+            const ar = Math.abs(timeDomainRData[i]);
+            if (al > framePeak) framePeak = al;
+            if (ar > framePeak) framePeak = ar;
+        }
+        const prevPeak = soundFieldState.polarPeakSmooth || 0.001;
+        if (framePeak > prevPeak) {
+            soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.3;
+        } else {
+            soundFieldState.polarPeakSmooth = prevPeak + (framePeak - prevPeak) * 0.005;
+        }
+        const peakSmooth = Math.max(soundFieldState.polarPeakSmooth, 0.001);
+        const gain = clamp(4.0 / peakSmooth, 2.0, 40);
+
+        // ─ 2. 准备 Level 形状数据 (平滑衰减) ─
+        for (let i = 0; i < NUM_BINS; i++) soundFieldState.polarLevelBins[i] *= 0.88;
+
+        for (let i = 0; i < pts; i++) {
+            const rawL = timeDomainLData[i];
+            const rawR = timeDomainRData[i];
+            const l = Math.tanh(rawL * gain);
+            const r = Math.tanh(rawR * gain);
+            const energy = Math.sqrt(l * l + r * r) / 1.4142;
+            if (energy < 1e-5) continue;
+
+            let angle = 2 * Math.atan2(rawR - rawL, rawL + rawR);
+            while (angle > Math.PI) angle -= Math.PI * 2;
+            while (angle < -Math.PI) angle += Math.PI * 2;
+
+            const bi = (Math.floor(((angle + Math.PI) / (Math.PI * 2)) * NUM_BINS) + NUM_BINS) % NUM_BINS;
+            if (energy > soundFieldState.polarLevelBins[bi]) soundFieldState.polarLevelBins[bi] = energy;
+        }
+
+        const blurRadius = 7;
+        const finalBins = new Float32Array(NUM_BINS);
+        for (let i = 0; i < NUM_BINS; i++) {
+            let sum = 0;
+            for (let j = -blurRadius; j <= blurRadius; j++) {
+                sum += soundFieldState.polarLevelBins[(i + j + NUM_BINS) % NUM_BINS];
+            }
+            finalBins[i] = sum / (blurRadius * 2 + 1);
+        }
+
+        // ─ 3. 绘制背景 ─
+        _sfBackground(ctx, cx, cy, radius);
+        _sfPolarLabels(ctx, cx, cy, radius);
+
+        // ─ 4. 绘制余辉点云 (Sample 层) - 弱化背景 ─
+        let trail = soundFieldState.polarSampleTrailCanvas;
+        if (!trail || trail.width !== width || trail.height !== height) {
+            trail = document.createElement('canvas');
+            trail.width = width;
+            trail.height = height;
+            soundFieldState.polarSampleTrailCanvas = trail;
+        }
+        const tCtx = trail.getContext('2d');
+        tCtx.globalCompositeOperation = 'destination-out';
+        tCtx.fillStyle = 'rgba(0,0,0,0.12)'; // 增加淡出速度 (0.06 -> 0.12)，减少积压
+        tCtx.fillRect(0, 0, width, height);
+        tCtx.globalCompositeOperation = 'lighter';
+
+        tCtx.save();
+        tCtx.beginPath();
+        tCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        tCtx.clip();
+
+        const step = 3; // 增加跳步 (2 -> 3)，减少总点数
+        for (let i = 0; i < pts; i += step) {
+            const l = Math.tanh(timeDomainLData[i] * gain);
+            const r = Math.tanh(timeDomainRData[i] * gain);
+            const energy = Math.sqrt(l * l + r * r) / 1.4142;
+            if (energy < 1e-3) continue; // 提高阈值，过滤极细碎噪声
+
+            const angle = 2 * Math.atan2(timeDomainRData[i] - timeDomainLData[i], timeDomainLData[i] + timeDomainRData[i]);
+            const rr = clamp(energy, 0, 1) * radius;
+            const px = cx + Math.sin(angle) * rr;
+            const py = cy - Math.cos(angle) * rr;
+
+            // 大幅降低点云亮度 (alpha/2)
+            const alpha = clamp(0.04 + energy * 0.25, 0.03, 0.4);
+            tCtx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${alpha.toFixed(3)})`;
+            tCtx.fillRect(px - 1, py - 1, 2, 2); // 缩小点尺寸
+            tCtx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${(alpha * 0.1).toFixed(3)})`;
+            tCtx.fillRect(px - 2.5, py - 2.5, 5, 5); // 缩小光晕
+        }
+        tCtx.restore();
+
         ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(trail, 0, 0);
+        ctx.restore();
 
-        // 同心参考弧（25% / 50% / 75%）
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-        ctx.lineWidth = 1;
-        [0.25, 0.5, 0.75].forEach(r => {
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius * r, Math.PI, 0);
-            ctx.stroke();
-        });
+        // ─ 5. 绘制渐变填充形状 (Level 层) - 放在顶层 ─
+        ctx.save();
+        const fillGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        fillGrad.addColorStop(0, `rgba(${accent.r},${accent.g},${accent.b},0.08)`);
+        fillGrad.addColorStop(1, `rgba(${accent.r},${accent.g},${accent.b},0.35)`);
 
-        // 外圆弧
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(cx, cy, radius, Math.PI, 0);
+        for (let i = 0; i < NUM_BINS; i++) {
+            const angle = (i / NUM_BINS) * Math.PI * 2 - Math.PI;
+            const r = clamp(finalBins[i], 0, 1) * radius;
+            const px = cx + Math.sin(angle) * r;
+            const py = cy - Math.cos(angle) * r;
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = fillGrad;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${accent.r},${accent.g},${accent.b},0.85)`;
+        ctx.lineWidth = 1.6;
+        // 增加一点发光感
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = `rgba(${accent.r},${accent.g},${accent.b},0.4)`;
+        ctx.stroke();
+        ctx.restore();
+
+        // ─ 6. 绘制游标 ─
+        _sfMeters(ctx, width, height, timeDomainLData, timeDomainRData);
+    }
+
+    // ── Lissajous：传统矩形 X-Y 相位示波图（Ozone 风格点云 + 余辉）─────────
+    function drawLissajous(ctx, width, height) {
+        if (!analyserL || !analyserR || !timeDomainLData || !timeDomainRData) return;
+        analyserL.getFloatTimeDomainData(timeDomainLData);
+        analyserR.getFloatTimeDomainData(timeDomainRData);
+
+        const accent = parseAccentColor();
+        const pad = 28;
+        const size = Math.min(width, height) - pad * 2;
+        const cx = width / 2, cy = height / 2;
+        const half = size / 2;
+
+        // ─ 背景网格 (Ozone 菱形) ─
+        ctx.save();
+        ctx.lineWidth = 1;
+
+        // 内部 X 轴 / Y 轴
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.beginPath();
+        ctx.moveTo(cx - half, cy + half); ctx.lineTo(cx + half, cy - half);
+        ctx.moveTo(cx + half, cy + half); ctx.lineTo(cx - half, cy - half);
         ctx.stroke();
 
-        // 水平基线（直径）
-        ctx.beginPath();
-        ctx.moveTo(cx - radius, cy);
-        ctx.lineTo(cx + radius, cy);
-        ctx.stroke();
-
-        // 垂直中轴（Mono 轴）
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx, cy - radius);
+        ctx.moveTo(cx - half, cy); ctx.lineTo(cx + half, cy);
+        ctx.moveTo(cx, cy - half); ctx.lineTo(cx, cy + half);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // 纯 L / 纯 R 对角参考线（45°）
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        const diagLen = radius * INV_SQRT2;
+        // 外框 (菱形 Bounding Box)
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx - diagLen, cy - diagLen); // 纯 L 方向（上左）
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + diagLen, cy - diagLen); // 纯 R 方向（上右）
-        ctx.stroke();
-
-        // --- 标签 ---
-        ctx.font = '500 11px "Segoe UI", "Microsoft YaHei", sans-serif';
-        ctx.textBaseline = 'middle';
-        // L 标签（左端）
-        ctx.fillStyle = 'rgba(180, 200, 255, 0.75)';
-        ctx.textAlign = 'right';
-        ctx.fillText('L', cx - radius - 4, cy);
-        // R 标签（右端）
-        ctx.textAlign = 'left';
-        ctx.fillText('R', cx + radius + 4, cy);
-        // M 标签（顶部）
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(180, 192, 214, 0.55)';
-        ctx.fillText('M', cx, cy - radius - 10);
-        // L / R 对角标签
-        ctx.font = '500 10px "Segoe UI", "Microsoft YaHei", sans-serif';
-        ctx.fillStyle = 'rgba(160, 176, 210, 0.45)';
-        ctx.textAlign = 'right';
-        ctx.fillText('L', cx - diagLen * 0.72 - 4, cy - diagLen * 0.72);
-        ctx.textAlign = 'left';
-        ctx.fillText('R', cx + diagLen * 0.72 + 4, cy - diagLen * 0.72);
-
-        ctx.restore();
-
-        // ============ 2. 绘制粒子（裁剪到半圆内） ============
-        ctx.save();
-
-        // 裁剪路径：上半圆区域
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, Math.PI, 0); // 从左到右，顺时针画上半圆弧
-        ctx.closePath();                      // 直线闭合（直径线）
-        ctx.clip();
-
-        const points = Math.min(timeDomainLData.length, timeDomainRData.length);
-        // 每帧最多采 1200 个点，步长取整
-        const step = Math.max(1, Math.floor(points / 1200));
-
-        ctx.shadowBlur = 5;
-        ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.7)`;
-
-        for (let i = 0; i < points; i += step) {
-            const l = timeDomainLData[i];
-            const r = timeDomainRData[i];
-
-            // M/S Goniometer 变换：
-            //   s（Side）= (R − L) / √2  →  正值偏右（R声道为主），负值偏左（L声道为主）
-            //   m（Mid） = (L + R) / √2  →  正值同相，负值反相（仅显示上半圆）
-            const s = (r - l) * INV_SQRT2;
-            const m = (l + r) * INV_SQRT2;
-
-            // 仅显示同相部分（上半圆，m >= 0）
-            if (m < 0) continue;
-
-            const px = cx + s * radius;
-            const py = cy - m * radius;
-
-            // 根据信号能量决定粒子透明度
-            const energy = Math.sqrt(l * l + r * r);
-            const alpha = clamp(0.25 + energy * 0.8, 0.15, 1.0);
-
-            ctx.fillStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${alpha.toFixed(2)})`;
-            ctx.beginPath();
-            ctx.arc(px, py, 1.4, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        ctx.restore();
-
-        // ============ 3. 底部声像游标 ============
-        ctx.save();
-
-        // 用 RMS 计算当前帧的左右声道能量比，得出声像位置
-        const nCalc = Math.min(512, points);
-        let sumL = 0, sumR = 0;
-        for (let i = 0; i < nCalc; i++) {
-            sumL += timeDomainLData[i] * timeDomainLData[i];
-            sumR += timeDomainRData[i] * timeDomainRData[i];
-        }
-        const rmsL = Math.sqrt(sumL / nCalc);
-        const rmsR = Math.sqrt(sumR / nCalc);
-        const total = rmsL + rmsR;
-        // rawPan: -1 = 全L, 0 = 中, +1 = 全R
-        const rawPan = total > 1e-5 ? (rmsR - rmsL) / total : 0;
-
-        // 低通平滑，避免游标跳动
-        soundFieldState.smoothPan += (rawPan - soundFieldState.smoothPan) * 0.15;
-        const cursorX = cx + clamp(soundFieldState.smoothPan, -1, 1) * radius;
-
-        // 游标轨道线
-        const trackY = cy + 10;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(cx - radius, trackY);
-        ctx.lineTo(cx + radius, trackY);
-        ctx.stroke();
-
-        // 中心刻度
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(cx, trackY - 3);
-        ctx.lineTo(cx, trackY + 4);
-        ctx.stroke();
-
-        // 四分之一刻度
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-        [-0.5, 0.5].forEach(pos => {
-            const tx = cx + pos * radius;
-            ctx.beginPath();
-            ctx.moveTo(tx, trackY - 2);
-            ctx.lineTo(tx, trackY + 3);
-            ctx.stroke();
-        });
-
-        // 游标三角形（向上指）
-        const triH = 7, triW = 5;
-        ctx.fillStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.95)`;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.85)`;
-        ctx.beginPath();
-        ctx.moveTo(cursorX, trackY - 5);            // 尖端朝上
-        ctx.lineTo(cursorX - triW, trackY + triH);  // 左底角
-        ctx.lineTo(cursorX + triW, trackY + triH);  // 右底角
+        ctx.moveTo(cx, cy - half);
+        ctx.lineTo(cx + half, cy);
+        ctx.lineTo(cx, cy + half);
+        ctx.lineTo(cx - half, cy);
         ctx.closePath();
-        ctx.fill();
-
-        // 游标竖线（从圆心底边向上延伸到圆弧内）
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.35)`;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 4]);
-        ctx.beginPath();
-        ctx.moveTo(cursorX, cy);
-        ctx.lineTo(cursorX, trackY - 6);
         ctx.stroke();
-        ctx.setLineDash([]);
 
+        // 标签
+        ctx.font = '500 11px "Segoe UI","Microsoft YaHei",sans-serif';
+        ctx.fillStyle = 'rgba(180,200,255,0.7)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText('M', cx, cy - half - 6);
+        ctx.fillStyle = 'rgba(180,200,255,0.35)';
+        ctx.textBaseline = 'top';
+        // 将 -M 标签稍微移入范围内，避挡 Balance 仪表
+        ctx.fillText('-M', cx, cy + half - 15);
+        ctx.fillStyle = 'rgba(180,200,255,0.7)';
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        ctx.fillText('S', cx + half + 6, cy);
+        ctx.textAlign = 'right';
+        ctx.fillText('-S', cx - half - 6, cy);
+
+        ctx.fillStyle = 'rgba(180,200,255,0.8)';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+        ctx.fillText('L', cx - half / 2 - 6, cy - half / 2 - 6);
+        ctx.textAlign = 'left';
+        ctx.fillText('R', cx + half / 2 + 6, cy - half / 2 - 6);
         ctx.restore();
+
+        // ─ 余辉层：离屏 canvas 实现多帧叠加淡出（Ozone 云雾效果）─
+        let trail = soundFieldState.lissajousTrailCanvas;
+        if (!trail || trail.width !== width || trail.height !== height) {
+            trail = document.createElement('canvas');
+            trail.width = width;
+            trail.height = height;
+            soundFieldState.lissajousTrailCanvas = trail;
+        }
+        const tCtx = trail.getContext('2d');
+
+        // 对余辉层做渐隐：用半透明黑色覆盖（模拟磷光屏衰减）
+        tCtx.globalCompositeOperation = 'destination-out';
+        tCtx.fillStyle = 'rgba(0,0,0,0.08)'; // 衰减速度，越小余辉越长
+        tCtx.fillRect(0, 0, width, height);
+        tCtx.globalCompositeOperation = 'lighter'; // Additive blending
+
+        // ─ 在余辉层上绘制当前帧的散点（裁剪到菱形内）─
+        tCtx.save();
+        tCtx.beginPath();
+        tCtx.moveTo(cx, cy - half);
+        tCtx.lineTo(cx + half, cy);
+        tCtx.lineTo(cx, cy + half);
+        tCtx.lineTo(cx - half, cy);
+        tCtx.closePath();
+        tCtx.clip();
+
+        const pts = Math.min(timeDomainLData.length, timeDomainRData.length);
+        const step = 2; // 跳帧以提升性能
+
+        // ─ 动态自动增益：测量当前帧峰值，动态调整 gain 使点云始终填充菱形 ~100% ─
+        let framePeak = 0;
+        for (let i = 0; i < pts; i += step) {
+            const al = Math.abs(timeDomainLData[i]);
+            const ar = Math.abs(timeDomainRData[i]);
+            if (al > framePeak) framePeak = al;
+            if (ar > framePeak) framePeak = ar;
+        }
+        // 平滑峰值跟踪：快速上升（attack）、缓慢下降（release），避免闪烁
+        const prev = soundFieldState.lissajousPeakSmooth;
+        if (framePeak > prev) {
+            soundFieldState.lissajousPeakSmooth = prev + (framePeak - prev) * 0.3;  // 快速响应突发峰值
+        } else {
+            soundFieldState.lissajousPeakSmooth = prev + (framePeak - prev) * 0.005; // 缓慢释放，保持稳定
+        }
+        const peakSmooth = Math.max(soundFieldState.lissajousPeakSmooth, 0.001);
+        // gain 使峰值映射到 tanh(4.0) ≈ 0.999，即填充 ~100%
+        const gain = clamp(4.0 / peakSmooth, 2.0, 40);
+
+        for (let i = 0; i < pts; i += step) {
+            // tanh 软饱和：输出 ∈ (-1, 1)，永远不会被菱形裁剪
+            const l = Math.tanh(timeDomainLData[i] * gain);
+            const r = Math.tanh(timeDomainRData[i] * gain);
+
+            const mid = (l + r) / 2;
+            const side = (r - l) / 2;
+            const px = cx + side * half;
+            const py = cy - mid * half;
+
+            // 根据离中心的距离调节亮度，中心更亮、边缘更暗
+            const dist = Math.sqrt(mid * mid + side * side);
+            const alpha = clamp(0.06 + dist * 0.35, 0.04, 0.5);
+
+            tCtx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${alpha.toFixed(3)})`;
+            tCtx.fillRect(px - 1, py - 1, 2, 2); // 2px 散点，用 fillRect 替代 arc 提高性能
+        }
+        tCtx.restore();
+
+        // ─ 将余辉层合成到主 canvas ─
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(trail, 0, 0);
+        ctx.restore();
+
+        // ─ 绘制相关度与平衡游标 ─
+        _sfMeters(ctx, width, height, timeDomainLData, timeDomainRData);
     }
 
     function drawLoudnessMeter(ctx, width, height) {
@@ -1094,8 +1336,10 @@ document.addEventListener('DOMContentLoaded', () => {
             drawSpectrum(visualizerCtx, width, height);
         } else if (mode === 'spectrogram3d') {
             drawSpectrogram3D(visualizerCtx, width, height);
-        } else if (mode === 'soundfield') {
-            drawSoundField(visualizerCtx, width, height);
+        } else if (mode === 'polar') {
+            drawPolar(visualizerCtx, width, height);
+        } else if (mode === 'lissajous') {
+            drawLissajous(visualizerCtx, width, height);
         } else if (mode === 'loudness') {
             drawLoudnessMeter(visualizerCtx, width, height);
         } else if (mode === 'levels') {
