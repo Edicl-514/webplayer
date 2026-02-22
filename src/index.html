@@ -2608,7 +2608,15 @@
                         if (taskItem) {
                             let displayName = data.file.name;
                             if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
-                            taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-processing">转录中...</span>`;
+                            // 如果有进度百分比，显示进度；否则显示"转录中..."
+                            let statusText = '转录中...';
+                            if (data.progress !== undefined && data.progress > 0) {
+                                statusText = `转录中... (${data.progress}%)`;
+                            }
+                            taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-processing">${statusText}</span>`;
+                            if (data.duration && data.duration > 0) {
+                                taskItem.dataset.duration = data.duration;
+                            }
                         }
                     } else if (data.type === 'transcribe_complete') {
                         const taskItem = document.getElementById(`transcribe-task-${data.file.id}`);
@@ -2618,7 +2626,12 @@
                             if (data.result.skipped) {
                                 taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">已跳过（已有字幕）</span>`;
                             } else if (data.result.success) {
-                                taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-success">完成</span>`;
+                                let statusHtml = '<span class="task-status task-status-success">完成</span>';
+                                // 如果有进度信息，在状态后面显示
+                                if (data.result.progress !== undefined) {
+                                    statusHtml = `<span class="task-status task-status-success">完成 (${data.result.progress}%)</span>`;
+                                }
+                                taskItem.innerHTML = `<span class="task-name">${displayName}</span> ${statusHtml}`;
                             } else {
                                 taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || '未知错误'}</span>`;
                             }
@@ -2702,7 +2715,14 @@
                         else if (file.status === 'processing') statusHtml = '<span class="task-status task-status-processing">转录中...</span>';
                         else if (file.status === 'skipped') statusHtml = '<span class="task-status task-status-waiting">已跳过（已有字幕）</span>';
                         else if (file.status === 'complete') {
-                            if (file.result && file.result.success) statusHtml = '<span class="task-status task-status-success">完成</span>';
+                            if (file.result && file.result.success) {
+                                // 显示进度百分比（如果有）
+                                if (file.result.progress !== undefined) {
+                                    statusHtml = `<span class="task-status task-status-success">完成 (${file.result.progress}%)</span>`;
+                                } else {
+                                    statusHtml = '<span class="task-status task-status-success">完成</span>';
+                                }
+                            }
                             else statusHtml = `<span class="task-status task-status-failed" title="${(file.result?.details || '').replace(/"/g, '&quot;')}">失败: ${file.result?.error || '未知错误'}</span>`;
                         }
                         li.innerHTML = `<span class="task-name">${displayName}</span> ${statusHtml}`;
@@ -2919,7 +2939,71 @@
     </div>
 
     <!-- 字幕转录面板 -->
-    <div id="transcribe-panel" class="hidden">
+    <style>
+    /* 浮动面板样式（用于视频/音乐/字幕面板）
+       - 在桌面显示为右下浮动窗口
+       - 在移动端宽度自适应，并保证内容可滚动 */
+    #transcribe-panel.floating {
+        width: 450px;
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        max-height: 70vh;
+        background-color: rgba(60,60,63,0.95);
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        z-index: 1001;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        color: #e0e0e0;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+    #transcribe-panel.floating .scraper-queue { overflow: auto; }
+    #transcribe-panel.floating .panel-close-btn {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: none;
+        border: none;
+        color: #e0e0e0;
+        font-size: 1.5em;
+        cursor: pointer;
+        line-height: 1;
+        padding: 0;
+    }
+    /* 小屏幕适配 */
+    @media (max-width: 600px) {
+        #transcribe-panel.floating {
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            width: auto;
+            max-height: 80vh;
+            border-radius: 10px;
+            padding: 12px;
+        }
+        #transcribe-panel.floating .transcribe-type-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        /* Only make text-like controls full-width on small screens; avoid affecting radios/checkboxes */
+        #transcribe-panel.floating select,
+        #transcribe-panel.floating input[type="text"],
+        #transcribe-panel.floating input[type="search"],
+        #transcribe-panel.floating input[type="number"],
+        #transcribe-panel.floating textarea,
+        #transcribe-panel.floating button:not(.panel-close-btn) {
+            width: 100%;
+            box-sizing: border-box;
+        }
+    }
+    </style>
+
+    <div id="transcribe-panel" class="hidden floating">
         <button class="panel-close-btn" id="closeTranscribePanelButton">&times;</button>
         <h2>字幕转录</h2>
         <div class="transcribe-controls">

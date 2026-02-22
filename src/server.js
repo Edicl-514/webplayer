@@ -3072,13 +3072,75 @@ const requestHandler = async (req, res) => {
                             }
 
                             if (activeTaskFile) activeTaskFile.status = 'processing';
-                            broadcast({ type: 'transcribe_progress', file: { id: fileTask.id, name: fileTask.name } });
+                            
+                            // 获取文件的总时长
+                            const fileDuration = await getMediaDuration(fileTask.path);
+                            broadcast({ type: 'transcribe_progress', file: { id: fileTask.id, name: fileTask.name }, duration: fileDuration, progress: 0 });
+
+                            // 启动进度监测定时器（定期检查生成的字幕文件）
+                            let progressMonitorInterval = null;
+                            const lastVttPath = null; // 用于缓存找到的VTT文件路径
+                            
+                            const startProgressMonitorAfterDelay = () => {
+                                // 延迟1秒后启动进度监测，给Python脚本时间创建初始的VTT文件
+                                setTimeout(() => {
+                                    progressMonitorInterval = setInterval(async () => {
+                                        try {
+                                            // 尝试在cache目录中查找该文件对应的最新VTT文件
+                                            const baseName = path.basename(fileTask.path, path.extname(fileTask.path));
+                                            const cacheLyricsDir = path.join(__dirname, 'cache', 'subtitles');
+                                            
+                                            if (!fs.existsSync(cacheLyricsDir)) return;
+                                            
+                                            const files = fs.readdirSync(cacheLyricsDir);
+                                            // 查找与输入文件相关的VTT文件（可能包含transcribe标记）
+                                            let vttFile = null;
+                                            for (const file of files) {
+                                                if ((file.includes(baseName) || file.includes('transcribe')) && file.endsWith('.vtt')) {
+                                                    const filePath = path.join(cacheLyricsDir, file);
+                                                    const stats = fs.statSync(filePath);
+                                                    // 选择最新修改的文件
+                                                    if (!vttFile || stats.mtime > fs.statSync(path.join(cacheLyricsDir, vttFile)).mtime) {
+                                                        vttFile = file;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if (vttFile && fileDuration > 0) {
+                                                const vttPath = path.join(cacheLyricsDir, vttFile);
+                                                const lastTimestamp = getLastSubtitleTimestamp(vttPath);
+                                                const progress = Math.round((lastTimestamp / fileDuration) * 100);
+                                                // 只在进度有变化时才广播（避免过度消息）
+                                                if (progress > 0 && progress < 100) {
+                                                    broadcast({ type: 'transcribe_progress', file: { id: fileTask.id, name: fileTask.name }, duration: fileDuration, progress });
+                                                }
+                                            }
+                                        } catch (e) {
+                                            // 监测过程中出错不影响转录，静默处理
+                                        }
+                                    }, 2000); // 每2秒检查一次
+                                }, 1000);
+                            };
+                            
+                            startProgressMonitorAfterDelay();
 
                             const result = await transcribeFileWithFallback(fileTask.path, {
                                 model: model || 'large-v3',
                                 modelSource: modelSource || 'pretrained',
                                 language, task: transcribeTask, vadFilter, denseSubtitles, maxCharsPerLine
                             });
+
+                            // 清理进度监测定时器
+                            if (progressMonitorInterval) {
+                                clearInterval(progressMonitorInterval);
+                            }
+
+                            // 如果转录成功，计算最终进度百分比
+                            if (result.success && result.vtt_file && fileDuration > 0) {
+                                const lastTimestamp = getLastSubtitleTimestamp(result.vtt_file);
+                                const progress = Math.round((lastTimestamp / fileDuration) * 100);
+                                result.progress = Math.min(100, progress); // 确保不超过100%
+                            }
 
                             if (activeTaskFile) {
                                 activeTaskFile.status = 'complete';
@@ -4500,6 +4562,57 @@ async function findMediaFilesForTranscription(dir, fileType) {
         broadcast({ type: 'transcribe_error', message: `读取目录失败: ${dir}` });
     }
     return files;
+}
+
+// 获取文件的总时长（单位：秒）
+function getMediaDuration(filePath) {
+    return new Promise((resolve) => {
+        const ffprobe = spawn('ffprobe', [
+            '-v', 'quiet',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            filePath
+        ]);
+        let output = '';
+        ffprobe.stdout.on('data', d => output += d);
+        ffprobe.on('close', (code) => {
+            if (code !== 0) {
+                resolve(0);
+                return;
+            }
+            try {
+                const info = JSON.parse(output);
+                resolve(parseFloat(info.format?.duration || 0));
+            } catch (e) {
+                resolve(0);
+            }
+        });
+    });
+}
+
+// 从VTT文件中提取最后一个字幕的时间戳（单位：秒）
+function getLastSubtitleTimestamp(vttPath) {
+    try {
+        if (!fs.existsSync(vttPath)) return 0;
+        const content = fs.readFileSync(vttPath, 'utf8');
+        const timeRegex = /(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})/g;
+        let lastMatch = null;
+        let match;
+        while ((match = timeRegex.exec(content)) !== null) {
+            lastMatch = match;
+        }
+        if (lastMatch) {
+            const hours = parseInt(lastMatch[1] || 0);
+            const minutes = parseInt(lastMatch[2]);
+            const seconds = parseInt(lastMatch[3]);
+            const milliseconds = parseInt(lastMatch[4]);
+            return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+        }
+        return 0;
+    } catch (e) {
+        console.warn(`Error reading VTT file: ${vttPath}`, e.message);
+        return 0;
+    }
 }
 
 function transcribeFileWithFallback(filePath, options) {

@@ -4469,6 +4469,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- 字幕/歌词功能 ---
+    // 辅助函数：计算当前字幕的转录进度
+    function getTranscribeProgress() {
+        if (currentLyrics.length === 0 || !sound) {
+            return null;
+        }
+        const lastTime = currentLyrics[currentLyrics.length - 1].time;
+        const totalDuration = sound.duration() || 0;
+        if (lastTime > 0 && totalDuration > 0) {
+            return Math.round((lastTime / totalDuration) * 100);
+        }
+        return null;
+    }
+
     async function loadLocalSubtitles() {
         if (!playlist[currentSongIndex]) {
             return;
@@ -4847,8 +4860,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
 
                                 console.log('[Auto Refresh] Loading partial subtitle:', subtitlePath);
-                                showToast('检测到新的字幕片段，正在加载...', 'info', 2000);
+                                // showToast('检测到新的字幕片段，正在加载...', 'info', 2000);
                                 await loadLyrics(subtitlePath);
+                                // 显示目前的转录进度
+                                const progress = getTranscribeProgress();
+                                if (progress !== null) {
+                                    showToast(`转录进度: ${progress}%`, 'info', 2000);
+                                }
                                 // 顺便刷新本地字幕列表 UI
                                 await loadLocalSubtitles();
                             }
@@ -4921,6 +4939,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log('[Auto Load] Loading generated subtitle:', subtitlePath);
                     try {
                         loadLyrics(subtitlePath);
+
+                        // 显示转录进度
+                        const progress = getTranscribeProgress();
+                        if (progress !== null) {
+                            showToast(`转录进度: ${progress}%`, 'success', 2000);
+                        }
 
                         // 更新当前播放项的 lrc 字段并持久化
                         try {
