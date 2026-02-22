@@ -574,6 +574,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 webglRenderer.setSize(rect.width, rect.height);
                 if (webglCamera) {
                     webglCamera.aspect = rect.width / rect.height;
+
+                    // 移动端适当拉远并调高视角，防止在窄屏下两侧超出，同时由于隐藏了封面，整体观感依然很大
+                    if (window.innerWidth <= 768) {
+                        webglCamera.position.set(0, 30, 52);
+                    } else {
+                        webglCamera.position.set(0, 18, 42);
+                    }
+
                     webglCamera.updateProjectionMatrix();
                 }
                 if (webglComposer) {
@@ -764,52 +772,163 @@ document.addEventListener('DOMContentLoaded', () => {
         const vertexShader = `
             uniform sampler2D u_dataTexture;
             varying vec2 vUv;
+            varying vec3 vLocalNormal;
             varying float vHeight;
+            varying float vIsTop;
 
             void main() {
-                vUv = uv;
-                // texData.r returns 0.0 ~ 1.0 from UnsignedByteType texture
+                vLocalNormal = normal;
+                
+                // Box dimensions: x in [-15, 15], z in [-11, 11]
+                // Reverse z so that z=+11 is vUv.y=0.0 (upstream) and z=-11 is vUv.y=1.0 (downstream)
+                vec2 texUv = vec2( (position.x + 15.0) / 30.0, 1.0 - (position.z + 11.0) / 22.0 );
+                vUv = clamp(texUv, 0.0, 1.0);
+
                 vec4 texData = texture2D(u_dataTexture, vUv);
                 float val = texData.r; 
-                float intensity = pow(val, 1.35); 
+                // 指数 1.5 使得高峰更锐利，低谷更深邃
+                float intensity = pow(val, 1.5); 
                 vHeight = intensity;
 
+                vIsTop = step(0.0, position.y); // 1.0 if top edge/face, 0.0 if bottom edge/face
+
                 vec3 newPos = position;
-                // Slightly reduced height to keep peaks within bounds
-                newPos.y += intensity * 6.5; 
+                // Extract thickness completely: bottom fixed at Y=0, top scaled
+                newPos.y = intensity * 6.5 * vIsTop; 
                 
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
             }
         `;
 
         const solidFragmentShader = `
+            uniform vec3 u_color;
             varying vec2 vUv;
+            varying vec3 vLocalNormal;
             varying float vHeight;
+            varying float vIsTop;
+            uniform sampler2D u_dataTexture;
+
             void main() {
-                // Only fill areas where there is actual height, and fade out towards the edges
-                float alpha = smoothstep(0.02, 0.2, vHeight) * 0.85;
-                // Dark but transparent, only occluding ridges behind it
-                gl_FragColor = vec4(0.0, 0.0, 0.02, alpha);
+                // Fade out towards downstream (z = -11 -> vUv.y = 1)
+                float alphaFadeY = smoothstep(1.0, 0.0, vUv.y);
+                float alpha = alphaFadeY;
+
+                vec3 finalColor = u_color * 0.1;
+                float faceAlpha = alpha * 0.3;
+
+                if (vLocalNormal.y > 0.5) {
+                    // TOP FACE: Wavy surface
+                    faceAlpha = alpha * 0.85; 
+                    
+                    // --- 3D地形阴影与光效 ---
+                    vec2 dTex = vec2(1.0 / ${sizeX}.0, 1.0 / ${sizeY}.0);
+                    // 采样高度，并与顶点着色器的指数变换逻辑保持一致
+                    float hL = pow(texture2D(u_dataTexture, vUv + vec2(-dTex.x, 0.0)).r, 1.5);
+                    float hR = pow(texture2D(u_dataTexture, vUv + vec2(dTex.x, 0.0)).r, 1.5);
+                    float hU = pow(texture2D(u_dataTexture, vUv + vec2(0.0, -dTex.y)).r, 1.5);
+                    float hD = pow(texture2D(u_dataTexture, vUv + vec2(0.0, dTex.y)).r, 1.5);
+                    
+                    // 基于高度差计算表面法线近似值
+                    vec3 dx = vec3(2.0, (hR - hL) * 6.5, 0.0);
+                    vec3 dy = vec3(0.0, (hD - hU) * 6.5, 2.0);
+                    vec3 norm = normalize(cross(dx, dy));
+                    
+                    // 模拟光照：主光源来自斜上方，环境光 0.4 + 散射光 0.7
+                    vec3 lightDir = normalize(vec3(0.3, 1.0, 0.5));
+                    float diff = max(dot(norm, lightDir), 0.0);
+                    float shade = 0.4 + 0.7 * diff;
+                    
+                    // 镜面高光 (Specular) 增强金属/液体质感
+                    vec3 viewDir = normalize(vec3(0.0, 5.0, 2.0));
+                    vec3 reflectDir = reflect(-lightDir, norm);
+                    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 24.0);
+
+                    // --- 深度色彩映射 ---
+                    // 使颜色保持更久，只有在极高亮度且受光面才趋向白色
+                    vec3 baseColor = u_color * 0.35;
+                    vec3 midColor = u_color;
+                    vec3 hotColor = mix(u_color, vec3(1.0, 1.0, 1.0), 0.5);
+                    vec3 peakColor = vec3(1.0, 1.0, 1.0);
+                    
+                    vec3 col;
+                    if (vHeight < 0.35) {
+                        col = mix(baseColor, midColor, vHeight / 0.35);
+                    } else if (vHeight < 0.8) {
+                        col = mix(midColor, hotColor, (vHeight - 0.35) / 0.45);
+                    } else {
+                        col = mix(hotColor, peakColor, (vHeight - 0.8) / 0.2);
+                    }
+                    
+                    finalColor = col * shade + spec * 0.35;
+
+                    // Upstream edge highlight on the top surface
+                    float upstreamEdge = smoothstep(0.012, 0.0, vUv.y);
+                    finalColor = mix(finalColor, vec3(1.0, 1.0, 1.0), upstreamEdge * 0.9);
+                    faceAlpha = mix(faceAlpha, 1.0, upstreamEdge);
+
+                } else if (vLocalNormal.y < -0.5) {
+                    // BOTTOM FACE: Base
+                    // Now truly flat at Y=0
+                    finalColor = u_color * 0.08;
+                    faceAlpha = alpha * 0.2;
+
+                } else {
+                    // SIDE WALLS
+                    vec3 sideTopColor = u_color * 0.7;
+                    vec3 sideBottomColor = u_color * 0.1;
+                    finalColor = mix(sideBottomColor, sideTopColor, vIsTop);
+                    
+                    faceAlpha = alpha * (0.3 + 0.6 * vIsTop);
+
+                    // UPSTREAM WALL (Front face, z > 0.5 i.e. vUv.y == 0)
+                    if (vLocalNormal.z > 0.5) {
+                        // Highlight the intersection curve (top edge of the wall)
+                        float topHighlight = smoothstep(0.92, 1.0, vIsTop);
+                        finalColor = mix(finalColor, vec3(1.0, 1.0, 1.0), topHighlight);
+                        faceAlpha = mix(faceAlpha, 1.0, topHighlight);
+                        
+                        // Highlight 0 dB plane (bottom edge of the wall / base)
+                        float bottomHighlight = smoothstep(0.08, 0.0, vIsTop);
+                        finalColor = mix(finalColor, vec3(0.6, 1.0, 1.0), bottomHighlight);
+                        faceAlpha = mix(faceAlpha, 0.9, bottomHighlight);
+                        
+                        // Boost base visibility for upstream wall
+                        faceAlpha = max(faceAlpha, 0.5);
+                        finalColor = mix(finalColor, u_color * 0.9, 0.3);
+                    } else {
+                        // Highlight 0 dB plane on other side walls as well
+                        float bottomHighlight = smoothstep(0.05, 0.0, vIsTop);
+                        finalColor = mix(finalColor, u_color * 1.5, bottomHighlight);
+                        faceAlpha = mix(faceAlpha, alpha * 0.6, bottomHighlight);
+                    }
+                }
+                gl_FragColor = vec4(finalColor, faceAlpha);
             }
         `;
 
         const wireFragmentShader = `
             uniform vec3 u_color;
             varying vec2 vUv;
+            varying vec3 vLocalNormal;
             varying float vHeight;
 
             void main() {
-                // Fade out towards the back (vUv.y from 0 to 1)
+                // Only wireframe the top surface
+                if (vLocalNormal.y < 0.5) {
+                    discard;
+                }
+
                 float alphaFadeY = smoothstep(1.0, 0.0, vUv.y);
-                // Also fade out near left/right edges (vUv.x) to prevent exceeding side boundaries
-                float alphaFadeX = smoothstep(0.0, 0.1, vUv.x) * smoothstep(1.0, 0.9, vUv.x);
+                float alphaFadeX = smoothstep(0.0, 0.05, vUv.x) * smoothstep(1.0, 0.95, vUv.x);
                 float alphaFade = alphaFadeX * alphaFadeY;
 
                 vec3 peakColor = vec3(1.0, 1.0, 1.0);
-                // Shift to white at the very peaks
-                vec3 finalColor = mix(u_color * 0.8, peakColor, vHeight * 0.7);
+                // 网格线保持较高的饱和度，仅在极高动态时变白
+                vec3 finalColor = mix(u_color * 0.8, peakColor, pow(vHeight, 2.0));
 
-                float alpha = (0.15 + 0.85 * vHeight) * alphaFade;
+                float alpha = (0.2 + 0.8 * vHeight) * alphaFade;
+                alpha = min(1.0, alpha * 2.0); // 进一步增强网格线在高峰处的表现
+
                 gl_FragColor = vec4(finalColor, alpha);
             }
         `;
@@ -833,8 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
             blending: THREE.AdditiveBlending
         });
 
-        const geometry = new THREE.PlaneGeometry(30, 22, sizeX - 1, sizeY - 1);
-        geometry.rotateX(-Math.PI / 2);
+        const geometry = new THREE.BoxGeometry(30, 4, 22, sizeX - 1, 1, sizeY - 1);
 
         const group = new THREE.Group();
         group.add(new THREE.Mesh(geometry, solidMaterial));
@@ -853,37 +971,36 @@ document.addEventListener('DOMContentLoaded', () => {
             opacity: 0.08
         });
 
-        // 频率轴线 (X方向)
+        // 频率轴线 (X方向) - 地面网格
         const freqTicks = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
         freqTicks.forEach(freq => {
             const t = (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20));
             const x = -planeWidth / 2 + t * planeWidth;
 
             const linePoints = [
-                new THREE.Vector3(x, 0, 0),
-                new THREE.Vector3(x, 0, planeDepth)
+                new THREE.Vector3(x, 0.0, -planeDepth / 2),
+                new THREE.Vector3(x, 0.0, planeDepth / 2)
             ];
             const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
             const line = new THREE.Line(lineGeometry, gridLinesMaterial);
             group.add(line);
         });
 
-        // dB轴线 (Y方向)
+        // dB轴线 (Y方向) - 前墙网格
         for (let db = floorDb; db <= maxDb; db += 10) {
             const normY = (db - floorDb) / (maxDb - floorDb);
-            // Match the vertex shader intensity scalar to keep the background grid lines aligned
-            const y = normY * 6.5;
+            const yPos = 0.0 + normY * 6.5;
 
             const linePoints = [
-                new THREE.Vector3(-planeWidth / 2, y, 0),
-                new THREE.Vector3(planeWidth / 2, y, planeDepth)
+                new THREE.Vector3(-planeWidth / 2, yPos, planeDepth / 2 + 0.1),
+                new THREE.Vector3(planeWidth / 2, yPos, planeDepth / 2 + 0.1)
             ];
             const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
             const line = new THREE.Line(lineGeometry, gridLinesMaterial);
             group.add(line);
         }
 
-        // Position y = -1.5 slightly higher to avoid clipping with bottom UI elements
+        // Position slightly higher to avoid clipping with bottom UI elements
         group.position.set(0, -1.5, -4.0);
         // group.rotation.y = 0.06;
         webglScene.add(group);
@@ -1659,7 +1776,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateMobileVisualizerLayout() {
         if (window.innerWidth <= 768) {
             const mode = visualizationModes[currentVisualizationModeIndex]?.key;
-            if (isVisualizerVisible && (mode === 'polar' || mode === 'lissajous')) {
+            if (isVisualizerVisible && (mode === 'polar' || mode === 'lissajous' || mode === 'spectrogram3d')) {
                 playerContainer.classList.add('visualizer-fullscreen-mode');
             } else {
                 playerContainer.classList.remove('visualizer-fullscreen-mode');
