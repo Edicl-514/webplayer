@@ -30,6 +30,7 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: hidden;
     position: relative;
 }
@@ -837,6 +838,7 @@ body {
         width: 100%;
         max-width: none;
         height: 100vh;
+        height: 100dvh;
         max-height: none;
         aspect-ratio: auto;
         border-radius: 0;
@@ -903,7 +905,7 @@ body {
         flex-direction: column;
         gap: 15px;
         position: relative;
-        z-index: 4;
+        z-index: 10;
     }
 
     .extra-controls {

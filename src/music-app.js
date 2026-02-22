@@ -590,7 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     webglCamera.aspect = rect.width / rect.height;
 
                     // 移动端拉远半径，theta/phi 保持用户拖拽后的状态
-                    webglOrbit.radius = window.innerWidth <= 768 ? 62 : 48;
+                    webglOrbit.radius = window.innerWidth <= 768 ? 84 : 48;
                     updateWebGLCameraFromOrbit();
 
                     webglCamera.updateProjectionMatrix();

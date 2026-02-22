@@ -28,19 +28,40 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: hidden;
     position: relative;
 }
 
 /* 全局强制所有图标为白色（FontAwesome 等） */
-i, .fa, .fas, .far, .fal, .fab,
-i::before, .fa::before, .fas::before, .far::before, .fal::before, .fab::before {
+i,
+.fa,
+.fas,
+.far,
+.fal,
+.fab,
+i::before,
+.fa::before,
+.fas::before,
+.far::before,
+.fal::before,
+.fab::before {
     color: #FFFFFF !important;
 }
 
 /* 按钮内的图标继承按钮颜色 */
-button i, button .fa, button .fas, button .far, button .fal, button .fab,
-a i, a .fa, a .fas, a .far, a .fal, a .fab {
+button i,
+button .fa,
+button .fas,
+button .far,
+button .fal,
+button .fab,
+a i,
+a .fa,
+a .fas,
+a .far,
+a .fal,
+a .fab {
     color: inherit !important;
 }
 
@@ -54,8 +75,10 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     background-position: center;
     filter: blur(30px) brightness(0.3);
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    z-index: 1; /* 提高 z-index 以覆盖 body 的背景 */
-    background-color: var(--primary-bg); /* 添加一个背景色 */
+    z-index: 1;
+    /* 提高 z-index 以覆盖 body 的背景 */
+    background-color: var(--primary-bg);
+    /* 添加一个背景色 */
 }
 
 .player-container {
@@ -72,9 +95,11 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
         0 20px 50px var(--shadow-color),
         inset 0 0 1px rgba(255, 255, 255, 0.1);
     overflow-y: auto;
-    overflow-x: hidden; /* Prevent horizontal scrollbar */
+    overflow-x: hidden;
+    /* Prevent horizontal scrollbar */
     display: flex;
-    flex-direction: column; /* Change to column layout */
+    flex-direction: column;
+    /* Change to column layout */
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     backdrop-filter: blur(10px);
 }
@@ -85,7 +110,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .player-container::-webkit-scrollbar-track {
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
 
@@ -99,16 +124,19 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .player-main {
-   position: relative;
-   z-index: 2;
-   padding: 20px; /* Adjust padding */
-   display: flex;
-   flex-direction: column;
-   width: 100%; /* Full width */
-   /* height: 65%; */ /* Removed for scrolling */
-   flex-shrink: 0;
-   gap: 15px;
-   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), margin-right 0.3s ease-in-out;
+    position: relative;
+    z-index: 2;
+    padding: 20px;
+    /* Adjust padding */
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    /* Full width */
+    /* height: 65%; */
+    /* Removed for scrolling */
+    flex-shrink: 0;
+    gap: 15px;
+    transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), margin-right 0.3s ease-in-out;
 }
 
 .control-btn {
@@ -165,7 +193,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
         width: auto;
         /* 使用一个比16:9视频本身更高的宽高比（3:2），为标题栏和信息面板留出空间 */
         aspect-ratio: 3 / 2;
-        max-width: 90vw; /* 同时确保宽度不会超出屏幕 */
+        max-width: 90vw;
+        /* 同时确保宽度不会超出屏幕 */
     }
 }
 
@@ -225,7 +254,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 
 .subtitle-dropdown-content {
     position: absolute;
-    top: 120%; /* Changed from bottom */
+    top: 120%;
+    /* Changed from bottom */
     right: 0;
     transform: none;
     left: auto;
@@ -238,7 +268,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     transition: all 0.3s ease;
     min-width: 150px;
     z-index: 100;
-    max-height: 200px; /* Limit height and add scroll */
+    max-height: 200px;
+    /* Limit height and add scroll */
 }
 
 /* 新增：分组标题样式 */
@@ -246,13 +277,14 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     padding: 8px 15px;
     font-size: 13px;
     color: var(--accent-color);
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-    background: rgba(0,0,0,0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    background: rgba(0, 0, 0, 0.05);
 }
 
 /* 确保分组标题可读 */
 .subtitle-section-header {
-    color: #FFFFFF !important; /* 强制为白色而非主题色 */
+    color: #FFFFFF !important;
+    /* 强制为白色而非主题色 */
 }
 
 /* 新增：禁用项样式 */
@@ -267,7 +299,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 
 /* 确保禁用项仍然可读（使用浅灰色而非黑色） */
 .subtitle-dropdown-content a.disabled {
-    color: #999999 !important; /* 浅灰色，避免变黑 */
+    color: #999999 !important;
+    /* 浅灰色，避免变黑 */
 }
 
 /* 动作项现在使用默认链接样式以保持一致性 */
@@ -278,7 +311,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .subtitle-dropdown-content::-webkit-scrollbar-track {
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
 
@@ -294,7 +327,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 .subtitle-dropdown-content.show {
     opacity: 1;
     visibility: visible;
-    top: 110%; /* Changed from bottom */
+    top: 110%;
+    /* Changed from bottom */
 }
 
 .subtitle-dropdown-content a {
@@ -322,89 +356,95 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 
 /* Scraper Dropdown */
 .scraper-dropdown {
-   position: relative;
+    position: relative;
 }
 
 .scraper-dropdown-content {
-   position: absolute;
-   top: 120%;
-   right: 0;
-   background: var(--secondary-bg);
-   border-radius: 8px;
-   box-shadow: 0 4px 10px var(--shadow-color);
-   overflow: hidden;
-   opacity: 0;
-   visibility: hidden;
-   transition: all 0.3s ease;
-   min-width: 100px;
-   z-index: 100;
+    position: absolute;
+    top: 120%;
+    right: 0;
+    background: var(--secondary-bg);
+    border-radius: 8px;
+    box-shadow: 0 4px 10px var(--shadow-color);
+    overflow: hidden;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    min-width: 100px;
+    z-index: 100;
 }
 
 .scraper-dropdown-content.show {
-   opacity: 1;
-   visibility: visible;
-   top: 110%;
+    opacity: 1;
+    visibility: visible;
+    top: 110%;
 }
 
 .scraper-dropdown-content a {
-   display: block;
-   padding: 8px 15px;
-   cursor: pointer;
-   font-size: 14px;
-   color: var(--primary-text);
-   text-decoration: none;
-   transition: background-color 0.2s;
+    display: block;
+    padding: 8px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--primary-text);
+    text-decoration: none;
+    transition: background-color 0.2s;
 }
 
 .scraper-dropdown-content a:hover {
-   background-color: var(--accent-color);
-   color: var(--accent-text-color);
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
 }
 
 /* Video Info Panel (previously Sidebar) */
 .video-info-panel {
-   width: 100%;
-   /* height: 35%; */ /* Removed for scrolling */
-   padding: 20px;
-   background-color: rgba(0, 0, 0, 0.2);
-   border-top: 1px solid rgba(255, 255, 255, 0.1);
-   display: flex;
-   flex-direction: column;
-   transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    width: 100%;
+    /* height: 35%; */
+    /* Removed for scrolling */
+    padding: 20px;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .panel-title {
-   font-size: 20px;
-   font-weight: 500;
-   padding-bottom: 10px;
-   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-   margin-bottom: 10px;
-   flex-shrink: 0; /* Prevent title from shrinking */
-   color: #FFFFFF !important; /* 强制为白色，避免深色滤镜影响 */
+    font-size: 20px;
+    font-weight: 500;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 10px;
+    flex-shrink: 0;
+    /* Prevent title from shrinking */
+    color: #FFFFFF !important;
+    /* 强制为白色，避免深色滤镜影响 */
 }
 
 .panel-content {
-   /* flex-grow: 1; */ /* Removed for scrolling */
-   /* overflow-y: auto; */ /* Removed for scrolling */
-   padding-right: 10px; /* For scrollbar spacing */
+    /* flex-grow: 1; */
+    /* Removed for scrolling */
+    /* overflow-y: auto; */
+    /* Removed for scrolling */
+    padding-right: 10px;
+    /* For scrollbar spacing */
 }
 
 .panel-content::-webkit-scrollbar {
-   width: 8px;
+    width: 8px;
 }
 
 .panel-content::-webkit-scrollbar-track {
-   background: rgba(0,0,0,0.2);
-   border-radius: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
 }
 
 .panel-content::-webkit-scrollbar-thumb {
-   background: var(--accent-color);
-   border-radius: 4px;
+    background: var(--accent-color);
+    border-radius: 4px;
 }
 
 .panel-content::-webkit-scrollbar-thumb:hover {
-   background: var(--accent-hover);
+    background: var(--accent-hover);
 }
 
 /* Styles for scraped data display */
@@ -437,7 +477,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 /* 新增：确保来源标题内的文本节点也为白色 */
 .source-container h3,
 .source-container h3 * {
-    color: #FFFFFF !important; /* 强制标题和其子元素为白色 */
+    color: #FFFFFF !important;
+    /* 强制标题和其子元素为白色 */
 }
 
 /* 刮削信息来源的删除按钮 */
@@ -451,9 +492,11 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     padding: 0 12px;
     border-radius: 50%;
     line-height: 1;
-    opacity: 0; /* 默认隐藏 */
+    opacity: 0;
+    /* 默认隐藏 */
     transition: opacity 0.2s, color 0.2s, transform 0.2s;
-    flex-shrink: 0; /* 防止按钮被压缩 */
+    flex-shrink: 0;
+    /* 防止按钮被压缩 */
 }
 
 .source-container:hover .delete-source-btn {
@@ -463,11 +506,13 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 
 .delete-source-btn:hover {
     opacity: 1;
-    color: #ff4b2b; /* 红色以示危险操作 */
+    color: #ff4b2b;
+    /* 红色以示危险操作 */
     transform: scale(1.1);
 }
 
-.image-container img, .image-gallery img {
+.image-container img,
+.image-gallery img {
     max-width: 100%;
     height: auto;
     border-radius: 8px;
@@ -477,11 +522,13 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     cursor: zoom-in;
 }
 
-.image-gallery a:hover img, .image-container a:hover img {
+.image-gallery a:hover img,
+.image-container a:hover img {
     transform: scale(1.05);
 }
 
-.image-gallery a:active img, .image-container a:active img {
+.image-gallery a:active img,
+.image-container a:active img {
     transform: scale(0.98);
     transition: transform 0.1s ease;
 }
@@ -499,55 +546,59 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .info-list {
-   list-style-type: none;
-   padding-left: 0;
+    list-style-type: none;
+    padding-left: 0;
 }
 
 .info-list li {
-   margin-bottom: 10px;
-   font-size: 14px;
+    margin-bottom: 10px;
+    font-size: 14px;
 }
 
 .info-list li strong {
-   color: var(--accent-color);
-   display: block;
-   margin-bottom: 4px;
+    color: var(--accent-color);
+    display: block;
+    margin-bottom: 4px;
 }
 
-.info-list li span, .info-list li a {
-   color: var(--primary-text);
-   word-break: break-word;
+.info-list li span,
+.info-list li a {
+    color: var(--primary-text);
+    word-break: break-word;
 }
 
 /* Ensure scraped info values are always readable - force white text
     Keys (strong) keep the accent color. Use !important to override any dark filters or theme changes. */
 .info-list li span {
-    color: #FFFFFF !important; /* 强制为白色，不使用变量 */
+    color: #FFFFFF !important;
+    /* 强制为白色，不使用变量 */
 }
 
 /* Links inside scraped info should also remain white and preserve hover behavior */
 .info-list li a {
-    color: #FFFFFF !important; /* 强制为白色，不使用变量 */
+    color: #FFFFFF !important;
+    /* 强制为白色，不使用变量 */
     text-decoration: none;
 }
 
 .info-list li a:hover {
     color: var(--accent-hover) !important;
-    background: transparent !important; /* prevent dark hover backgrounds from appearing */
+    background: transparent !important;
+    /* prevent dark hover backgrounds from appearing */
 }
 
 .info-list li a {
-   text-decoration: none;
-   border-bottom: 1px dotted var(--accent-color);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--accent-color);
 }
 
 .info-list li a:hover {
-   color: var(--accent-hover);
+    color: var(--accent-hover);
 }
 
 .info-list ul {
-   padding-left: 20px;
-   margin-top: 5px;
+    padding-left: 20px;
+    margin-top: 5px;
 }
 
 /* DPlayer Style Overrides */
@@ -570,7 +621,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .dplayer-volume .dplayer-volume-bar-wrap .dplayer-volume-bar {
-     background: rgba(255, 255, 255, 0.2) !important;
+    background: rgba(255, 255, 255, 0.2) !important;
 }
 
 .dplayer-volume .dplayer-volume-bar-wrap .dplayer-volume-bar .dplayer-volume-bar-inner {
@@ -583,12 +634,18 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     box-shadow: 0 4px 10px var(--shadow-color);
 }
 
-.dplayer-controller .dplayer-icon, .dplayer-quality-item, .dplayer-speed-item, .dplayer-setting-item {
+.dplayer-controller .dplayer-icon,
+.dplayer-quality-item,
+.dplayer-speed-item,
+.dplayer-setting-item {
     color: var(--primary-text) !important;
     transition: all 0.2s ease;
 }
 
-.dplayer-controller .dplayer-icon:hover, .dplayer-quality-item:hover, .dplayer-speed-item:hover, .dplayer-setting-item:hover {
+.dplayer-controller .dplayer-icon:hover,
+.dplayer-quality-item:hover,
+.dplayer-speed-item:hover,
+.dplayer-setting-item:hover {
     color: var(--accent-color) !important;
     background: transparent !important;
 }
@@ -597,8 +654,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     background: var(--accent-color) !important;
 }
 
-.dplayer-setting .dplayer-setting-box .dplayer-setting-item.dplayer-setting-item-active .dplayer-label{
-     color: var(--primary-bg) !important;
+.dplayer-setting .dplayer-setting-box .dplayer-setting-item.dplayer-setting-item-active .dplayer-label {
+    color: var(--primary-bg) !important;
 }
 
 /* Modal styles for conversion */
@@ -610,7 +667,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0,0,0,0.8);
+    background-color: rgba(0, 0, 0, 0.8);
     backdrop-filter: blur(5px);
     display: flex;
     align-items: center;
@@ -621,7 +678,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 .modal-content {
     background-color: var(--secondary-bg);
     padding: 30px;
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     width: 90%;
     max-width: 500px;
     border-radius: 15px;
@@ -638,10 +695,10 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .modal-content p {
-     margin-bottom: 25px;
- }
+    margin-bottom: 25px;
+}
 
- #closeSettingsBtn {
+#closeSettingsBtn {
     background: var(--accent-color);
     border: none;
     color: var(--accent-text-color);
@@ -650,13 +707,15 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     cursor: pointer;
     font-size: 16px;
     transition: all 0.3s ease;
- }
+}
 
- #closeSettingsBtn:hover {
+#closeSettingsBtn:hover {
     background: var(--accent-hover);
- }
- 
- #startConversionBtn, #cancelConversionBtn, #modalDownloadBtn {
+}
+
+#startConversionBtn,
+#cancelConversionBtn,
+#modalDownloadBtn {
     background: none;
     border: 1px solid var(--primary-text);
     color: var(--primary-text);
@@ -667,7 +726,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     transition: all 0.3s ease;
 }
 
-#startConversionBtn:hover, #modalDownloadBtn:hover {
+#startConversionBtn:hover,
+#modalDownloadBtn:hover {
     background: var(--accent-color);
     border-color: var(--accent-color);
     color: var(--accent-text-color);
@@ -678,22 +738,24 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
     border-color: #ff4b2b;
     color: white;
 }
+
 .progress-bar-container {
     width: 100%;
-    background-color: rgba(0,0,0,0.3);
+    background-color: rgba(0, 0, 0, 0.3);
     border-radius: 5px;
     overflow: hidden;
 }
+
 .progress-bar-inner {
-     width: 0%;
-     height: 30px;
-     background-color: var(--accent-color);
-     text-align: center;
-     line-height: 30px;
-     color: var(--primary-bg);
-     border-radius: 5px;
-     transition: width 0.3s ease;
- }
+    width: 0%;
+    height: 30px;
+    background-color: var(--accent-color);
+    text-align: center;
+    line-height: 30px;
+    color: var(--primary-bg);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
 
 /* Settings Modal Styles */
 #settingsModal .modal-content {
@@ -735,7 +797,7 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 }
 
 .settings-list::-webkit-scrollbar-track {
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
 
@@ -788,7 +850,8 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 .setting-item label {
     font-size: 16px;
     padding-right: 15px;
-    color: #FFFFFF !important; /* 强制设置项标签为白色 */
+    color: #FFFFFF !important;
+    /* 强制设置项标签为白色 */
 }
 
 /* 强制所有设置相关文本为白色 */
@@ -802,66 +865,66 @@ a i, a .fa, a .fas, a .far, a .fal, a .fab {
 
 /* The switch - a checkbox with a custom slider */
 .switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 28px;
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
 }
 
 .switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
+    opacity: 0;
+    width: 0;
+    height: 0;
 }
 
 .slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #444;
-  -webkit-transition: .4s;
-  transition: .4s;
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #444;
+    -webkit-transition: .4s;
+    transition: .4s;
 }
 
 .slider:before {
-  position: absolute;
-  content: "";
-  height: 20px;
-  width: 20px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  -webkit-transition: .4s;
-  transition: .4s;
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    -webkit-transition: .4s;
+    transition: .4s;
 }
 
-input:checked + .slider {
-  background-color: var(--accent-color);
+input:checked+.slider {
+    background-color: var(--accent-color);
 }
 
-input:focus + .slider {
-  box-shadow: 0 0 1px var(--accent-color);
+input:focus+.slider {
+    box-shadow: 0 0 1px var(--accent-color);
 }
 
-input:checked + .slider:before {
-  -webkit-transform: translateX(22px);
-  -ms-transform: translateX(22px);
-  transform: translateX(22px);
+input:checked+.slider:before {
+    -webkit-transform: translateX(22px);
+    -ms-transform: translateX(22px);
+    transform: translateX(22px);
 }
 
 /* Rounded sliders */
 .slider.round {
-  border-radius: 28px;
+    border-radius: 28px;
 }
 
 .slider.round:before {
-  border-radius: 50%;
+    border-radius: 50%;
 }
- 
- /* --- Responsive Design for Mobile --- */
+
+/* --- Responsive Design for Mobile --- */
 @media (max-width: 768px) {
     body {
         align-items: flex-start;
@@ -870,6 +933,7 @@ input:checked + .slider:before {
     .player-container.video-mode {
         width: 100%;
         height: 100vh;
+        height: 100dvh;
         max-height: none;
         border-radius: 0;
         max-width: none;
@@ -890,7 +954,7 @@ input:checked + .slider:before {
     .video-title {
         font-size: 20px;
     }
-    
+
     .video-controls-right {
         width: 100%;
         justify-content: space-between;
@@ -899,12 +963,15 @@ input:checked + .slider:before {
     .video-content-area {
         height: auto;
         flex-grow: 1;
-        min-height: 0; /* Allow shrinking */
+        min-height: 0;
+        /* Allow shrinking */
     }
-    
+
     .dplayer-subtitle {
-        font-size: 3.5vw !important; /* Adjust subtitle font size for mobile */
-        bottom: 8% !important; /* Raise subtitles slightly on mobile */
+        font-size: 3.5vw !important;
+        /* Adjust subtitle font size for mobile */
+        bottom: 8% !important;
+        /* Raise subtitles slightly on mobile */
     }
 
     .scraper-dropdown-content,
@@ -915,9 +982,10 @@ input:checked + .slider:before {
 
     .subtitle-dropdown-content {
         bottom: auto;
-        top: 110%; /* Position below the button on mobile */
+        top: 110%;
+        /* Position below the button on mobile */
     }
-    
+
     .subtitle-dropdown-content.show {
         bottom: auto;
         top: 110%;
@@ -956,12 +1024,15 @@ input:checked + .slider:before {
     margin-left: 8px;
     border-top: 6px solid transparent;
     border-bottom: 6px solid transparent;
-    border-left: 6px solid var(--primary-text); /* 指向右侧箭头 */
+    border-left: 6px solid var(--primary-text);
+    /* 指向右侧箭头 */
     transform-origin: center;
     transition: transform 0.2s ease, border-left-color 0.2s;
 }
+
 .subtitle-local-toggle.open::after {
-    transform: rotate(180deg); /* 箭头向左（视觉上表现为打开） */
+    transform: rotate(180deg);
+    /* 箭头向左（视觉上表现为打开） */
     border-left-color: var(--accent-color);
 }
 
@@ -972,14 +1043,16 @@ input:checked + .slider:before {
 
 /* 浮动的同文件夹字幕子菜单（桌面：右侧弹出） */
 .subtitle-local-submenu {
-    position: fixed; /* 改为 fixed，避免被父容器裁剪或受滚动影响 */
+    position: fixed;
+    /* 改为 fixed，避免被父容器裁剪或受滚动影响 */
     top: 0;
     left: 0;
     min-width: 180px;
     background: var(--secondary-bg);
     border-radius: 8px;
     box-shadow: 0 6px 12px var(--shadow-color);
-    padding: 6px 5px; /* 增加左右内边距以容纳按钮的放大效果 */
+    padding: 6px 5px;
+    /* 增加左右内边距以容纳按钮的放大效果 */
     z-index: 10000;
     display: none;
     max-height: 60vh;
@@ -995,7 +1068,8 @@ input:checked + .slider:before {
     font-size: 14px;
     color: var(--primary-text);
     text-decoration: none;
-    white-space: nowrap; /* 保持单行，超出显示省略或滚动 */
+    white-space: nowrap;
+    /* 保持单行，超出显示省略或滚动 */
     overflow: hidden;
     text-overflow: ellipsis;
     transition: background-color 0.2s, color 0.2s;
@@ -1006,6 +1080,7 @@ input:checked + .slider:before {
 .subtitle-local-toggle {
     color: #FFFFFF !important;
 }
+
 .subtitle-local-submenu a:hover {
     background-color: var(--accent-color);
     color: var(--accent-text-color);
@@ -1025,13 +1100,16 @@ input:checked + .slider:before {
 
 /* 容器内的链接样式调整 */
 .subtitle-menu-item-container a {
-    flex-grow: 1; /* 占据尽可能多的空间 */
-    padding-right: 10px; /* 与删除按钮保持间距 */
+    flex-grow: 1;
+    /* 占据尽可能多的空间 */
+    padding-right: 10px;
+    /* 与删除按钮保持间距 */
 }
 
 .subtitle-menu-item-container:hover a {
     color: var(--accent-text-color);
-    background-color: transparent; /* 避免双重背景色 */
+    background-color: transparent;
+    /* 避免双重背景色 */
 }
 
 /* 删除按钮样式 */
@@ -1045,9 +1123,11 @@ input:checked + .slider:before {
     padding: 0 12px;
     border-radius: 50%;
     line-height: 1;
-    opacity: 0; /* 默认隐藏 */
+    opacity: 0;
+    /* 默认隐藏 */
     transition: opacity 0.2s, color 0.2s, transform 0.2s;
-    flex-shrink: 0; /* 防止按钮被压缩 */
+    flex-shrink: 0;
+    /* 防止按钮被压缩 */
 }
 
 /* 容器悬停时显示删除按钮 */
@@ -1058,7 +1138,8 @@ input:checked + .slider:before {
 
 .delete-subtitle-btn:hover {
     opacity: 1;
-    color: #ff4b2b; /* 红色以示危险操作 */
+    color: #ff4b2b;
+    /* 红色以示危险操作 */
     transform: scale(1.1);
 }
 
@@ -1100,7 +1181,7 @@ input:checked + .slider:before {
 }
 
 .player-container.chat-mode .player-main {
-   margin-right: 320px;
+    margin-right: 320px;
 }
 
 .chat-container {
@@ -1108,7 +1189,8 @@ input:checked + .slider:before {
     flex-direction: column;
     height: 100%;
     width: 100%;
-    overflow: hidden; /* Prevent content from spilling out */
+    overflow: hidden;
+    /* Prevent content from spilling out */
 }
 
 .chat-header {
@@ -1119,13 +1201,15 @@ input:checked + .slider:before {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--primary-text);
     flex-shrink: 0;
-    background-color: rgba(0,0,0,0.2);
+    background-color: rgba(0, 0, 0, 0.2);
     border-top-left-radius: 15px;
 }
+
 .chat-header h3 {
     margin: 0;
     font-size: 16px;
-    color: #FFFFFF !important; /* 强制聊天标题为白色 */
+    color: #FFFFFF !important;
+    /* 强制聊天标题为白色 */
 }
 
 /* 强制聊天相关文本为白色 */
@@ -1136,6 +1220,7 @@ input:checked + .slider:before {
 .chat-confirm-btn {
     color: #FFFFFF !important;
 }
+
 #closeChatBtn {
     background: none;
     border: none;
@@ -1169,19 +1254,22 @@ input:checked + .slider:before {
     color: var(--primary-text);
     padding: 15px;
     scrollbar-width: thin;
-    scrollbar-color: var(--accent-color) rgba(0,0,0,0.2);
+    scrollbar-color: var(--accent-color) rgba(0, 0, 0, 0.2);
 }
 
 .chat-messages::-webkit-scrollbar {
     width: 8px;
 }
+
 .chat-messages::-webkit-scrollbar-track {
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
 }
+
 .chat-messages::-webkit-scrollbar-thumb {
     background: var(--accent-color);
     border-radius: 4px;
 }
+
 .chat-messages::-webkit-scrollbar-thumb:hover {
     background: var(--accent-hover);
 }
@@ -1190,13 +1278,13 @@ input:checked + .slider:before {
     display: flex;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     padding: 10px;
-    background-color: rgba(0,0,0,0.2);
+    background-color: rgba(0, 0, 0, 0.2);
     border-bottom-left-radius: 15px;
 }
 
 #chatInput {
     flex-grow: 1;
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     border: 1px solid #333;
     color: #fff;
     padding: 10px 15px;
@@ -1205,9 +1293,10 @@ input:checked + .slider:before {
     outline: none;
     transition: border-color 0.2s;
 }
+
 #chatInput:focus {
-     border-color: var(--accent-color);
- }
+    border-color: var(--accent-color);
+}
 
 #sendChatBtn {
     background: var(--accent-color);
@@ -1235,8 +1324,8 @@ input:checked + .slider:before {
 }
 
 #sendChatBtn:disabled {
-   background: #555;
-   cursor: not-allowed;
+    background: #555;
+    cursor: not-allowed;
 }
 
 #sendChatBtn:disabled i,
@@ -1250,23 +1339,28 @@ input:checked + .slider:before {
     border-radius: 18px;
     max-width: 90%;
     word-wrap: break-word;
-    display: flex; /* Use flex for alignment */
+    display: flex;
+    /* Use flex for alignment */
     flex-direction: column;
 }
+
 .user-message {
     background-color: var(--accent-color);
     color: var(--accent-text-color, #1a1a1a);
     align-self: flex-end;
 }
+
 .bot-message {
     background-color: #2a2a2a;
     align-self: flex-start;
 }
+
 .error-message {
-     background-color: #4e2a2a;
-     color: #ffbaba;
-     align-self: flex-start;
+    background-color: #4e2a2a;
+    color: #ffbaba;
+    align-self: flex-start;
 }
+
 .search-result-item {
     cursor: pointer;
     padding: 8px 12px;
@@ -1275,9 +1369,11 @@ input:checked + .slider:before {
     transition: background-color 0.2s;
     border: 1px solid #3a3a3a;
 }
+
 .search-result-item:hover {
     background-color: #383838;
 }
+
 .search-result-item .timestamp {
     font-weight: bold;
     color: var(--accent-color);
@@ -1352,7 +1448,8 @@ input:checked + .slider:before {
     transition: background-color 0.2s, color 0.2s, border-color 0.2s;
     margin-top: 10px;
     font-size: 12px;
-    margin-right: 5px; /* Add some space between buttons */
+    margin-right: 5px;
+    /* Add some space between buttons */
 }
 
 .chat-confirm-btn:hover {
@@ -1360,6 +1457,7 @@ input:checked + .slider:before {
     color: #fff;
     border-color: #777;
 }
+
 /* Model Status Styles */
 .model-status-category {
     margin-bottom: 15px;
