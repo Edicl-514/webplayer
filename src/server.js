@@ -2760,13 +2760,17 @@ const requestHandler = async (req, res) => {
     if (typeof global.activeMusicScrapeTask === 'undefined') {
         global.activeMusicScrapeTask = null;
     }
+    if (typeof global.activeTranscriptionTask === 'undefined') {
+        global.activeTranscriptionTask = null;
+    }
 
     if (pathname === '/api/scrape-status' && req.method === 'GET') {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({
             videoScrape: global.activeVideoScrapeTask,
-            musicScrape: global.activeMusicScrapeTask
+            musicScrape: global.activeMusicScrapeTask,
+            transcriptionTask: global.activeTranscriptionTask
         }));
         return;
     }
@@ -2994,6 +2998,75 @@ const requestHandler = async (req, res) => {
                     res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
                 }
                 console.error('Error starting scrape-music-directory process:', e);
+            }
+        });
+        return;
+    }
+
+    if (pathname === '/api/transcribe-directory' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', async () => {
+            try {
+                const { path: relativePath, mediaDir, fileType, model, modelSource, language, task: transcribeTask, vadFilter, denseSubtitles, maxCharsPerLine } = JSON.parse(body);
+                const fullPath = path.join(mediaDir, relativePath);
+
+                console.log(`[Transcribe] Starting batch transcription for path: ${fullPath}, fileType: ${fileType}`);
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, message: 'Transcription process started.' }));
+
+                (async () => {
+                    try {
+                        const mediaFiles = await findMediaFilesForTranscription(fullPath, fileType || 'all');
+                        console.log(`[Transcribe] Found ${mediaFiles.length} files`);
+
+                        const fileTasks = mediaFiles.map((filePath, index) => ({
+                            id: `transcribe_${index}_${Date.now()}`,
+                            path: filePath,
+                            name: path.relative(fullPath, filePath) || path.basename(filePath)
+                        }));
+
+                        global.activeTranscriptionTask = {
+                            files: fileTasks.map(f => ({ id: f.id, name: f.name, status: 'waiting', result: null })),
+                            isFinished: false
+                        };
+
+                        broadcast({ type: 'transcribe_start', files: fileTasks.map(f => ({ id: f.id, name: f.name })) });
+
+                        for (const fileTask of fileTasks) {
+                            const activeTaskFile = global.activeTranscriptionTask.files.find(f => f.id === fileTask.id);
+                            if (activeTaskFile) activeTaskFile.status = 'processing';
+                            broadcast({ type: 'transcribe_progress', file: { id: fileTask.id, name: fileTask.name } });
+
+                            const result = await transcribeFileWithFallback(fileTask.path, {
+                                model: model || 'large-v3',
+                                modelSource: modelSource || 'pretrained',
+                                language, task: transcribeTask, vadFilter, denseSubtitles, maxCharsPerLine
+                            });
+
+                            if (activeTaskFile) {
+                                activeTaskFile.status = 'complete';
+                                activeTaskFile.result = result;
+                            }
+                            broadcast({ type: 'transcribe_complete', file: { id: fileTask.id, name: fileTask.name }, result });
+                        }
+                        if (global.activeTranscriptionTask) global.activeTranscriptionTask.isFinished = true;
+                        broadcast({ type: 'transcribe_finished_all' });
+                    } catch (bgError) {
+                        console.error('[Transcribe] Background task error:', bgError);
+                        if (global.activeTranscriptionTask) global.activeTranscriptionTask.isFinished = true;
+                        broadcast({ type: 'transcribe_error', message: '转录过程出错', details: bgError.message });
+                    }
+                })();
+            } catch (e) {
+                if (!res.headersSent) {
+                    res.statusCode = 400;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, message: 'Invalid JSON request.' }));
+                }
+                console.error('Error starting transcribe-directory process:', e);
             }
         });
         return;
@@ -4300,6 +4373,122 @@ function proxySubtitleTaskToPython(req, res, targetPath, taskType) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: 'Invalid request body' }));
         }
+    });
+}
+
+// --- 批量字幕转录功能 ---
+async function findMediaFilesForTranscription(dir, fileType) {
+    let files = [];
+    const videoExtensions = [
+        '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v',
+        '.ts', '.m2ts', '.rmvb', '.mpg', '.mpeg', '.3gp', '.m2p', '.mxf', '.dv'
+    ];
+    const audioExtensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.opus', '.wma', '.ape'];
+    let allowedExtensions;
+    if (fileType === 'video') allowedExtensions = videoExtensions;
+    else if (fileType === 'audio') allowedExtensions = audioExtensions;
+    else allowedExtensions = [...videoExtensions, ...audioExtensions];
+
+    try {
+        const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+        for (const dirent of dirents) {
+            const resolvedPath = path.resolve(dir, dirent.name);
+            try {
+                const stats = await fs.promises.stat(resolvedPath);
+                if (stats.isDirectory()) {
+                    files = files.concat(await findMediaFilesForTranscription(resolvedPath, fileType));
+                } else if (stats.isFile()) {
+                    if (allowedExtensions.includes(path.extname(dirent.name).toLowerCase())) {
+                        files.push(resolvedPath);
+                    }
+                }
+            } catch (statError) {
+                console.error(`Error accessing ${resolvedPath}:`, statError.message);
+            }
+        }
+    } catch (error) {
+        console.error(`Error reading directory ${dir}:`, error);
+        broadcast({ type: 'transcribe_error', message: `读取目录失败: ${dir}` });
+    }
+    return files;
+}
+
+function transcribeFileWithFallback(filePath, options) {
+    return new Promise((resolve) => {
+        const { model, modelSource, language, task, vadFilter, denseSubtitles, maxCharsPerLine } = options;
+
+        const flaskData = {
+            videoPath: filePath,
+            model: model || 'large-v3',
+            modelSource: modelSource || 'pretrained',
+            language: language || null,
+            task: task || 'transcribe',
+            vadFilter: !!vadFilter,
+            denseSubtitles: !!denseSubtitles,
+            maxCharsPerLine: maxCharsPerLine || 30
+        };
+
+        const flaskBody = JSON.stringify(flaskData);
+
+        const fallbackToSpawn = () => {
+            const args = [path.join(__dirname, 'generate_subtitle.py'), filePath];
+            if (modelSource) args.push('--model-source', modelSource);
+            if (model) args.push('--model', model);
+            if (task) args.push('--task', task);
+            if (language && language !== 'None') args.push('--language', language);
+            if (vadFilter) args.push('--vad-filter');
+            if (denseSubtitles) args.push('--dense-subtitles');
+            if (maxCharsPerLine) args.push('--max-chars-per-line', String(maxCharsPerLine));
+
+            const pythonProcess = spawn('python', args, {
+                env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+            });
+            let stdoutData = '';
+            let stderrData = '';
+            pythonProcess.stdout.on('data', d => { stdoutData += d.toString(); console.log(`[Transcribe] ${d.toString().trim()}`); });
+            pythonProcess.stderr.on('data', d => { stderrData += d.toString(); });
+            pythonProcess.on('close', code => {
+                const vttMatch = stdoutData.match(/字幕已保存为\s*VTT\s*格式:\s*(.+?)(?:\r?\n|$)/);
+                if (vttMatch) {
+                    resolve({ success: true, vtt_file: vttMatch[1].trim() });
+                } else if (code === 0) {
+                    resolve({ success: true });
+                } else {
+                    resolve({ success: false, error: `转录失败 (code ${code})`, details: stderrData });
+                }
+            });
+        };
+
+        // Try Flask first (has loaded model, faster)
+        const proxyReq = http.request({
+            hostname: '127.0.0.1',
+            port: 5000,
+            path: '/api/transcribe_video',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(flaskBody) }
+        }, proxyRes => {
+            if (proxyRes.statusCode === 404) {
+                fallbackToSpawn();
+                return;
+            }
+            let responseBody = '';
+            proxyRes.on('data', d => { responseBody += d.toString(); });
+            proxyRes.on('end', () => {
+                try {
+                    const result = JSON.parse(responseBody);
+                    resolve({ success: result.success !== false, vtt_file: result.vtt_file, error: result.message });
+                } catch (e) {
+                    resolve({ success: false, error: '无法解析Flask响应', details: responseBody });
+                }
+            });
+        });
+
+        proxyReq.on('error', () => {
+            console.log('[Transcribe] Flask not available, using spawn fallback.');
+            fallbackToSpawn();
+        });
+        proxyReq.write(flaskBody);
+        proxyReq.end();
     });
 }
 

@@ -797,6 +797,147 @@
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.5);
         }
 
+        #transcribeManagerButton {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: linear-gradient(to right, #17a2b8, #138496);
+            color: white;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        #transcribeManagerButton:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 12px rgba(23, 162, 184, 0.6);
+        }
+
+        #transcribeManagerButton:active {
+            transform: scale(0.97);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        #transcribe-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 480px;
+            max-height: 65vh;
+            background-color: rgba(60, 60, 63, 0.90);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            z-index: 1002;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            color: #e0e0e0;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        #transcribe-panel.hidden {
+            display: none;
+        }
+
+        #transcribe-panel h2 {
+            margin-top: 0;
+            color: #17a2b8;
+            text-align: center;
+        }
+
+        #transcribe-panel .panel-close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #e0e0e0;
+            font-size: 1.5em;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .transcribe-controls {
+            margin-bottom: 12px;
+        }
+
+        .transcribe-controls p {
+            margin: 6px 0 4px;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+
+        .transcribe-type-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 4px 0;
+        }
+
+        .transcribe-type-options label {
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        #transcribe-model-select {
+            width: 100%;
+            padding: 6px 8px;
+            background: rgba(45, 45, 48, 0.9);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 0.9em;
+            margin-top: 4px;
+        }
+
+        #transcribe-language-input {
+            width: 100%;
+            padding: 6px 8px;
+            background: rgba(45, 45, 48, 0.9);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 0.9em;
+            margin-top: 4px;
+            box-sizing: border-box;
+        }
+
+        #startTranscribeButton {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(to right, #17a2b8, #138496);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            margin-top: 8px;
+        }
+
+        #startTranscribeButton:hover {
+            transform: scale(1.02);
+        }
+
+        #transcribe-task-list li {
+            padding: 8px 5px;
+            border-bottom: 1px solid #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #transcribe-task-list li:last-child {
+            border-bottom: none;
+        }
+
+        .task-status-processing {
+            color: #17a2b8;
+        }
+
         #scraper-panel {
             position: fixed;
             bottom: 20px;
@@ -932,6 +1073,7 @@
         <button id="cacheManagerButton">缓存管理</button>
         <button id="scraperManagerButton">视频刮削</button>
         <button id="musicScraperManagerButton">音乐刮削</button>
+        <button id="transcribeManagerButton">字幕转录</button>
         <!-- 缓存信息面板 -->
         <div id="cache-info-panel">
             <h2>缓存管理</h2>
@@ -2415,6 +2557,47 @@
                     } else if (data.type === 'music_scrape_error') {
                         const musicScraperTaskList = document.getElementById('music-scraper-task-list');
                         musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '&quot;')}">错误: ${data.message}</span></li>`;
+                    } else if (data.type === 'transcribe_start') {
+                        const transcribeTaskList = document.getElementById('transcribe-task-list');
+                        transcribeTaskList.innerHTML = '';
+                        if (data.files && data.files.length > 0) {
+                            data.files.forEach(file => {
+                                const li = document.createElement('li');
+                                li.id = `transcribe-task-${file.id}`;
+                                let displayName = file.name;
+                                if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
+                                li.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">等待中</span>`;
+                                transcribeTaskList.appendChild(li);
+                            });
+                        } else {
+                            transcribeTaskList.innerHTML = '<li><span class="task-status task-status-failed">未找到任何媒体文件</span></li>';
+                        }
+                    } else if (data.type === 'transcribe_progress') {
+                        const taskItem = document.getElementById(`transcribe-task-${data.file.id}`);
+                        if (taskItem) {
+                            let displayName = data.file.name;
+                            if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
+                            taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-processing">转录中...</span>`;
+                        }
+                    } else if (data.type === 'transcribe_complete') {
+                        const taskItem = document.getElementById(`transcribe-task-${data.file.id}`);
+                        if (taskItem) {
+                            let displayName = data.file.name;
+                            if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
+                            if (data.result.success) {
+                                taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-success">完成</span>`;
+                            } else {
+                                taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || '未知错误'}</span>`;
+                            }
+                        }
+                    } else if (data.type === 'transcribe_finished_all') {
+                        const transcribeTaskList = document.getElementById('transcribe-task-list');
+                        const li = document.createElement('li');
+                        li.innerHTML = `<strong>所有转录任务已完成!</strong>`;
+                        transcribeTaskList.appendChild(li);
+                    } else if (data.type === 'transcribe_error') {
+                        const transcribeTaskList = document.getElementById('transcribe-task-list');
+                        transcribeTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed" title="${(data.details || '').replace(/"/g, '&quot;')}">错误: ${data.message}</span></li>`;
                     }
                 };
 
@@ -2473,6 +2656,25 @@
                         musicScraperTaskList.appendChild(li);
                     });
                 }
+                const transcribeTaskList = document.getElementById('transcribe-task-list');
+                if (data.transcriptionTask && !data.transcriptionTask.isFinished && transcribeTaskList) {
+                    transcribeTaskList.innerHTML = '';
+                    data.transcriptionTask.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.id = `transcribe-task-${file.id}`;
+                        let displayName = file.name;
+                        if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
+                        let statusHtml = '';
+                        if (file.status === 'waiting') statusHtml = '<span class="task-status task-status-waiting">等待中</span>';
+                        else if (file.status === 'processing') statusHtml = '<span class="task-status task-status-processing">转录中...</span>';
+                        else if (file.status === 'complete') {
+                            if (file.result && file.result.success) statusHtml = '<span class="task-status task-status-success">完成</span>';
+                            else statusHtml = `<span class="task-status task-status-failed" title="${(file.result?.details || '').replace(/"/g, '&quot;')}">失败: ${file.result?.error || '未知错误'}</span>`;
+                        }
+                        li.innerHTML = `<span class="task-name">${displayName}</span> ${statusHtml}`;
+                        transcribeTaskList.appendChild(li);
+                    });
+                }
             }).catch(e => console.error('[Scraping Status] Failed to fetch:', e));
 
             // 音乐刮削
@@ -2524,6 +2726,104 @@
                     // 成功时不设置任何内容，由 WebSocket music_scrape_start 消息接管
                 } catch (error) {
                     musicScraperTaskList.innerHTML = `<li><span class="task-name"></span><span class="task-status task-status-failed">启动音乐刮削任务时出错: ${error.message}</span></li>`;
+                }
+            };
+
+            // 字幕转录
+            const transcribeManagerButton = document.getElementById('transcribeManagerButton');
+            const transcribePanel = document.getElementById('transcribe-panel');
+            const closeTranscribePanelButton = document.getElementById('closeTranscribePanelButton');
+            const startTranscribeButton = document.getElementById('startTranscribeButton');
+            const transcribeModelSelect = document.getElementById('transcribe-model-select');
+
+            async function loadTranscriptionModels() {
+                try {
+                    const res = await fetch('/api/models');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const modelData = await res.json();
+                    const tm = modelData.transcription_models;
+                    if (!tm || !tm.available || tm.available.length === 0) {
+                        transcribeModelSelect.innerHTML = '<option value="">未找到可用模型（需配置 transcriber_models）</option>';
+                        return;
+                    }
+                    transcribeModelSelect.innerHTML = '';
+                    tm.available.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        const isLoaded = tm.active && tm.active !== 'N/A' && tm.active === name;
+                        opt.textContent = isLoaded ? `${name}  [已加载]` : name;
+                        if (isLoaded) opt.selected = true;
+                        transcribeModelSelect.appendChild(opt);
+                    });
+                    // 如果没有任何选中（active 是 N/A 或未匹配），默认选第一个
+                    if (!transcribeModelSelect.value && transcribeModelSelect.options.length > 0) {
+                        transcribeModelSelect.options[0].selected = true;
+                    }
+                } catch (e) {
+                    transcribeModelSelect.innerHTML = '<option value="">无法获取模型列表（Flask未运行）</option>';
+                }
+            }
+
+            transcribeManagerButton.onclick = () => {
+                transcribePanel.classList.toggle('hidden');
+                if (!transcribePanel.classList.contains('hidden')) {
+                    loadTranscriptionModels();
+                }
+            };
+
+            closeTranscribePanelButton.onclick = () => {
+                transcribePanel.classList.add('hidden');
+            };
+
+            startTranscribeButton.onclick = async () => {
+                if (!currentPath || !currentMediaDir) {
+                    alert('无法确定当前目录，请先进入一个媒体目录。');
+                    return;
+                }
+                const fileType = document.querySelector('input[name="transcribeFileType"]:checked').value;
+                const transcribeTask = document.querySelector('input[name="transcribeTask"]:checked').value;
+                const selectedModel = transcribeModelSelect.value;
+                const language = document.getElementById('transcribe-language-input').value.trim() || null;
+                const transcribeTaskListEl = document.getElementById('transcribe-task-list');
+
+                if (!selectedModel) {
+                    alert('请先选择转录模型。');
+                    return;
+                }
+
+                // 判断 modelSource：若模型值为路径（含斜杠或盘符），则为 local；否则为 pretrained
+                const modelSource = (selectedModel.includes('/') || selectedModel.includes('\\') || /^[A-Za-z]:/.test(selectedModel)) ? 'local' : 'pretrained';
+
+                transcribeTaskListEl.innerHTML = '<li><span class="task-status task-status-waiting">正在启动转录任务...</span></li>';
+                try {
+                    const response = await fetch('/api/transcribe-directory', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            path: currentPath,
+                            mediaDir: currentMediaDir,
+                            fileType,
+                            model: selectedModel,
+                            modelSource,
+                            language,
+                            task: transcribeTask
+                        })
+                    });
+                    const responseText = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (parseError) {
+                        console.error('[Transcribe] Response parsing failed. Raw response:', responseText);
+                        transcribeTaskListEl.innerHTML = `<li><span class="task-status task-status-failed">响应解析失败: ${responseText.substring(0, 100)}</span></li>`;
+                        return;
+                    }
+                    if (!result.success) {
+                        transcribeTaskListEl.innerHTML = `<li><span class="task-status task-status-failed">启动失败: ${result.message}</span></li>`;
+                    }
+                    // 成功时由 WebSocket transcribe_start 消息接管
+                } catch (error) {
+                    transcribeTaskListEl.innerHTML = `<li><span class="task-status task-status-failed">启动转录任务时出错: ${error.message}</span></li>`;
                 }
             };
         });
@@ -2580,6 +2880,38 @@
             <h3>任务队列</h3>
             <ul id="music-scraper-task-list" style="list-style: none; padding: 0; margin: 0; font-size: 0.9em;">
                 <!-- 音乐刮削任务项将动态插入此处 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 字幕转录面板 -->
+    <div id="transcribe-panel" class="hidden">
+        <button class="panel-close-btn" id="closeTranscribePanelButton">&times;</button>
+        <h2>字幕转录</h2>
+        <div class="transcribe-controls">
+            <p>目标文件类型：</p>
+            <div class="transcribe-type-options">
+                <label><input type="radio" name="transcribeFileType" value="all" checked> 全部（音频+视频）</label>
+                <label><input type="radio" name="transcribeFileType" value="audio"> 仅音频</label>
+                <label><input type="radio" name="transcribeFileType" value="video"> 仅视频</label>
+            </div>
+            <p>转录任务：</p>
+            <div class="transcribe-type-options">
+                <label><input type="radio" name="transcribeTask" value="transcribe" checked> 转录（原语言）</label>
+                <label><input type="radio" name="transcribeTask" value="translate"> 翻译（转为英语）</label>
+            </div>
+            <p>可用模型：</p>
+            <select id="transcribe-model-select">
+                <option value="">加载中...</option>
+            </select>
+            <p>语言提示（可选，如 ja/zh/en，留空自动检测）：</p>
+            <input type="text" id="transcribe-language-input" placeholder="自动检测">
+            <button id="startTranscribeButton">开始转录当前目录</button>
+        </div>
+        <div class="scraper-queue">
+            <h3>任务队列</h3>
+            <ul id="transcribe-task-list" style="list-style: none; padding: 0; margin: 0; font-size: 0.9em;">
+                <!-- 转录任务项将动态插入此处 -->
             </ul>
         </div>
     </div>
