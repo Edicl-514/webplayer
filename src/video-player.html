@@ -1388,7 +1388,8 @@
         const convertToMp4Btn = document.getElementById('convertToMp4Btn');
         const modalDownloadBtn = document.getElementById('modalDownloadBtn');
 
-        const ws = new WebSocket(`ws://${window.location.host}`);
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}`);
 
         ws.onmessage = function (event) {
             const data = JSON.parse(event.data);

@@ -27,7 +27,7 @@ process.on('exit', () => {
     }
 });
 
-const server = http.createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     // 安全地解码路径，处理可能的编码错误
     let pathname;
@@ -38,6 +38,10 @@ const server = http.createServer(async (req, res) => {
         console.warn('Failed to decode pathname, using raw pathname:', parsedUrl.pathname);
         pathname = parsedUrl.pathname;
     }
+
+    // 设置跨域隔离响应头（COOP/COEP），用于支持 SharedArrayBuffer 等高危特性
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
 
     // ============================================================
     // VBR→CBR 代理流：跟踪活跃的 ffmpeg 转码进程
@@ -3191,6 +3195,8 @@ const server = http.createServer(async (req, res) => {
                 if (staticStats.isFile()) {
                     const contentType = getContentType(staticFilePath);
                     res.setHeader('Content-Type', contentType);
+                    // 按 COEP 要求为所有静态资源添加 CORP 头
+                    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
                     const staticStream = fs.createReadStream(staticFilePath);
 
                     // 监听客户端断开连接
@@ -3362,7 +3368,28 @@ const server = http.createServer(async (req, res) => {
             }
         }
     });
-});
+};
+
+// 根据是否提供证书决定创建 HTTPS 或 HTTP 服务器
+let server;
+(function() {
+    const httpsKeyPath = process.env.HTTPS_KEY || path.join(__dirname, 'cert', 'server.key');
+    const httpsCertPath = process.env.HTTPS_CERT || path.join(__dirname, 'cert', 'server.crt');
+    try {
+        if (fs.existsSync(httpsKeyPath) && fs.existsSync(httpsCertPath)) {
+            const key = fs.readFileSync(httpsKeyPath);
+            const cert = fs.readFileSync(httpsCertPath);
+            server = https.createServer({ key, cert }, requestHandler);
+            console.log('HTTPS enabled using', httpsKeyPath, httpsCertPath);
+        }
+    } catch (e) {
+        console.warn('HTTPS setup error:', e && e.message);
+    }
+    if (!server) {
+        server = http.createServer(requestHandler);
+        console.log('HTTPS not configured, falling back to HTTP');
+    }
+})();
 
 const wss = new WebSocket.Server({ server });
 
@@ -3992,7 +4019,8 @@ function stopAllThumbnailGenerations() {
 
 // 启动服务器
 server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    const protocol = server instanceof https.Server ? 'https' : 'http';
+    console.log(`Server running at ${protocol}://localhost:${PORT}`);
     // 查找当前媒体目录的别名
     const currentDirObj = MEDIA_DIRS.find(md => md.path === currentMediaDir);
     const displayName = currentDirObj ? (currentDirObj.alias || currentDirObj.path) : currentMediaDir;

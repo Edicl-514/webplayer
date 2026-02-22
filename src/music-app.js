@@ -109,7 +109,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- WebSocket 初始化和任务进度处理 ---
     function initializeWebSocket() {
-        ws = new WebSocket(`ws://${window.location.host}`);
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${window.location.host}`);
 
         ws.onopen = () => {
             console.log('[WebSocket] Connected');
@@ -1629,6 +1630,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // --- 加载 LUFS AudioWorklet 模块（异步，失败时降级为无 LUFS 计量）---
             try {
+                // AudioWorklet 仅在安全上下文（HTTPS 或 localhost）下可用
+                // 通过 HTTP 局域网访问时 audioContext.audioWorklet 为 undefined
+                if (!audioContext.audioWorklet) {
+                    throw new Error('AudioWorklet unavailable: page must be served over HTTPS or localhost (current origin: ' + location.origin + ')');
+                }
                 await audioContext.audioWorklet.addModule('lufs-meter-processor.js');
 
                 // 在主线程加载 WASM（AudioWorklet 中无网络 API），再传给 Worklet

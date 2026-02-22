@@ -14,3 +14,4 @@
 /hls-test
 /src/audio_processor/target
 指南.md
+src/cert/*
