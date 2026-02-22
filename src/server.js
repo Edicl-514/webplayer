@@ -2420,7 +2420,7 @@ const requestHandler = async (req, res) => {
             } catch (e) {
                 // Ignore error if directory doesn't exist
             }
-            return { name: dir, size, fileCount, isDir: true };
+            return { name: dir, displayName: CACHE_NAME_MAP[dir] || dir, size, fileCount, isDir: true };
         });
 
         const fileSizePromises = CACHE_FILES.map(async (file) => {
@@ -2434,7 +2434,7 @@ const requestHandler = async (req, res) => {
             } catch (e) {
                 // Ignore error if file doesn't exist
             }
-            return { name: file, size, fileCount, isDir: false };
+            return { name: file, displayName: CACHE_FILE_NAME_MAP[file] || file, size, fileCount, isDir: false };
         });
 
         try {
@@ -3037,6 +3037,40 @@ const requestHandler = async (req, res) => {
 
                         for (const fileTask of fileTasks) {
                             const activeTaskFile = global.activeTranscriptionTask.files.find(f => f.id === fileTask.id);
+
+                            // 检查文件是否已有字幕或歌词，有则跳过
+                            let hasSubtitles = false;
+                            try {
+                                const subtitleResult = await findSubtitles(fileTask.path, mediaDir);
+                                if (subtitleResult && subtitleResult.subtitles && subtitleResult.subtitles.length > 0) {
+                                    hasSubtitles = true;
+                                }
+                            } catch (subtitleCheckError) {
+                                console.warn(`[Transcribe] Could not check subtitles for ${fileTask.name}: ${subtitleCheckError.message}`);
+                            }
+
+                            // 对音频文件额外检查 cache/lyrics/ 中是否有歌词
+                            if (!hasSubtitles) {
+                                const audioExtensions = new Set(['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.opus', '.wma', '.ape']);
+                                if (audioExtensions.has(path.extname(fileTask.path).toLowerCase())) {
+                                    try {
+                                        hasSubtitles = await checkMusicHasLyrics(fileTask.path);
+                                    } catch (musicCheckError) {
+                                        console.warn(`[Transcribe] Could not check lyrics for ${fileTask.name}: ${musicCheckError.message}`);
+                                    }
+                                }
+                            }
+
+                            if (hasSubtitles) {
+                                console.log(`[Transcribe] Skipping ${fileTask.name} (subtitles/lyrics already exist)`);
+                                if (activeTaskFile) {
+                                    activeTaskFile.status = 'skipped';
+                                    activeTaskFile.result = { success: true, skipped: true };
+                                }
+                                broadcast({ type: 'transcribe_complete', file: { id: fileTask.id, name: fileTask.name }, result: { success: true, skipped: true } });
+                                continue;
+                            }
+
                             if (activeTaskFile) activeTaskFile.status = 'processing';
                             broadcast({ type: 'transcribe_progress', file: { id: fileTask.id, name: fileTask.name } });
 
@@ -3605,12 +3639,67 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
     });
 }
 
+// 检查音乐文件在 cache/lyrics/ 中是否已有歌词文件（不触发网络请求）
+function checkMusicHasLyrics(filePath) {
+    return new Promise((resolve) => {
+        const args = [
+            path.join(__dirname, 'get_music_info.py'),
+            filePath,
+            '--source', 'local',
+            '--only', 'info',
+            '--no-write',
+            '--json-output'
+        ];
+        const pythonProcess = spawn('python', args, {
+            env: { ...process.env, PYTHONIOENCODING: 'UTF-8' }
+        });
+        let stdoutData = '';
+        pythonProcess.stdout.on('data', (data) => { stdoutData += data.toString(); });
+        pythonProcess.stderr.on('data', () => {});
+        pythonProcess.on('close', () => {
+            try {
+                const jsonMatch = stdoutData.match(/(\{[\s\S]*\})/);
+                if (!jsonMatch) return resolve(false);
+                const info = JSON.parse(jsonMatch[1]);
+                const artist = (info.artist || '').trim();
+                const title = (info.title || '').trim();
+                if (!artist || !title || artist === 'Unknown Artist' || title === 'Unknown Title') {
+                    return resolve(false);
+                }
+                const sanitize = (name) => name.replace(/[\*?:"<>|：？]/g, '_');
+                const lrcFilename = `${sanitize(artist)} - ${sanitize(title)}.lrc`;
+                const lrcPath = path.join(__dirname, 'cache', 'lyrics', lrcFilename);
+                resolve(fs.existsSync(lrcPath));
+            } catch (e) {
+                resolve(false);
+            }
+        });
+        pythonProcess.on('error', () => resolve(false));
+    });
+}
+
 const activeFfmpegProcesses = []; // 用于存储活跃的 ffmpeg 进程
-// 缓略图缓存目录 — 启动时 launcher 会先 `cd` 到 `src`，因此缓存目录位于项目根的 `cache`，即 __dirname 的上一级
+// 缩略图缓存目录 — 启动时 launcher 会先 `cd` 到 `src`，因此缓存目录位于项目根的 `cache`，即 __dirname 的上一级
 const CACHE_DIR = path.join(__dirname, 'cache');
 const CACHE_SUB_DIRS = ['thumbnails', 'covers', 'lyrics', 'subtitles', 'vectordata', 'videoinfo', 'musicdata', 'hls'];
 const CACHE_FILES = ['foldercache.db'];
 const THUMBNAIL_DIR = path.join(CACHE_DIR, 'thumbnails');
+
+// 缓存目录在前端显示时使用的友好名称（中文）；后端仍然使用原始 key 来执行操作
+const CACHE_NAME_MAP = {
+    thumbnails: '缩略图',
+    covers: '封面',
+    lyrics: '歌词',
+    subtitles: '字幕',
+    vectordata: '向量数据',
+    videoinfo: '视频信息',
+    musicdata: '音乐信息',
+    hls: 'HLS 缓存'
+};
+
+const CACHE_FILE_NAME_MAP = {
+    'foldercache.db': '文件夹缓存'
+};
 
 // ============================================================
 // HLS 代理转码：常量、任务管理与辅助函数

@@ -15,6 +15,7 @@
             }
         })();
     </script>
+    <link rel="stylesheet" href="vendor/all.min.css" />
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -1069,11 +1070,39 @@
 
 <body>
     <div class="container">
-        <h1>WebPlayer - Browser </h1>
-        <button id="cacheManagerButton">缓存管理</button>
-        <button id="scraperManagerButton">视频刮削</button>
-        <button id="musicScraperManagerButton">音乐刮削</button>
-        <button id="transcribeManagerButton">字幕转录</button>
+                <h1>WebPlayer - Browser </h1>
+                <style>
+                .action-buttons { display: block; }
+                .action-buttons .action-btn { display: inline-block; margin: 6px 4px; padding: 8px 12px; }
+                .action-btn .btn-icon { display: none; }
+                .action-btn .btn-label { display: inline-block; }
+
+                @media (max-width: 768px) {
+                  .action-buttons { display: flex; gap: 8px; }
+                  .action-buttons .action-btn { flex: 1 1 0; min-width: 0; text-align: center; padding: 10px 6px; }
+                  /* 移动端只显示图标，隐藏文字标签 */
+                  .action-btn .btn-label { display: none; }
+                  .action-btn .btn-icon { display: inline-block; font-size: 1.2em; line-height: 1; }
+                }
+                </style>
+                <div class="action-buttons">
+                    <button class="action-btn" id="cacheManagerButton" aria-label="缓存管理">
+                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-hdd"></i></span>
+                        <span class="btn-label">缓存管理</span>
+                    </button>
+                    <button class="action-btn" id="scraperManagerButton" aria-label="视频刮削">
+                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-video"></i></span>
+                        <span class="btn-label">视频刮削</span>
+                    </button>
+                    <button class="action-btn" id="musicScraperManagerButton" aria-label="音乐刮削">
+                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-music"></i></span>
+                        <span class="btn-label">音乐刮削</span>
+                    </button>
+                    <button class="action-btn" id="transcribeManagerButton" aria-label="字幕转录">
+                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-closed-captioning"></i></span>
+                        <span class="btn-label">字幕转录</span>
+                    </button>
+                </div>
         <!-- 缓存信息面板 -->
         <div id="cache-info-panel">
             <h2>缓存管理</h2>
@@ -2375,9 +2404,10 @@
                 cacheInfoTbody.innerHTML = '';
 
                 cacheSizes.forEach(cache => {
+                    const display = cache.displayName || cache.name;
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                    <td>${cache.name}</td>
+                    <td title="${cache.name}">${display}</td>
                     <td>${formatBytes(cache.size)}</td>
                     <td>${cache.fileCount}</td>
                     <td>
@@ -2392,15 +2422,16 @@
                 // Add event listeners to delete buttons
                 document.querySelectorAll('.delete-cache-btn').forEach(button => {
                     button.onclick = (e) => {
-                        const item = e.target.dataset.dir; // Keep using 'dir' dataset for simplicity
-                        if (confirm(`确定要清空缓存项 '${item}' 吗？`)) {
-                            clearCacheItem(item);
+                        const item = e.target.dataset.dir; // 原始 key，用于后端操作
+                        const displayName = e.target.closest('tr').querySelector('td').textContent.trim();
+                        if (confirm(`确定要清空缓存项 '${displayName}' 吗？`)) {
+                            clearCacheItem(item, displayName);
                         }
                     };
                 });
             }
 
-            async function clearCacheItem(item) {
+            async function clearCacheItem(item, displayName) {
                 try {
                     const response = await fetch('/api/clear-cache-item', {
                         method: 'POST',
@@ -2409,7 +2440,7 @@
                     });
                     const result = await response.json();
                     if (result.success) {
-                        showNotification(`缓存项 '${item}' 已清空`);
+                        showNotification(`缓存项 '${displayName || item}' 已清空`);
                         fetchCacheInfo(); // Refresh cache info
                     } else {
                         alert(`清空缓存失败: ${result.message}`);
@@ -2584,7 +2615,9 @@
                         if (taskItem) {
                             let displayName = data.file.name;
                             if (displayName.startsWith('./') || displayName.startsWith('.\\')) displayName = displayName.slice(2);
-                            if (data.result.success) {
+                            if (data.result.skipped) {
+                                taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-waiting">已跳过（已有字幕）</span>`;
+                            } else if (data.result.success) {
                                 taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-success">完成</span>`;
                             } else {
                                 taskItem.innerHTML = `<span class="task-name">${displayName}</span> <span class="task-status task-status-failed" title="${(data.result.details || '').replace(/"/g, '&quot;')}">失败: ${data.result.error || '未知错误'}</span>`;
@@ -2667,6 +2700,7 @@
                         let statusHtml = '';
                         if (file.status === 'waiting') statusHtml = '<span class="task-status task-status-waiting">等待中</span>';
                         else if (file.status === 'processing') statusHtml = '<span class="task-status task-status-processing">转录中...</span>';
+                        else if (file.status === 'skipped') statusHtml = '<span class="task-status task-status-waiting">已跳过（已有字幕）</span>';
                         else if (file.status === 'complete') {
                             if (file.result && file.result.success) statusHtml = '<span class="task-status task-status-success">完成</span>';
                             else statusHtml = `<span class="task-status task-status-failed" title="${(file.result?.details || '').replace(/"/g, '&quot;')}">失败: ${file.result?.error || '未知错误'}</span>`;
