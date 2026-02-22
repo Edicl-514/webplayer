@@ -495,6 +495,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let timeDomainLData = null;
     let timeDomainRData = null;
 
+    // --- WebGL 3D 频谱相关 ---
+    let webglCanvas = null;
+    let webglRenderer = null;
+    let webglScene = null;
+    let webglCamera = null;
+    let webglComposer = null;
+    let webglDataTexture = null;
+    let webglMaterial = null;
+    let webglUniforms = null;
+
     const visualizationModes = [
         { key: 'spectrum', label: '频谱仪' },
         { key: 'spectrogram3d', label: '3D频谱' },
@@ -548,17 +558,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const rect = canvas.getBoundingClientRect();
         let dpr = window.devicePixelRatio || 1;
 
-        // 由于 3D 频谱图会绘制大量线条和阴影，在高分屏（如手机）上容易卡顿
-        // 因此为其单独限制 dpr
-        if (mode === 'spectrogram3d') {
-            dpr = Math.min(dpr, 1);
-        }
+        // 3D 频谱图现在使用 WebGL，性能已经足够好，不再需要限制 DPR
+        // if (mode === 'spectrogram3d') {
+        //     dpr = Math.min(dpr, 1);
+        // }
 
         const w = Math.max(1, Math.floor(rect.width * dpr));
         const h = Math.max(1, Math.floor(rect.height * dpr));
         if (canvas.width !== w || canvas.height !== h) {
             canvas.width = w;
             canvas.height = h;
+
+            // 级联调整 WebGL 画布大小
+            if (webglRenderer) {
+                webglRenderer.setSize(rect.width, rect.height);
+                if (webglCamera) {
+                    webglCamera.aspect = rect.width / rect.height;
+                    webglCamera.updateProjectionMatrix();
+                }
+                if (webglComposer) {
+                    webglComposer.setSize(rect.width, rect.height);
+                }
+            }
         }
         return {
             width: Math.max(1, Math.floor(rect.width)),
@@ -704,7 +725,192 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
     }
 
+    function initWebGL() {
+        if (webglRenderer || !window.THREE) return;
+        webglCanvas = document.getElementById('webgl-visualizer');
+        if (!webglCanvas) return;
+
+        webglRenderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true, alpha: true, transparent: true });
+        webglRenderer.setClearColor(0x000000, 0); // 设置背景为透明
+        webglRenderer.autoClear = true;
+        webglRenderer.autoClearColor = true;
+        webglRenderer.setPixelRatio(window.devicePixelRatio);
+        webglRenderer.setSize(webglCanvas.clientWidth, webglCanvas.clientHeight);
+
+        webglScene = new THREE.Scene();
+        // Wider FOV with further distance to reduce clipping and edge distortion
+        webglCamera = new THREE.PerspectiveCamera(40, webglCanvas.clientWidth / webglCanvas.clientHeight, 0.1, 1000);
+        // Pull camera back significantly more for safety margins
+        webglCamera.position.set(0, 18, 42);
+        webglCamera.lookAt(0, 0, 0);
+
+        const sizeX = SPECTROGRAM_BINS;
+        const sizeY = SPECTROGRAM_HISTORY_SIZE;
+        const data = new Uint8Array(sizeX * sizeY);
+        // Using LuminanceFormat for older Three.js or RedFormat
+        const format = THREE.LuminanceFormat || THREE.RedFormat;
+        webglDataTexture = new THREE.DataTexture(data, sizeX, sizeY, format);
+
+        webglDataTexture.type = THREE.UnsignedByteType;
+        webglDataTexture.magFilter = THREE.LinearFilter;
+        webglDataTexture.minFilter = THREE.LinearFilter;
+        webglDataTexture.needsUpdate = true;
+
+        webglUniforms = {
+            u_dataTexture: { value: webglDataTexture },
+            u_color: { value: new THREE.Vector3(0, 0.73, 0.83) }
+        };
+
+        const vertexShader = `
+            uniform sampler2D u_dataTexture;
+            varying vec2 vUv;
+            varying float vHeight;
+
+            void main() {
+                vUv = uv;
+                // texData.r returns 0.0 ~ 1.0 from UnsignedByteType texture
+                vec4 texData = texture2D(u_dataTexture, vUv);
+                float val = texData.r; 
+                float intensity = pow(val, 1.35); 
+                vHeight = intensity;
+
+                vec3 newPos = position;
+                // Slightly reduced height to keep peaks within bounds
+                newPos.y += intensity * 6.5; 
+                
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
+            }
+        `;
+
+        const solidFragmentShader = `
+            varying vec2 vUv;
+            varying float vHeight;
+            void main() {
+                // Only fill areas where there is actual height, and fade out towards the edges
+                float alpha = smoothstep(0.02, 0.2, vHeight) * 0.85;
+                // Dark but transparent, only occluding ridges behind it
+                gl_FragColor = vec4(0.0, 0.0, 0.02, alpha);
+            }
+        `;
+
+        const wireFragmentShader = `
+            uniform vec3 u_color;
+            varying vec2 vUv;
+            varying float vHeight;
+
+            void main() {
+                // Fade out towards the back (vUv.y from 0 to 1)
+                float alphaFadeY = smoothstep(1.0, 0.0, vUv.y);
+                // Also fade out near left/right edges (vUv.x) to prevent exceeding side boundaries
+                float alphaFadeX = smoothstep(0.0, 0.1, vUv.x) * smoothstep(1.0, 0.9, vUv.x);
+                float alphaFade = alphaFadeX * alphaFadeY;
+
+                vec3 peakColor = vec3(1.0, 1.0, 1.0);
+                // Shift to white at the very peaks
+                vec3 finalColor = mix(u_color * 0.8, peakColor, vHeight * 0.7);
+
+                float alpha = (0.15 + 0.85 * vHeight) * alphaFade;
+                gl_FragColor = vec4(finalColor, alpha);
+            }
+        `;
+
+        const solidMaterial = new THREE.ShaderMaterial({
+            uniforms: webglUniforms,
+            vertexShader: vertexShader,
+            fragmentShader: solidFragmentShader,
+            transparent: true,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1
+        });
+
+        const wireMaterial = new THREE.ShaderMaterial({
+            uniforms: webglUniforms,
+            vertexShader: vertexShader,
+            fragmentShader: wireFragmentShader,
+            transparent: true,
+            wireframe: true,
+            blending: THREE.AdditiveBlending
+        });
+
+        const geometry = new THREE.PlaneGeometry(30, 22, sizeX - 1, sizeY - 1);
+        geometry.rotateX(-Math.PI / 2);
+
+        const group = new THREE.Group();
+        group.add(new THREE.Mesh(geometry, solidMaterial));
+        group.add(new THREE.Mesh(geometry, wireMaterial));
+
+        // 添加网格线 - 同步缩小宽度和深度
+        const planeWidth = 30;
+        const planeDepth = 22;
+        const floorDb = -90;
+        const maxDb = 0;
+        const nyquist = audioContext ? audioContext.sampleRate / 2 : 22050;
+
+        const gridLinesMaterial = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.08
+        });
+
+        // 频率轴线 (X方向)
+        const freqTicks = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+        freqTicks.forEach(freq => {
+            const t = (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20));
+            const x = -planeWidth / 2 + t * planeWidth;
+
+            const linePoints = [
+                new THREE.Vector3(x, 0, 0),
+                new THREE.Vector3(x, 0, planeDepth)
+            ];
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+            const line = new THREE.Line(lineGeometry, gridLinesMaterial);
+            group.add(line);
+        });
+
+        // dB轴线 (Y方向)
+        for (let db = floorDb; db <= maxDb; db += 10) {
+            const normY = (db - floorDb) / (maxDb - floorDb);
+            // Match the vertex shader intensity scalar to keep the background grid lines aligned
+            const y = normY * 6.5;
+
+            const linePoints = [
+                new THREE.Vector3(-planeWidth / 2, y, 0),
+                new THREE.Vector3(planeWidth / 2, y, planeDepth)
+            ];
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+            const line = new THREE.Line(lineGeometry, gridLinesMaterial);
+            group.add(line);
+        }
+
+        // Position y = -1.5 slightly higher to avoid clipping with bottom UI elements
+        group.position.set(0, -1.5, -4.0);
+        // group.rotation.y = 0.06;
+        webglScene.add(group);
+
+        // Disable EffectComposer to ensure transparent background.
+        // UnrealBloomPass's internal textures/buffers drop alpha channels, forcing a black background.
+        /*
+        if (window.THREE.EffectComposer) {
+            webglComposer = new THREE.EffectComposer(webglRenderer);
+            const renderPass = new THREE.RenderPass(webglScene, webglCamera);
+            renderPass.clearColor = new THREE.Color(0x000000);
+            renderPass.clearAlpha = 0;
+            webglComposer.addPass(renderPass);
+            if (window.THREE.UnrealBloomPass) {
+                // Lower Bloom strength slightly so it isn't overly blown out when there's loud music
+                const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.85, 0.4, 0.85);
+                webglComposer.addPass(bloomPass);
+            }
+        }
+        */
+    }
+
     function drawSpectrogram3D(ctx, width, height) {
+        if (!webglRenderer) {
+            initWebGL();
+        }
+
         if (!analyserMixed || !mixedFreqByteData) return;
 
         analyserMixed.getByteFrequencyData(mixedFreqByteData);
@@ -723,152 +929,34 @@ document.addEventListener('DOMContentLoaded', () => {
             spectrogramHistory.length = SPECTROGRAM_HISTORY_SIZE;
         }
 
-        const accent = parseAccentColor();
-        const originX = width * 0.75;
-        const originY = height * 0.85;
-        const spanX = width * 0.65;
-        const depthX = width * 0.2;
-        const depthY = height * 0.55;
-
-        ctx.save();
-
-        // 绘制 3D 辅助地板与网格
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(originX - spanX, originY);
-        ctx.lineTo(originX, originY);
-        ctx.lineTo(originX + depthX, originY - depthY);
-        ctx.lineTo(originX - spanX + depthX, originY - depthY);
-        ctx.closePath();
-        ctx.stroke();
-
-        // 绘制内部网格与刻度
-        ctx.font = '500 9.5px "Segoe UI", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        // 1. 频率刻度 (Frequency Ticks) - 深度轴 (Z)
-        const freqTicks3D = [100, 1000, 10000];
-        const nyquist3D = audioContext ? audioContext.sampleRate / 2 : 22050;
-        const log20 = Math.log10(20);
-        const logNyquist = Math.log10(nyquist3D);
-
-        freqTicks3D.forEach(freq => {
-            const t = (Math.log10(freq) - log20) / (logNyquist - log20);
-            const dx = t * depthX;
-            const dy = t * depthY;
-
-            // 绘制横贯地板的频率线
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.beginPath();
-            ctx.moveTo(originX + dx, originY - dy);
-            ctx.lineTo(originX - spanX + dx, originY - dy);
-            ctx.stroke();
-
-            // 频率数字标注 (移动到外侧，避免与时间轴重叠)
-            ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
-            const label = freq >= 1000 ? (freq / 1000) + 'k' : freq;
-            ctx.fillText(label, originX + dx + 15, originY - dy);
-        });
-
-        // 2. 时间刻度 (Time Ticks) - 横轴 (X)
-        const timeTicks = [
-            { frame: 0, label: '0s' },
-            { frame: 60, label: '-1s' },
-            { frame: 120, label: '-2s' }
-        ];
-
-        timeTicks.forEach(tick => {
-            if (tick.frame >= SPECTROGRAM_HISTORY_SIZE) return;
-            const tx = (tick.frame / SPECTROGRAM_HISTORY_SIZE) * spanX;
-            const x = originX - tx;
-
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.beginPath();
-            ctx.moveTo(x, originY);
-            ctx.lineTo(x + depthX, originY - depthY);
-            ctx.stroke();
-
-            // 时间数字标注
-            ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
-            ctx.fillText(tick.label, x, originY + 16);
-        });
-
-        // 绘制整体标题 (仅保留时间单位)
-        ctx.font = '500 10px "Segoe UI", sans-serif';
-        ctx.fillStyle = 'rgba(180, 192, 214, 0.35)';
-        ctx.textAlign = 'center';
-        // ctx.fillText('秒 (Sec)', originX - spanX / 2, originY + 28);
-
-        // 边界刻度 (20 / 20k)
-        ctx.fillStyle = 'rgba(180, 192, 214, 0.6)';
-        ctx.textAlign = 'left';
-        ctx.fillText('20', originX + 15, originY + 2); // 统一偏移量，修复 0s 遮挡
-        ctx.textAlign = 'right';
-        ctx.fillText(Math.round(nyquist3D / 1000) + 'k', originX + depthX + 4, originY - depthY - 8);
-
-        // 3. 绘制频谱数据 (从远到近，带填充遮挡)
-        for (let z = spectrogramHistory.length - 1; z >= 0; z--) {
-            const row = spectrogramHistory[z];
-            const zNorm = z / Math.max(1, SPECTROGRAM_HISTORY_SIZE - 1);
-            const baseX = originX - zNorm * spanX;
-            const rowAlpha = 0.05 + (1 - zNorm) * 0.45;
-
-            // 建立路径：山脊线 + 地板封闭线
-            ctx.beginPath();
-            for (let i = 0; i < row.length; i++) {
-                const iNorm = i / (row.length - 1);
-                const x = baseX + iNorm * depthX;
-                const baseY = originY - iNorm * depthY;
-                const amp = row[i] / 255;
-                const peak = Math.pow(amp, 1.35) * (height * 0.22);
-                const y = baseY - peak;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            }
-
-            // 准备填充遮挡（密封底部）
-            const lastX = baseX + depthX;
-            const lastBaseY = originY - depthY;
-            const firstX = baseX;
-            const firstBaseY = originY;
-
-            ctx.lineTo(lastX, lastBaseY);
-            ctx.lineTo(firstX, firstBaseY);
-            ctx.closePath();
-
-            // 使用深色背景色进行遮挡填充，避免线条堆积造成的混乱
-            ctx.fillStyle = 'rgba(10, 11, 14, 0.88)';
-            ctx.fill();
-
-            // 绘制山脊线
-            ctx.beginPath();
-            for (let i = 0; i < row.length; i++) {
-                const iNorm = i / (row.length - 1);
-                const x = baseX + iNorm * depthX;
-                const baseY = originY - iNorm * depthY;
-                const amp = row[i] / 255;
-                const peak = Math.pow(amp, 1.35) * (height * 0.22);
-                const y = baseY - peak;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            }
-
-            ctx.strokeStyle = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
-            ctx.lineWidth = 1.3;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            if (z < 10) {
-                ctx.shadowBlur = 10 - z;
-                ctx.shadowColor = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${rowAlpha.toFixed(3)})`;
-            } else {
-                ctx.shadowBlur = 0;
-            }
-            ctx.stroke();
+        // 同步主题色到 WebGL
+        if (webglUniforms) {
+            const accent = parseAccentColor();
+            webglUniforms.u_color.value.set(accent.r / 255, accent.g / 255, accent.b / 255);
         }
 
-        ctx.restore();
+        // 将数据推送给 GPU
+        if (webglDataTexture && webglDataTexture.image) {
+            for (let y = 0; y < SPECTROGRAM_HISTORY_SIZE; y++) {
+                const row = spectrogramHistory[y];
+                if (row) {
+                    for (let x = 0; x < SPECTROGRAM_BINS; x++) {
+                        webglDataTexture.image.data[y * SPECTROGRAM_BINS + x] = row[x];
+                    }
+                }
+            }
+            webglDataTexture.needsUpdate = true;
+        }
+
+        // 渲染 WebGL
+        if (webglComposer) {
+            webglComposer.render();
+        } else if (webglRenderer) {
+            webglRenderer.render(webglScene, webglCamera);
+        }
+
+        // 清空canvas - 网格现在由Three.js渲染
+        ctx.clearRect(0, 0, width, height);
     }
 
     // ── 声场图公共辅助：全圆背景网格 ──────────────────────────────────────────
@@ -1543,6 +1631,12 @@ document.addEventListener('DOMContentLoaded', () => {
         visualizerCtx.save();
         visualizerCtx.scale(dpr, dpr);
         visualizerCtx.clearRect(0, 0, width, height);
+
+        // 控制 WebGL 画布的显示/隐藏
+        if (!webglCanvas) webglCanvas = document.getElementById('webgl-visualizer');
+        if (webglCanvas) {
+            webglCanvas.style.display = (mode === 'spectrogram3d') ? 'block' : 'none';
+        }
 
         if (mode === 'spectrum') {
             drawSpectrum(visualizerCtx, width, height);

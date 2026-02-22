@@ -99,6 +99,7 @@
                                 class="fas fa-chart-bar"></i></button>
                     </div>
                     <div class="visualization-container">
+                        <canvas id="webgl-visualizer"></canvas>
                         <canvas id="visualizer"></canvas>
                     </div>
                     <div class="lyrics-wrapper" id="lyrics-wrapper">
@@ -272,6 +273,13 @@
     <script src="vendor/color-thief.min.js"></script>
     <script src="vendor/cptable.full.js"></script>
     <script src="vendor/Sortable.min.js"></script>
+    <script src="vendor/three/three.min.js"></script>
+    <script src="vendor/three/EffectComposer.js"></script>
+    <script src="vendor/three/RenderPass.js"></script>
+    <script src="vendor/three/ShaderPass.js"></script>
+    <script src="vendor/three/CopyShader.js"></script>
+    <script src="vendor/three/LuminosityHighPassShader.js"></script>
+    <script src="vendor/three/UnrealBloomPass.js"></script>
     <script src="music-app.js?v=1"></script>
     <script>
         // 清理字幕缓存：在页面卸载或播放器关闭时发送请求到后端
