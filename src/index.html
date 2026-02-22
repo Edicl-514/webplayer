@@ -651,6 +651,29 @@
         .mobile .thumbnail-container {
             height: 120px;
         }
+
+        /* 移动端刮削面板调整 */
+        .mobile #scraper-panel,
+        .mobile #music-scraper-panel {
+            width: auto !important;
+            max-width: none !important;
+            right: 10px !important;
+            left: 10px !important;
+            bottom: 10px !important;
+            padding: 15px !important;
+            box-sizing: border-box !important;
+            max-height: 80vh !important;
+        }
+
+        .mobile .scraper-type-options {
+            gap: 8px !important;
+            justify-content: flex-start !important;
+        }
+
+        .mobile .scraper-type-options label {
+            font-size: 0.9em;
+            display: inline-block;
+        }
     </style>
     <style>
         /* 缓存管理面板样式 */
@@ -1026,8 +1049,8 @@
             function chineseToNumber(s) {
                 if (!s) return null;
                 if (/^\d+$/.test(s)) return parseInt(s, 10);
-                const digits = { '零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
-                const units = { '十':10,'百':100,'千':1000,'万':10000,'亿':100000000 };
+                const digits = { '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+                const units = { '十': 10, '百': 100, '千': 1000, '万': 10000, '亿': 100000000 };
                 let section = 0, number = 0;
                 for (let i = 0; i < s.length; i++) {
                     const ch = s[i];
