@@ -505,6 +505,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let webglMaterial = null;
     let webglUniforms = null;
 
+    // 摄像机轨道控制状态（球面坐标）
+    const webglOrbit = {
+        theta: 0,           // 水平旋转角（偏航），弧度
+        phi: 0.404,         // 垂直仰角，弧度（约23°）
+        radius: 48,         // 到原点的距离（桌面端）
+        isDragging: false,
+        hasDragged: false,  // 标记是否真的进行了拖拽移动
+        lastX: 0,
+        lastY: 0
+    };
+
     const visualizationModes = [
         { key: 'spectrum', label: '频谱仪' },
         { key: 'spectrogram3d', label: '3D频谱' },
@@ -575,12 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (webglCamera) {
                     webglCamera.aspect = rect.width / rect.height;
 
-                    // 移动端适当拉远并调高视角，防止在窄屏下两侧超出，同时由于隐藏了封面，整体观感依然很大
-                    if (window.innerWidth <= 768) {
-                        webglCamera.position.set(0, 30, 52);
-                    } else {
-                        webglCamera.position.set(0, 18, 42);
-                    }
+                    // 移动端拉远半径，theta/phi 保持用户拖拽后的状态
+                    webglOrbit.radius = window.innerWidth <= 768 ? 62 : 48;
+                    updateWebGLCameraFromOrbit();
 
                     webglCamera.updateProjectionMatrix();
                 }
@@ -733,6 +741,17 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
     }
 
+    // 将球面坐标转换为笛卡尔坐标并更新摄像机位置
+    function updateWebGLCameraFromOrbit() {
+        if (!webglCamera) return;
+        const { theta, phi, radius } = webglOrbit;
+        const x = radius * Math.cos(phi) * Math.sin(theta);
+        const y = radius * Math.sin(phi);
+        const z = radius * Math.cos(phi) * Math.cos(theta);
+        webglCamera.position.set(x, y, z);
+        webglCamera.lookAt(0, 0, 0);
+    }
+
     function initWebGL() {
         if (webglRenderer || !window.THREE) return;
         webglCanvas = document.getElementById('webgl-visualizer');
@@ -748,9 +767,9 @@ document.addEventListener('DOMContentLoaded', () => {
         webglScene = new THREE.Scene();
         // Wider FOV with further distance to reduce clipping and edge distortion
         webglCamera = new THREE.PerspectiveCamera(40, webglCanvas.clientWidth / webglCanvas.clientHeight, 0.1, 1000);
-        // Pull camera back significantly more for safety margins
-        webglCamera.position.set(0, 18, 42);
-        webglCamera.lookAt(0, 0, 0);
+        // 使用球面坐标初始化摄像机（依据设备宽度选择合适的半径）
+        webglOrbit.radius = window.innerWidth <= 768 ? 62 : 48;
+        updateWebGLCameraFromOrbit();
 
         const sizeX = SPECTROGRAM_BINS;
         const sizeY = SPECTROGRAM_HISTORY_SIZE;
@@ -1021,6 +1040,80 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         */
+
+        // 绑定拖拽/触屏事件，让摄像机沿球面运动
+        webglCanvas.style.cursor = 'grab';
+
+        function onWebGLMouseDown(e) {
+            webglOrbit.isDragging = true;
+            webglOrbit.hasDragged = false;  // 重置拖拽标志
+            webglOrbit.lastX = e.clientX;
+            webglOrbit.lastY = e.clientY;
+            webglCanvas.style.cursor = 'grabbing';
+        }
+        function onWebGLMouseMove(e) {
+            if (!webglOrbit.isDragging) return;
+            const dx = e.clientX - webglOrbit.lastX;
+            const dy = e.clientY - webglOrbit.lastY;
+            // 如果移动距离超过2px，标记为真正的拖拽
+            if (Math.sqrt(dx * dx + dy * dy) > 2) {
+                webglOrbit.hasDragged = true;
+            }
+            webglOrbit.lastX = e.clientX;
+            webglOrbit.lastY = e.clientY;
+            webglOrbit.theta -= dx * 0.005;
+            webglOrbit.phi   += dy * 0.005;
+            webglOrbit.phi = Math.max(-0.3, Math.min(1.4, webglOrbit.phi));
+            updateWebGLCameraFromOrbit();
+        }
+        function onWebGLMouseUp() {
+            webglOrbit.isDragging = false;
+            webglCanvas.style.cursor = 'grab';
+            // hasDragged 标志会在 click 事件处理后重置
+        }
+        function onWebGLClick(e) {
+            // 如果发生了拖拽，阻止 click 事件冒泡，防止切换可视化效果
+            if (webglOrbit.hasDragged) {
+                e.stopPropagation();
+                e.preventDefault();
+                webglOrbit.hasDragged = false;
+            }
+        }
+        function onWebGLTouchStart(e) {
+            if (e.touches.length === 1) {
+                webglOrbit.isDragging = true;
+                webglOrbit.hasDragged = false;  // 重置拖拽标志
+                webglOrbit.lastX = e.touches[0].clientX;
+                webglOrbit.lastY = e.touches[0].clientY;
+            }
+        }
+        function onWebGLTouchMove(e) {
+            if (!webglOrbit.isDragging || e.touches.length !== 1) return;
+            e.preventDefault();
+            const dx = e.touches[0].clientX - webglOrbit.lastX;
+            const dy = e.touches[0].clientY - webglOrbit.lastY;
+            // 如果移动距离超过2px，标记为真正的拖拽
+            if (Math.sqrt(dx * dx + dy * dy) > 2) {
+                webglOrbit.hasDragged = true;
+            }
+            webglOrbit.lastX = e.touches[0].clientX;
+            webglOrbit.lastY = e.touches[0].clientY;
+            webglOrbit.theta -= dx * 0.005;
+            webglOrbit.phi   += dy * 0.005;
+            webglOrbit.phi = Math.max(-0.3, Math.min(1.4, webglOrbit.phi));
+            updateWebGLCameraFromOrbit();
+        }
+        function onWebGLTouchEnd() {
+            webglOrbit.isDragging = false;
+        }
+
+        webglCanvas.addEventListener('mousedown', onWebGLMouseDown);
+        window.addEventListener('mousemove', onWebGLMouseMove);
+        window.addEventListener('mouseup', onWebGLMouseUp);
+        webglCanvas.addEventListener('click', onWebGLClick);
+        webglCanvas.addEventListener('touchstart', onWebGLTouchStart, { passive: true });
+        webglCanvas.addEventListener('touchmove', onWebGLTouchMove, { passive: false });
+        webglCanvas.addEventListener('touchend', onWebGLTouchEnd);
     }
 
     function drawSpectrogram3D(ctx, width, height) {
@@ -1751,8 +1844,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 控制 WebGL 画布的显示/隐藏
         if (!webglCanvas) webglCanvas = document.getElementById('webgl-visualizer');
+        const canvas2d = document.getElementById('visualizer');
         if (webglCanvas) {
             webglCanvas.style.display = (mode === 'spectrogram3d') ? 'block' : 'none';
+        }
+        // 3D 频谱模式下，隐藏 2D canvas 以允许鼠标事件传递到 WebGL canvas
+        if (canvas2d) {
+            canvas2d.style.pointerEvents = (mode === 'spectrogram3d') ? 'none' : 'auto';
         }
 
         if (mode === 'spectrum') {
