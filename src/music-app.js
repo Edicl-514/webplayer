@@ -513,7 +513,10 @@ document.addEventListener('DOMContentLoaded', () => {
         isDragging: false,
         hasDragged: false,  // 标记是否真的进行了拖拽移动
         lastX: 0,
-        lastY: 0
+        lastY: 0,
+        minRadius: 20,      // 缩放最小距离
+        maxRadius: 100,     // 缩放最大距离
+        lastTouchDistance: 0 // 用于双指捏合检测
     };
 
     const visualizationModes = [
@@ -768,7 +771,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Wider FOV with further distance to reduce clipping and edge distortion
         webglCamera = new THREE.PerspectiveCamera(40, webglCanvas.clientWidth / webglCanvas.clientHeight, 0.1, 1000);
         // 使用球面坐标初始化摄像机（依据设备宽度选择合适的半径）
-        webglOrbit.radius = window.innerWidth <= 768 ? 62 : 48;
+        // 略微增加半径，使摄像机离远一点，确保新的坐标轴标签可见
+        webglOrbit.radius = window.innerWidth <= 768 ? 75 : 68;
         updateWebGLCameraFromOrbit();
 
         const sizeX = SPECTROGRAM_BINS;
@@ -977,7 +981,27 @@ document.addEventListener('DOMContentLoaded', () => {
         group.add(new THREE.Mesh(geometry, solidMaterial));
         group.add(new THREE.Mesh(geometry, wireMaterial));
 
-        // 添加网格线 - 同步缩小宽度和深度
+        // ----------- 增加坐标轴和刻度文字的辅助函数 -----------
+        function createTextSprite(message, color, scaleX, scaleY) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 128;
+            ctx.font = 'bold 36px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = color || 'rgba(255, 255, 255, 0.7)';
+            ctx.fillText(message, 128, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter;
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(scaleX || 4, scaleY || 2, 1);
+            return sprite;
+        }
+
+        // 添加网格线及坐标轴 - 同步缩小宽度和深度
         const planeWidth = 30;
         const planeDepth = 22;
         const floorDb = -90;
@@ -990,12 +1014,38 @@ document.addEventListener('DOMContentLoaded', () => {
             opacity: 0.08
         });
 
-        // 频率轴线 (X方向) - 地面网格
+        const axesMaterial = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.3
+        });
+
+        // ------ 加粗的主坐标轴 ------
+        const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-planeWidth / 2, 0, planeDepth / 2),
+            new THREE.Vector3(planeWidth / 2 + 1, 0, planeDepth / 2)
+        ]);
+        group.add(new THREE.Line(xAxisGeometry, axesMaterial));
+
+        const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-planeWidth / 2, 0, planeDepth / 2),
+            new THREE.Vector3(-planeWidth / 2, 0, -planeDepth / 2 - 1)
+        ]);
+        group.add(new THREE.Line(zAxisGeometry, axesMaterial));
+
+        const yAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-planeWidth / 2, 0, planeDepth / 2),
+            new THREE.Vector3(-planeWidth / 2, 6.5 + 0.5, planeDepth / 2)
+        ]);
+        group.add(new THREE.Line(yAxisGeometry, axesMaterial));
+
+        // ------ 频率轴标尺 (X方向) - 地面网格及刻度 ------
         const freqTicks = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
         freqTicks.forEach(freq => {
             const t = (Math.log10(freq) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20));
             const x = -planeWidth / 2 + t * planeWidth;
 
+            // 网格线
             const linePoints = [
                 new THREE.Vector3(x, 0.0, -planeDepth / 2),
                 new THREE.Vector3(x, 0.0, planeDepth / 2)
@@ -1003,13 +1053,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
             const line = new THREE.Line(lineGeometry, gridLinesMaterial);
             group.add(line);
+
+            // 刻度及标签
+            if (freq === 50 || freq === 200 || freq === 1000 || freq === 5000 || freq === 20000) {
+                const tickGeo = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(x, 0.0, planeDepth / 2),
+                    new THREE.Vector3(x, 0.0, planeDepth / 2 + 0.4)
+                ]);
+                group.add(new THREE.Line(tickGeo, axesMaterial));
+
+                let labelText = freq >= 1000 ? (freq / 1000) + 'k' : freq;
+                const sprite = createTextSprite(labelText.toString(), 'rgba(255,255,255,0.6)', 3, 1.5);
+                sprite.position.set(x, 0, planeDepth / 2 + 1.2);
+                group.add(sprite);
+            }
         });
 
-        // dB轴线 (Y方向) - 前墙网格
+        // ------ 响度dB轴标尺 (Y方向) - 前墙网格及刻度 ------
         for (let db = floorDb; db <= maxDb; db += 10) {
             const normY = (db - floorDb) / (maxDb - floorDb);
             const yPos = 0.0 + normY * 6.5;
 
+            // 网格线
             const linePoints = [
                 new THREE.Vector3(-planeWidth / 2, yPos, planeDepth / 2 + 0.1),
                 new THREE.Vector3(planeWidth / 2, yPos, planeDepth / 2 + 0.1)
@@ -1017,7 +1082,67 @@ document.addEventListener('DOMContentLoaded', () => {
             const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
             const line = new THREE.Line(lineGeometry, gridLinesMaterial);
             group.add(line);
+
+            // 刻度及标签 (每 20dB 标一个数字)
+            if (db % 20 === 0) {
+                const tickGeo = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(-planeWidth / 2, yPos, planeDepth / 2),
+                    new THREE.Vector3(-planeWidth / 2 - 0.4, yPos, planeDepth / 2)
+                ]);
+                group.add(new THREE.Line(tickGeo, axesMaterial));
+
+                const sprite = createTextSprite(db + ' dB', 'rgba(255,255,255,0.6)', 3.5, 1.75);
+                sprite.position.set(-planeWidth / 2 - 2.0, yPos, planeDepth / 2 + 0.2);
+                group.add(sprite);
+            }
         }
+
+        // ------ 时间轴标尺 (Z方向) - 地面横向网格及刻度 ------
+        for (let s = 1; s <= 3; s++) {
+            const zStep = planeDepth / 2.66;
+            const zPos = planeDepth / 2 - s * zStep;
+            if (zPos < -planeDepth / 2) break;
+
+            const linePoints = [
+                new THREE.Vector3(-planeWidth / 2, 0.0, zPos),
+                new THREE.Vector3(planeWidth / 2, 0.0, zPos)
+            ];
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+            const line = new THREE.Line(lineGeometry, gridLinesMaterial);
+            group.add(line);
+
+            const tickGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-planeWidth / 2, 0.0, zPos),
+                new THREE.Vector3(-planeWidth / 2 - 0.4, 0.0, zPos)
+            ]);
+            group.add(new THREE.Line(tickGeo, axesMaterial));
+
+            const sprite = createTextSprite('-' + s + 's', 'rgba(255,255,255,0.6)', 3, 1.5);
+            sprite.position.set(-planeWidth / 2 - 1.8, 0, zPos);
+            group.add(sprite);
+        }
+
+        const nowTickGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-planeWidth / 2, 0.0, planeDepth / 2),
+            new THREE.Vector3(-planeWidth / 2 - 0.4, 0.0, planeDepth / 2)
+        ]);
+        group.add(new THREE.Line(nowTickGeo, axesMaterial));
+        const nowSprite = createTextSprite('Now', 'rgba(255,255,255,0.8)', 3, 1.5);
+        nowSprite.position.set(-planeWidth / 2 - 1.8, 0, planeDepth / 2);
+        group.add(nowSprite);
+
+        // ------ 轴标题 ------
+        const freqTitle = createTextSprite("Frequency", 'rgba(255,255,255,0.8)', 6, 3);
+        freqTitle.position.set(planeWidth / 2 + 3.0, 0, planeDepth / 2 + 1.2);
+        group.add(freqTitle);
+
+        const timeTitle = createTextSprite("Time", 'rgba(255,255,255,0.8)', 5, 2.5);
+        timeTitle.position.set(-planeWidth / 2 - 2.0, 0, -planeDepth / 2 - 2.0);
+        group.add(timeTitle);
+
+        const dbTitle = createTextSprite("Loudness", 'rgba(255,255,255,0.8)', 5, 2.5);
+        dbTitle.position.set(-planeWidth / 2 - 2.0, 6.5 + 1.0, planeDepth / 2 + 0.2);
+        group.add(dbTitle);
 
         // Position slightly higher to avoid clipping with bottom UI elements
         group.position.set(0, -1.5, -4.0);
@@ -1062,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
             webglOrbit.lastX = e.clientX;
             webglOrbit.lastY = e.clientY;
             webglOrbit.theta -= dx * 0.005;
-            webglOrbit.phi   += dy * 0.005;
+            webglOrbit.phi += dy * 0.005;
             webglOrbit.phi = Math.max(-0.3, Math.min(1.4, webglOrbit.phi));
             updateWebGLCameraFromOrbit();
         }
@@ -1085,9 +1210,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 webglOrbit.hasDragged = false;  // 重置拖拽标志
                 webglOrbit.lastX = e.touches[0].clientX;
                 webglOrbit.lastY = e.touches[0].clientY;
+                webglOrbit.lastTouchDistance = 0;
+            } else if (e.touches.length === 2) {
+                // 双指捏合初始化
+                webglOrbit.isDragging = false;
+                webglOrbit.lastTouchDistance = getTouchDistance(e.touches);
             }
         }
         function onWebGLTouchMove(e) {
+            // 双指捏合缩放处理
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const currentDistance = getTouchDistance(e.touches);
+                if (webglOrbit.lastTouchDistance > 0) {
+                    // 计算缩放比例
+                    const distanceDelta = currentDistance - webglOrbit.lastTouchDistance;
+                    const zoomSpeed = 0.08;
+                    webglOrbit.radius -= distanceDelta * zoomSpeed;
+                    webglOrbit.radius = Math.max(webglOrbit.minRadius, Math.min(webglOrbit.maxRadius, webglOrbit.radius));
+                    updateWebGLCameraFromOrbit();
+                }
+                webglOrbit.lastTouchDistance = currentDistance;
+                return;
+            }
+
+            // 单指拖拽处理
             if (!webglOrbit.isDragging || e.touches.length !== 1) return;
             e.preventDefault();
             const dx = e.touches[0].clientX - webglOrbit.lastX;
@@ -1099,18 +1246,39 @@ document.addEventListener('DOMContentLoaded', () => {
             webglOrbit.lastX = e.touches[0].clientX;
             webglOrbit.lastY = e.touches[0].clientY;
             webglOrbit.theta -= dx * 0.005;
-            webglOrbit.phi   += dy * 0.005;
+            webglOrbit.phi += dy * 0.005;
             webglOrbit.phi = Math.max(-0.3, Math.min(1.4, webglOrbit.phi));
             updateWebGLCameraFromOrbit();
         }
         function onWebGLTouchEnd() {
             webglOrbit.isDragging = false;
+            webglOrbit.lastTouchDistance = 0; // 重置双指距离
+        }
+
+        // 鼠标滚轮缩放处理
+        function onWebGLWheel(e) {
+            e.preventDefault();
+            // deltaY > 0 表示向下滚动（缩小），< 0 表示向上滚动（放大）
+            const zoomSpeed = 0.1;
+            const delta = e.deltaY > 0 ? 1 : -1;
+            webglOrbit.radius += delta * zoomSpeed * webglOrbit.radius;
+            webglOrbit.radius = Math.max(webglOrbit.minRadius, Math.min(webglOrbit.maxRadius, webglOrbit.radius));
+            updateWebGLCameraFromOrbit();
+        }
+
+        // 计算两个触摸点之间的距离
+        function getTouchDistance(touches) {
+            if (touches.length < 2) return 0;
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
         }
 
         webglCanvas.addEventListener('mousedown', onWebGLMouseDown);
         window.addEventListener('mousemove', onWebGLMouseMove);
         window.addEventListener('mouseup', onWebGLMouseUp);
         webglCanvas.addEventListener('click', onWebGLClick);
+        webglCanvas.addEventListener('wheel', onWebGLWheel, { passive: false });
         webglCanvas.addEventListener('touchstart', onWebGLTouchStart, { passive: true });
         webglCanvas.addEventListener('touchmove', onWebGLTouchMove, { passive: false });
         webglCanvas.addEventListener('touchend', onWebGLTouchEnd);
