@@ -74,6 +74,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeTasks = {}; // 跟踪活动任务
     let ws = null; // WebSocket连接
 
+    // --- 字幕实时刷新状态（模块级，确保切歌时可跨作用域清除）---
+    let autoRefreshInterval = null;   // 字幕自动刷新定时器
+    let autoRefreshBusy = false;      // 防止并发刷新
+    let activeTranscribeInfo = null;  // 当前活动转录信息 { musicPath, mediaDir, expectedHash, isComplete }
+
     // --- 歌词滚动状态 ---
     let isLyricScrolling = false;
     let scrollTimeout = null;
@@ -2194,6 +2199,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sound) {
             sound.unload();
         }
+        // 切歌时停止旧的字幕自动刷新轮询（防止旧歌字幕污染新歌）
+        stopSubtitleAutoRefresh();
         // 换曲时重置 LUFS 计量历史（清除滤波器状态、缓冲区和峰值）
         if (lufsNode) {
             try { lufsNode.port.postMessage({ type: 'reset-all' }); } catch (e) { }
@@ -2331,6 +2338,18 @@ document.addEventListener('DOMContentLoaded', () => {
         vbrTimeOffset = 0;
         vbrProxyActive = false;
         vbrAccurateDuration = 0;
+
+        // 如果切回的正是正在转录的曲目，重启字幕自动刷新轮询
+        if (activeTranscribeInfo &&
+            !activeTranscribeInfo.isComplete &&
+            activeTranscribeInfo.musicPath === songMusicPath) {
+            console.log('[loadSong] Returning to actively-transcribing song, restarting subtitle auto-refresh.');
+            startSubtitleAutoRefresh(
+                activeTranscribeInfo.musicPath,
+                activeTranscribeInfo.mediaDir,
+                activeTranscribeInfo.expectedHash
+            );
+        }
 
         // 检测是否为 MP3 文件，如果是则获取音频信息并启用 CBR 代理
         const isMP3 = songMusicPath.toLowerCase().endsWith('.mp3');
@@ -4676,6 +4695,106 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- 字幕自动刷新工具函数 ---
+    function stopSubtitleAutoRefresh() {
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+            autoRefreshBusy = false;
+            console.log('[Auto Refresh] Stopped subtitle auto-refresh.');
+        }
+    }
+
+    /**
+     * 启动（或重启）字幕轮询，每3秒检查一次是否有新片段。
+     * 轮询内部会检查当前播放曲目是否仍匹配，不匹配则自动停止。
+     */
+    function startSubtitleAutoRefresh(musicPath, mediaDir, expectedHash) {
+        stopSubtitleAutoRefresh();
+        // 延迟2秒启动，给后端一点时间创建文件
+        setTimeout(() => {
+            // 若转录已结束或歌曲已切换，则不启动
+            if (!activeTranscribeInfo ||
+                activeTranscribeInfo.isComplete ||
+                activeTranscribeInfo.musicPath !== musicPath) {
+                return;
+            }
+            if (autoRefreshInterval) return; // 防止重复
+            console.log('[Auto Refresh] Starting subtitle auto-refresh loop for:', musicPath);
+
+            autoRefreshInterval = setInterval(async () => {
+                // 如果歌曲已切换或转录已结束，停止轮询
+                if (!activeTranscribeInfo ||
+                    activeTranscribeInfo.isComplete ||
+                    activeTranscribeInfo.musicPath !== musicPath) {
+                    stopSubtitleAutoRefresh();
+                    return;
+                }
+                if (autoRefreshBusy) return;
+                autoRefreshBusy = true;
+
+                try {
+                    // 1. 获取当前音乐的字幕列表
+                    const params = new URLSearchParams({ src: musicPath, all: 'true' });
+                    if (mediaDir) params.append('mediaDir', mediaDir);
+
+                    const res = await fetch(`/api/find-music-subtitles?${params.toString()}`);
+                    const data = await res.json();
+
+                    if (data.success && data.subtitles && data.subtitles.length > 0) {
+                        // 2. 寻找匹配哈希值的字幕文件
+                        let targetSub = null;
+
+                        if (expectedHash) {
+                            targetSub = data.subtitles.find(s =>
+                                s.url &&
+                                s.url.includes('transcribe') &&
+                                s.url.includes(expectedHash)
+                            );
+                            if (targetSub) {
+                                console.log('[Auto Refresh] Found hash-matching subtitle:', targetSub.url);
+                            }
+                        }
+
+                        if (targetSub) {
+                            let subtitlePath = targetSub.url;
+
+                            // 3. 路径转换逻辑 (构建可访问的 URL)
+                            if (subtitlePath.includes('cache/subtitles') || subtitlePath.includes('cache\\subtitles')) {
+                                const cachePart = subtitlePath.match(/(cache[\\/]subtitles[\\/].+)/);
+                                if (cachePart) {
+                                    subtitlePath = '/' + cachePart[1].replace(/\\/g, '/');
+                                }
+                            } else if (mediaDir) {
+                                subtitlePath = subtitlePath.replace(/\\/g, '/');
+                                if (subtitlePath.startsWith(mediaDir.replace(/\\/g, '/'))) {
+                                    subtitlePath = subtitlePath.substring(mediaDir.length);
+                                }
+                                subtitlePath = '/' + subtitlePath.replace(/^\/+/, '');
+                                subtitlePath += `?mediaDir=${encodeURIComponent(mediaDir)}`;
+                            }
+
+                            // 再次确认歌曲未切换后才加载字幕
+                            if (activeTranscribeInfo && activeTranscribeInfo.musicPath === musicPath) {
+                                console.log('[Auto Refresh] Loading partial subtitle:', subtitlePath);
+                                await loadLyrics(subtitlePath);
+                                const progress = getTranscribeProgress();
+                                if (progress !== null) {
+                                    showToast(`转录进度: ${progress}%`, 'info', 2000);
+                                }
+                                await loadLocalSubtitles();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Auto Refresh] Failed:', e);
+                } finally {
+                    autoRefreshBusy = false;
+                }
+            }, 3000); // 每 3 秒刷新一次
+        }, 2000);
+    }
+
     // 处理转录请求
     async function handleTranscribe(modelConfig) {
         if (!playlist[currentSongIndex]) {
@@ -4787,100 +4906,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('[Transcribe] Expected subtitle hash suffix:', expectedHash);
         }
 
-        // --- 自动刷新字幕逻辑 ---
-        let autoRefreshInterval = null;
-        let isRefreshing = false;
-
-        const startAutoRefresh = () => {
-            // 延迟2秒启动，给后端一点时间创建文件
-            setTimeout(() => {
-                if (autoRefreshInterval) return;
-                console.log('[Auto Refresh] Starting subtitle auto-refresh loop...');
-
-                autoRefreshInterval = setInterval(async () => {
-                    if (isRefreshing) return;
-                    isRefreshing = true;
-
-                    try {
-                        // 1. 获取当前音乐的字幕列表
-                        const params = new URLSearchParams({
-                            src: musicPath,
-                            all: 'true'
-                        });
-                        if (mediaDir) params.append('mediaDir', mediaDir);
-
-                        const res = await fetch(`/api/find-music-subtitles?${params.toString()}`);
-                        const data = await res.json();
-
-                        if (data.success && data.subtitles && data.subtitles.length > 0) {
-                            // 2. 寻找匹配哈希值的字幕文件
-                            // 优先级：
-                            // a) 如果有哈希值，查找文件名包含该哈希的 transcribe 字幕
-                            // b) 否则，查找最新的 transcribe 字幕
-                            let targetSub = null;
-
-                            if (expectedHash) {
-                                // 查找匹配哈希值的字幕文件
-                                targetSub = data.subtitles.find(s =>
-                                    s.url &&
-                                    s.url.includes('transcribe') &&
-                                    s.url.includes(expectedHash)
-                                );
-                                if (targetSub) {
-                                    console.log('[Auto Refresh] Found hash-matching subtitle:', targetSub.url);
-                                }
-                            }
-
-                            // 如果没有找到匹配哈希的，或者没有哈希值，则使用第一个包含 transcribe 的
-                            // if (!targetSub) {
-                            //     targetSub = data.subtitles.find(s => s.url && s.url.includes('transcribe'));
-                            //     if (targetSub && expectedHash) {
-                            //         console.warn('[Auto Refresh] No hash match found, using first transcribe subtitle');
-                            //     }
-                            // }
-
-                            if (targetSub) {
-                                let subtitlePath = targetSub.url;
-
-                                // 3. 路径转换逻辑 (构建可访问的 URL)
-                                if (subtitlePath.includes('cache/subtitles') || subtitlePath.includes('cache\\subtitles')) {
-                                    const cachePart = subtitlePath.match(/(cache[\\/]subtitles[\\/].+)/);
-                                    if (cachePart) {
-                                        subtitlePath = '/' + cachePart[1].replace(/\\/g, '/');
-                                    }
-                                } else if (mediaDir) {
-                                    subtitlePath = subtitlePath.replace(/\\/g, '/');
-                                    if (subtitlePath.startsWith(mediaDir.replace(/\\/g, '/'))) {
-                                        subtitlePath = subtitlePath.substring(mediaDir.length);
-                                    }
-                                    subtitlePath = '/' + subtitlePath.replace(/^\/+/, '');
-                                    if (mediaDir) {
-                                        subtitlePath += `?mediaDir=${encodeURIComponent(mediaDir)}`;
-                                    }
-                                }
-
-                                console.log('[Auto Refresh] Loading partial subtitle:', subtitlePath);
-                                // showToast('检测到新的字幕片段，正在加载...', 'info', 2000);
-                                await loadLyrics(subtitlePath);
-                                // 显示目前的转录进度
-                                const progress = getTranscribeProgress();
-                                if (progress !== null) {
-                                    showToast(`转录进度: ${progress}%`, 'info', 2000);
-                                }
-                                // 顺便刷新本地字幕列表 UI
-                                await loadLocalSubtitles();
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('[Auto Refresh] Failed:', e);
-                    } finally {
-                        isRefreshing = false;
-                    }
-                }, 3000); // 每 3 秒刷新一次
-            }, 2000);
-        };
-
-        startAutoRefresh();
+        // --- 自动刷新字幕逻辑（使用模块级变量，确保切歌时能正确停止/重启）---
+        // 记录当前转录信息，供切歌时判断是否需要重启轮询
+        activeTranscribeInfo = { musicPath, mediaDir, expectedHash, isComplete: false };
+        startSubtitleAutoRefresh(musicPath, mediaDir, expectedHash);
         // -----------------------
 
         try {
@@ -4893,10 +4922,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // 转录结束，清除定时器
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-                autoRefreshInterval = null;
-            }
+            if (activeTranscribeInfo) activeTranscribeInfo.isComplete = true;
+            stopSubtitleAutoRefresh();
 
             const result = await response.json();
 
@@ -4979,10 +5006,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             // 出错时也要清除定时器
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-                autoRefreshInterval = null;
-            }
+            if (activeTranscribeInfo) activeTranscribeInfo.isComplete = true;
+            stopSubtitleAutoRefresh();
             const errorMessage = `${taskLabel}请求失败: ${error.message}`;
             showToast(errorMessage, 'error', 5000);
             addChatMessage(`错误: ${errorMessage}`, 'bot');
