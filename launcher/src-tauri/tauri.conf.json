@@ -1,0 +1,32 @@
+{
+  "productName": "Launcher",
+  "version": "0.1.0",
+  "identifier": "com.webplayer.launcher",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Launcher",
+        "width": 580,
+        "height": 555,
+        "resizable": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "icon": [
+      "icons/app_icon.ico"
+    ]
+  }
+}

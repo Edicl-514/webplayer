@@ -457,10 +457,19 @@ class VTTCorrector:
 
         # 自动检测模型格式
         if model_format == 'auto':
-            if model_name.endswith('.gguf'):
-                model_format = 'gguf'
+            # 优先判断是否为在线模型：如果配置中提供了 online_config（或其中含有关键字段），则视为 online
+            online_conf = self.model_config.get("online_config", {})
+            if online_conf and (online_conf.get("api_key") or online_conf.get("api_base") or online_conf.get("model_name")):
+                model_format = 'online'
             else:
-                model_format = 'transformers'
+                # 其次根据 model_path 的文本进行启发式判断（URL、包含 openai/api/online 的占位说明等）
+                lp = model_name.lower() if model_name else ""
+                if lp.startswith('http://') or lp.startswith('https://') or 'openai' in lp or 'api' in lp or 'online' in lp:
+                    model_format = 'online'
+                elif lp.endswith('.gguf'):
+                    model_format = 'gguf'
+                else:
+                    model_format = 'transformers'
         
         logger.info(f"模型格式: {model_format}")
         self.model_format = model_format
@@ -561,7 +570,8 @@ class VTTCorrector:
         
         logger.info(f"正在加载Transformers模型: {model_path}")
         
-        trans_config = self.model_config.get("transformers_config", {})
+        # 支持两种配置键名: `transformers_config` 或 兼容旧项目的 `transformers`
+        trans_config = self.model_config.get("transformers_config", {}) or self.model_config.get("transformers", {})
         
         # 自动检测模型类型
         detected_type = self._detect_model_type(model_path)
@@ -981,7 +991,8 @@ class VTTCorrector:
                 response = completion['choices'][0]['message']['content']
             else:
                 # Transformers模型推理
-                trans_config = self.model_config.get("transformers_config", {})
+                # 支持两种配置键名: `transformers_config` 或 `transformers`
+                trans_config = self.model_config.get("transformers_config", {}) or self.model_config.get("transformers", {})
                 model_type = trans_config.get("model_type", "auto")
 
                 # 尝试应用聊天模板，如果分词器没有配置模板，则会失败
