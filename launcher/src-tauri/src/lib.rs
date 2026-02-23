@@ -8,7 +8,11 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use sysinfo::System;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Listener, Manager, State,
+};
 
 // ───────────────────────────── Data Structures ──────────────────────────────
 
@@ -800,6 +804,127 @@ fn run_network_checks(app: AppHandle) {
     });
 }
 
+// ──────────────────────────── Tray ───────────────────────────────────────────
+
+fn status_display(status: &str) -> &'static str {
+    if status == "Running" {
+        "运行中"
+    } else {
+        "已停止"
+    }
+}
+
+fn update_tray_menu(app: &AppHandle) {
+    let state: State<AppState> = app.state();
+    let node_status = state.node_server.lock().unwrap().status.clone();
+    let python_status = state.python_server.lock().unwrap().status.clone();
+
+    let node_running = node_status == "Running";
+    let python_running = python_status == "Running";
+
+    let open = match MenuItem::with_id(app, "open", "打开", true, None::<&str>) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let sep1 = match PredefinedMenuItem::separator(app) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let node_label = format!("Node 服务：{}", status_display(&node_status));
+    let node_status_item =
+        match MenuItem::with_id(app, "node_status_display", &node_label, false, None::<&str>) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+    let node_toggle_text = if node_running {
+        "停止 Node 服务"
+    } else {
+        "启动 Node 服务"
+    };
+    let node_toggle_id = if node_running { "node_stop" } else { "node_start" };
+    let node_toggle =
+        match MenuItem::with_id(app, node_toggle_id, node_toggle_text, true, None::<&str>) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+    let sep2 = match PredefinedMenuItem::separator(app) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let python_label = format!("Python 服务：{}", status_display(&python_status));
+    let python_status_item = match MenuItem::with_id(
+        app,
+        "python_status_display",
+        &python_label,
+        false,
+        None::<&str>,
+    ) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let python_toggle_text = if python_running {
+        "停止 Python 服务"
+    } else {
+        "启动 Python 服务"
+    };
+    let python_toggle_id = if python_running {
+        "python_stop"
+    } else {
+        "python_start"
+    };
+    let python_toggle = match MenuItem::with_id(
+        app,
+        python_toggle_id,
+        python_toggle_text,
+        true,
+        None::<&str>,
+    ) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let sep3 = match PredefinedMenuItem::separator(app) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let quit = match MenuItem::with_id(app, "quit", "退出", true, None::<&str>) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    if let Ok(menu) = Menu::with_items(
+        app,
+        &[
+            &open,
+            &sep1,
+            &node_status_item,
+            &node_toggle,
+            &sep2,
+            &python_status_item,
+            &python_toggle,
+            &sep3,
+            &quit,
+        ],
+    ) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+
+    // Update tooltip
+    let tooltip = format!(
+        "Launcher  |  Node: {}  |  Python: {}",
+        status_display(&node_status),
+        status_display(&python_status)
+    );
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&tooltip));
+    }
+}
+
 // ────────────────────────── Config Template ──────────────────────────────────
 
 fn create_template_config() -> Config {
@@ -955,14 +1080,115 @@ pub fn run() {
             run_environment_checks,
             run_network_checks,
         ])
+        .setup(|app| {
+            // Build initial tray icon (no menu yet; update_tray_menu will set it)
+            TrayIconBuilder::with_id("main")
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Launcher")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "node_start" => {
+                        let state: State<AppState> = app.state();
+                        if !is_process_running(&state.node_server) {
+                            let state_clone = Arc::clone(&state.node_server);
+                            let app_clone = app.clone();
+                            thread::spawn(move || {
+                                spawn_process(
+                                    "node",
+                                    &["server.js"],
+                                    Some("./src"),
+                                    app_clone,
+                                    state_clone,
+                                    "Node",
+                                );
+                            });
+                        }
+                    }
+                    "node_stop" => {
+                        let state: State<AppState> = app.state();
+                        stop_process(Arc::clone(&state.node_server), "Node", app);
+                        app.emit("server-status-changed", serde_json::json!({})).ok();
+                    }
+                    "python_start" => {
+                        let state: State<AppState> = app.state();
+                        if !is_process_running(&state.python_server) {
+                            let state_clone = Arc::clone(&state.python_server);
+                            let app_clone = app.clone();
+                            thread::spawn(move || {
+                                spawn_process(
+                                    "python",
+                                    &["subtitle_process_backend.py"],
+                                    Some("./src"),
+                                    app_clone,
+                                    state_clone,
+                                    "Python",
+                                );
+                            });
+                        }
+                    }
+                    "python_stop" => {
+                        let state: State<AppState> = app.state();
+                        stop_process(Arc::clone(&state.python_server), "Python", app);
+                        app.emit("server-status-changed", serde_json::json!({})).ok();
+                    }
+                    "quit" => {
+                        let state: State<AppState> = app.state();
+                        stop_process(Arc::clone(&state.node_server), "Node", app);
+                        stop_process(Arc::clone(&state.python_server), "Python", app);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Listen to server-status-changed to update tray menu
+            let app_handle = app.handle().clone();
+            app.listen("server-status-changed", move |_| {
+                update_tray_menu(&app_handle);
+            });
+
+            // Set initial tray menu
+            update_tray_menu(app.handle());
+
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                // Stop both servers on exit
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } => {
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window(&label) {
+                    let _ = window.hide();
+                }
+            }
+            tauri::RunEvent::Exit => {
                 let state: State<AppState> = app_handle.state();
                 stop_process(Arc::clone(&state.node_server), "Node", app_handle);
                 stop_process(Arc::clone(&state.python_server), "Python", app_handle);
             }
+            _ => {}
         });
 }
