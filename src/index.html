@@ -552,8 +552,11 @@
         }
 
         .mobile #searchForm button {
-            flex-grow: 1;
-            /* Make buttons share remaining space */
+            flex: 1;
+            /* Make buttons share remaining space equally */
+            padding: 10px 0;
+            /* Uniform vertical padding, horizontal padding removed to ensure equal width */
+            box-sizing: border-box;
         }
 
         .mobile #searchOptions label {
@@ -1065,44 +1068,115 @@
             line-height: 1;
             padding: 0;
         }
+
+        #loading-mask {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        #loading-mask.hidden {
+            display: none !important;
+        }
+
+        .spinner {
+            border: 8px solid rgba(255, 255, 255, 0.3);
+            border-top: 8px solid #4d9deb;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 
 <body>
+    <div id="loading-mask" class="hidden">
+        <div class="spinner"></div>
+    </div>
     <div class="container">
-                <h1>WebPlayer - Browser </h1>
-                <style>
-                .action-buttons { display: block; }
-                .action-buttons .action-btn { display: inline-block; margin: 6px 4px; padding: 8px 12px; }
-                .action-btn .btn-icon { display: none; }
-                .action-btn .btn-label { display: inline-block; }
+        <h1>WebPlayer - Browser </h1>
+        <style>
+            .action-buttons {
+                display: block;
+            }
 
-                @media (max-width: 768px) {
-                  .action-buttons { display: flex; gap: 8px; }
-                  .action-buttons .action-btn { flex: 1 1 0; min-width: 0; text-align: center; padding: 10px 6px; }
-                  /* 移动端只显示图标，隐藏文字标签 */
-                  .action-btn .btn-label { display: none; }
-                  .action-btn .btn-icon { display: inline-block; font-size: 1.2em; line-height: 1; }
+            .action-buttons .action-btn {
+                display: inline-block;
+                margin: 6px 4px;
+                padding: 8px 12px;
+            }
+
+            .action-btn .btn-icon {
+                display: none;
+            }
+
+            .action-btn .btn-label {
+                display: inline-block;
+            }
+
+            @media (max-width: 768px) {
+                .action-buttons {
+                    display: flex;
+                    gap: 8px;
                 }
-                </style>
-                <div class="action-buttons">
-                    <button class="action-btn" id="cacheManagerButton" aria-label="缓存管理">
-                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-hdd"></i></span>
-                        <span class="btn-label">缓存管理</span>
-                    </button>
-                    <button class="action-btn" id="scraperManagerButton" aria-label="视频刮削">
-                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-video"></i></span>
-                        <span class="btn-label">视频刮削</span>
-                    </button>
-                    <button class="action-btn" id="musicScraperManagerButton" aria-label="音乐刮削">
-                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-music"></i></span>
-                        <span class="btn-label">音乐刮削</span>
-                    </button>
-                    <button class="action-btn" id="transcribeManagerButton" aria-label="字幕转录">
-                        <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-closed-captioning"></i></span>
-                        <span class="btn-label">字幕转录</span>
-                    </button>
-                </div>
+
+                .action-buttons .action-btn {
+                    flex: 1 1 0;
+                    min-width: 0;
+                    text-align: center;
+                    padding: 10px 6px;
+                }
+
+                /* 移动端只显示图标，隐藏文字标签 */
+                .action-btn .btn-label {
+                    display: none;
+                }
+
+                .action-btn .btn-icon {
+                    display: inline-block;
+                    font-size: 1.2em;
+                    line-height: 1;
+                }
+            }
+        </style>
+        <div class="action-buttons">
+            <button class="action-btn" id="cacheManagerButton" aria-label="缓存管理">
+                <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-hdd"></i></span>
+                <span class="btn-label">缓存管理</span>
+            </button>
+            <button class="action-btn" id="scraperManagerButton" aria-label="视频刮削">
+                <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-video"></i></span>
+                <span class="btn-label">视频刮削</span>
+            </button>
+            <button class="action-btn" id="musicScraperManagerButton" aria-label="音乐刮削">
+                <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-music"></i></span>
+                <span class="btn-label">音乐刮削</span>
+            </button>
+            <button class="action-btn" id="transcribeManagerButton" aria-label="字幕转录">
+                <span class="btn-icon" aria-hidden="true"><i class="fa-solid fa-closed-captioning"></i></span>
+                <span class="btn-label">字幕转录</span>
+            </button>
+        </div>
         <!-- 缓存信息面板 -->
         <div id="cache-info-panel">
             <h2>缓存管理</h2>
@@ -1154,7 +1228,7 @@
                             <select id="sortBy">
                                 <option value="name">文件名</option>
                                 <option value="type">文件类型</option>
-                                <option value="time">修改时间</option>
+                                <option value="time">修改时间(真实)</option>
                                 <option value="time-system">修改时间(系统)</option>
                             </select>
                         </div>
@@ -1194,6 +1268,14 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            const loadingMask = document.getElementById('loading-mask');
+            function showLoadingMask() {
+                if (loadingMask) loadingMask.classList.remove('hidden');
+            }
+            function hideLoadingMask() {
+                if (loadingMask) loadingMask.classList.add('hidden');
+            }
+
             function getCharGroup(char) {
                 if (!char) return '...';
                 if (char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z') {
@@ -1327,6 +1409,7 @@
 
             // 获取根目录媒体目录列表并展示
             async function fetchRootDirs() {
+                showLoadingMask();
                 try {
                     const response = await fetch('/api/root-dirs');
                     if (!response.ok) {
@@ -1392,12 +1475,15 @@
                 } catch (error) {
                     console.error('Error fetching root directories:', error);
                     rootDirsGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载目录失败: ${error.message}</div></div>`;
+                } finally {
+                    hideLoadingMask();
                 }
             }
 
             // 切换媒体目录
             // 增加 currentPath 参数，允许在切换媒体目录后直接导航到指定路径
             async function switchMediaDir(newDir, targetPath = '/', historyAction = 'replace') {
+                showLoadingMask();
                 try {
                     const response = await fetch('/api/set-media-dir', {
                         method: 'POST',
@@ -1431,10 +1517,13 @@
                     }
                 } catch (error) {
                     console.error('Error switching media directory:', error);
+                } finally {
+                    hideLoadingMask();
                 }
             }
 
             async function fetchFiles(relativePath) {
+                showLoadingMask();
                 try {
                     // 对路径进行编码以防止特殊字符（如 #）引起的问题
                     const encodedRelativePath = relativePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
@@ -1445,116 +1534,123 @@
                     }
                     const files = await response.json();
                     currentFiles = files; // 保存文件列表
-                    sortAndDisplayFiles(); // 应用当前排序
+                    await sortAndDisplayFiles(); // 应用当前排序
                 } catch (error) {
                     console.error('Error fetching files:', error);
                     fileGrid.innerHTML = `<div class="grid-item"><div class="file-info">加载文件失败: ${error.message}</div></div>`;
+                } finally {
+                    hideLoadingMask();
                 }
             }
 
             async function sortAndDisplayFiles() {
-                const sortTypeValue = sortBy.value;
-                const sortOrderValue = sortOrder.value;
+                showLoadingMask();
+                try {
+                    const sortTypeValue = sortBy.value;
+                    const sortOrderValue = sortOrder.value;
 
-                // Step 1: Sort the files based on current settings
-                if (sortTypeValue === 'time' || sortTypeValue === 'time-system') {
-                    try {
-                        const useSystemTime = sortTypeValue === 'time-system' ? '&system=true' : '';
-                        const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}${useSystemTime}`);
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
+                    // Step 1: Sort the files based on current settings
+                    if (sortTypeValue === 'time' || sortTypeValue === 'time-system') {
+                        try {
+                            const useSystemTime = sortTypeValue === 'time-system' ? '&system=true' : '';
+                            const response = await fetch(`/api/sort-by-time?path=${encodeURIComponent(currentPath)}&order=${sortOrderValue}${useSystemTime}`);
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            currentFiles = await response.json();
+                        } catch (error) {
+                            console.error('Error sorting by time:', error);
+                            return; // Exit if sorting fails
                         }
-                        currentFiles = await response.json();
-                    } catch (error) {
-                        console.error('Error sorting by time:', error);
-                        return; // Exit if sorting fails
+                    } else {
+                        currentFiles.sort((a, b) => {
+                            const mixSort = document.getElementById('mixSort').checked;
+
+                            if (!mixSort) {
+                                if (a.isDirectory && !b.isDirectory) return -1;
+                                if (!a.isDirectory && b.isDirectory) return 1;
+                            }
+
+                            // 当启用混合排序且按名称排序时，优先按首字母分组排序
+                            if (mixSort && sortTypeValue === 'name') {
+                                const groupA = getCharGroup(a.name.charAt(0));
+                                const groupB = getCharGroup(b.name.charAt(0));
+
+                                // 定义分组的排序顺序
+                                const groupOrder = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), 'あ', '汉', '@', '...'];
+                                const indexA = groupOrder.indexOf(groupA);
+                                const indexB = groupOrder.indexOf(groupB);
+
+                                if (indexA !== indexB) {
+                                    return sortOrderValue === 'asc' ? indexA - indexB : indexB - indexA;
+                                }
+
+                                // 同一分组内按文件名排序（使用中文本地化比较，带中文数字识别）
+                                const nameCmp = compareNamesLocalized(a.name, b.name);
+                                if (nameCmp < 0) return -1;
+                                if (nameCmp > 0) return 1;
+                                return 0;
+                            }
+
+                            // 非混合排序时（默认行为），如果选择按名称排序，先按文件类型分组再按名称排序
+                            if (!mixSort && sortTypeValue === 'name') {
+                                const extA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
+                                const extB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
+
+                                if (extA !== extB) {
+                                    return sortOrderValue === 'asc' ? extA.localeCompare(extB) : extB.localeCompare(extA);
+                                }
+                                // 同类型则继续按名称比较（下面的通用比较会处理）
+                            }
+
+                            let compareA, compareB;
+                            switch (sortTypeValue) {
+                                case 'name':
+                                    compareA = a.name;
+                                    compareB = b.name;
+                                    break;
+                                case 'type':
+                                    compareA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
+                                    compareB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
+                                    break;
+                                default: // default to name sort
+                                    compareA = a.name;
+                                    compareB = b.name;
+                            }
+
+                            if (sortTypeValue === 'name') {
+                                const cmp = compareNamesLocalized(compareA, compareB);
+                                if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
+                                if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
+                                return 0;
+                            } else {
+                                const cmp = zhCollator.compare(String(compareA).toLowerCase(), String(compareB).toLowerCase());
+                                if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
+                                if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
+                                return 0;
+                            }
+                        });
                     }
-                } else {
-                    currentFiles.sort((a, b) => {
-                        const mixSort = document.getElementById('mixSort').checked;
 
-                        if (!mixSort) {
-                            if (a.isDirectory && !b.isDirectory) return -1;
-                            if (!a.isDirectory && b.isDirectory) return 1;
-                        }
+                    // Step 2: Display the sorted files
+                    displayFiles(currentFiles);
 
-                        // 当启用混合排序且按名称排序时，优先按首字母分组排序
-                        if (mixSort && sortTypeValue === 'name') {
-                            const groupA = getCharGroup(a.name.charAt(0));
-                            const groupB = getCharGroup(b.name.charAt(0));
+                    // Step 3: Update the sidebar based on the new sort order and settings
+                    const sidebar = document.getElementById('sidebar');
+                    const mixSortChecked = document.getElementById('mixSort').checked;
+                    const shouldShowSidebar = mixSortChecked && sortTypeValue === 'name';
 
-                            // 定义分组的排序顺序
-                            const groupOrder = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), 'あ', '汉', '@', '...'];
-                            const indexA = groupOrder.indexOf(groupA);
-                            const indexB = groupOrder.indexOf(groupB);
-
-                            if (indexA !== indexB) {
-                                return sortOrderValue === 'asc' ? indexA - indexB : indexB - indexA;
-                            }
-
-                            // 同一分组内按文件名排序（使用中文本地化比较，带中文数字识别）
-                            const nameCmp = compareNamesLocalized(a.name, b.name);
-                            if (nameCmp < 0) return -1;
-                            if (nameCmp > 0) return 1;
-                            return 0;
-                        }
-
-                        // 非混合排序时（默认行为），如果选择按名称排序，先按文件类型分组再按名称排序
-                        if (!mixSort && sortTypeValue === 'name') {
-                            const extA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
-                            const extB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
-
-                            if (extA !== extB) {
-                                return sortOrderValue === 'asc' ? extA.localeCompare(extB) : extB.localeCompare(extA);
-                            }
-                            // 同类型则继续按名称比较（下面的通用比较会处理）
-                        }
-
-                        let compareA, compareB;
-                        switch (sortTypeValue) {
-                            case 'name':
-                                compareA = a.name;
-                                compareB = b.name;
-                                break;
-                            case 'type':
-                                compareA = a.isDirectory ? '' : (a.name.includes('.') && a.name.lastIndexOf('.') > 0 ? a.name.slice(a.name.lastIndexOf('.') + 1).toLowerCase() : '');
-                                compareB = b.isDirectory ? '' : (b.name.includes('.') && b.name.lastIndexOf('.') > 0 ? b.name.slice(b.name.lastIndexOf('.') + 1).toLowerCase() : '');
-                                break;
-                            default: // default to name sort
-                                compareA = a.name;
-                                compareB = b.name;
-                        }
-
-                        if (sortTypeValue === 'name') {
-                            const cmp = compareNamesLocalized(compareA, compareB);
-                            if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
-                            if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
-                            return 0;
-                        } else {
-                            const cmp = zhCollator.compare(String(compareA).toLowerCase(), String(compareB).toLowerCase());
-                            if (cmp < 0) return sortOrderValue === 'asc' ? -1 : 1;
-                            if (cmp > 0) return sortOrderValue === 'asc' ? 1 : -1;
-                            return 0;
-                        }
-                    });
-                }
-
-                // Step 2: Display the sorted files
-                displayFiles(currentFiles);
-
-                // Step 3: Update the sidebar based on the new sort order and settings
-                const sidebar = document.getElementById('sidebar');
-                const mixSortChecked = document.getElementById('mixSort').checked;
-                const shouldShowSidebar = mixSortChecked && sortTypeValue === 'name';
-
-                if (shouldShowSidebar) {
-                    updateSidebar();
-                    sidebar.classList.remove('hidden');
-                } else {
-                    // 确保侧边栏被隐藏
-                    sidebar.classList.add('hidden');
-                    // 清空侧边栏内容
-                    sidebar.innerHTML = '';
+                    if (shouldShowSidebar) {
+                        updateSidebar();
+                        sidebar.classList.remove('hidden');
+                    } else {
+                        // 确保侧边栏被隐藏
+                        sidebar.classList.add('hidden');
+                        // 清空侧边栏内容
+                        sidebar.innerHTML = '';
+                    }
+                } finally {
+                    hideLoadingMask();
                 }
             }
 
@@ -1790,7 +1886,7 @@
                             addToPlaylistButton.className = 'add-to-playlist-btn';
                             addToPlaylistButton.onclick = (e) => {
                                 e.stopPropagation();
-                                addToPlaylist(file);
+                                addToPlaylist(file, addToPlaylistButton);
                             };
                             actionsDiv.appendChild(addToPlaylistButton);
                         }
@@ -1986,12 +2082,20 @@
                 }, 3000);
             }
 
-            function addToPlaylist(file) {
+            async function addToPlaylist(file, btn) {
                 const encodedPath = currentPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
                 const encodedFileName = encodeURIComponent(file.name);
                 const musicUrl = `${encodedPath === '/' ? '' : encodedPath}/${encodedFileName}`.replace(/\\/g, '/');
                 const finalSrc = `${decodeURIComponent(musicUrl)}?mediaDir=${encodeURIComponent(currentMediaDir)}`;
 
+                // 快速重复检测，在请求元数据前先拦截
+                let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+                if (playlist.some(pSong => pSong.src === finalSrc)) {
+                    showNotification(`已经在播放列表中`);
+                    return;
+                }
+
+                // 文件名解析作为备用
                 const parts = file.name.replace(/\.\w+$/, '').split(' - ');
                 let artist = '未知艺术家';
                 let title = parts[0];
@@ -2003,22 +2107,54 @@
                 const song = {
                     title: title,
                     artist: artist,
+                    album: '',
+                    titleFromFilename: true,
                     src: finalSrc,
-                    cover: 'cover.jpg', // Default cover
+                    cover: 'cover.jpg',
                     lrc: null
                 };
 
-                let playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+                // 按钮加载状态
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                }
 
-                // Check for duplicates based on src
-                if (playlist.some(pSong => pSong.src === song.src)) {
+                // 优先从服务器获取本地元数据
+                try {
+                    let musicPath = decodeURIComponent(musicUrl);
+                    if (musicPath.startsWith('/')) musicPath = musicPath.substring(1);
+
+                    const params = new URLSearchParams({ path: musicPath, source: 'local', only: 'info' });
+                    if (currentMediaDir) params.append('mediaDir', currentMediaDir);
+
+                    const response = await fetch(`/api/music-info?${params.toString()}`);
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success && result.data) {
+                            const info = result.data;
+                            if (info.title)  { song.title  = info.title;  song.titleFromFilename = false; }
+                            if (info.artist) { song.artist = info.artist; song.titleFromFilename = false; }
+                            if (info.album)  { song.album  = info.album; }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[addToPlaylist] 获取元数据失败，使用文件名解析:', e);
+                }
+
+                // 异步结束后再次检查重复（防止同时多次点击）
+                playlist = JSON.parse(localStorage.getItem('musicPlaylist')) || [];
+                if (playlist.some(pSong => pSong.src === finalSrc)) {
                     showNotification(`'${song.title}' 已经在播放列表中`);
+                    if (btn) { btn.disabled = false; btn.textContent = '添加'; }
                     return;
                 }
 
                 playlist.push(song);
                 localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                 showNotification(`'${song.title}' 已添加到播放列表`);
+
+                if (btn) { btn.disabled = false; btn.textContent = '添加'; }
             }
 
             closePlayerButton.onclick = () => {
@@ -2940,67 +3076,74 @@
 
     <!-- 字幕转录面板 -->
     <style>
-    /* 浮动面板样式（用于视频/音乐/字幕面板）
+        /* 浮动面板样式（用于视频/音乐/字幕面板）
        - 在桌面显示为右下浮动窗口
        - 在移动端宽度自适应，并保证内容可滚动 */
-    #transcribe-panel.floating {
-        width: 450px;
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        max-height: 70vh;
-        background-color: rgba(60,60,63,0.95);
-        border-radius: 8px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-        z-index: 1001;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        color: #e0e0e0;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        overflow: hidden;
-    }
-    #transcribe-panel.floating .scraper-queue { overflow: auto; }
-    #transcribe-panel.floating .panel-close-btn {
-        position: absolute;
-        top: 12px;
-        right: 12px;
-        background: none;
-        border: none;
-        color: #e0e0e0;
-        font-size: 1.5em;
-        cursor: pointer;
-        line-height: 1;
-        padding: 0;
-    }
-    /* 小屏幕适配 */
-    @media (max-width: 600px) {
         #transcribe-panel.floating {
-            left: 10px;
-            right: 10px;
-            bottom: 10px;
-            width: auto;
-            max-height: 80vh;
-            border-radius: 10px;
-            padding: 12px;
-        }
-        #transcribe-panel.floating .transcribe-type-options {
+            width: 450px;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            max-height: 70vh;
+            background-color: rgba(60, 60, 63, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            z-index: 1001;
+            padding: 20px;
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+            flex-direction: column;
+            color: #e0e0e0;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            overflow: hidden;
         }
-        /* Only make text-like controls full-width on small screens; avoid affecting radios/checkboxes */
-        #transcribe-panel.floating select,
-        #transcribe-panel.floating input[type="text"],
-        #transcribe-panel.floating input[type="search"],
-        #transcribe-panel.floating input[type="number"],
-        #transcribe-panel.floating textarea,
-        #transcribe-panel.floating button:not(.panel-close-btn) {
-            width: 100%;
-            box-sizing: border-box;
+
+        #transcribe-panel.floating .scraper-queue {
+            overflow: auto;
         }
-    }
+
+        #transcribe-panel.floating .panel-close-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: #e0e0e0;
+            font-size: 1.5em;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+
+        /* 小屏幕适配 */
+        @media (max-width: 600px) {
+            #transcribe-panel.floating {
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
+                width: auto;
+                max-height: 80vh;
+                border-radius: 10px;
+                padding: 12px;
+            }
+
+            #transcribe-panel.floating .transcribe-type-options {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            /* Only make text-like controls full-width on small screens; avoid affecting radios/checkboxes */
+            #transcribe-panel.floating select,
+            #transcribe-panel.floating input[type="text"],
+            #transcribe-panel.floating input[type="search"],
+            #transcribe-panel.floating input[type="number"],
+            #transcribe-panel.floating textarea,
+            #transcribe-panel.floating button:not(.panel-close-btn) {
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
     </style>
 
     <div id="transcribe-panel" class="hidden floating">

@@ -628,7 +628,8 @@ a .fab {
     background: var(--accent-color) !important;
 }
 
-.dplayer-setting .dplayer-setting-box {
+.dplayer-setting .dplayer-setting-box,
+.dplayer-quality-list {
     background: var(--secondary-bg) !important;
     border-radius: 8px;
     box-shadow: 0 4px 10px var(--shadow-color);
@@ -637,7 +638,11 @@ a .fab {
 .dplayer-controller .dplayer-icon,
 .dplayer-quality-item,
 .dplayer-speed-item,
-.dplayer-setting-item {
+.dplayer-setting-item,
+.dplayer-quality-icon,
+.dplayer-quality-label,
+.dplayer-speed-icon,
+.dplayer-speed-label {
     color: var(--primary-text) !important;
     transition: all 0.2s ease;
 }
@@ -645,7 +650,11 @@ a .fab {
 .dplayer-controller .dplayer-icon:hover,
 .dplayer-quality-item:hover,
 .dplayer-speed-item:hover,
-.dplayer-setting-item:hover {
+.dplayer-setting-item:hover,
+.dplayer-quality-icon:hover,
+.dplayer-quality-label:hover,
+.dplayer-speed-icon:hover,
+.dplayer-speed-label:hover {
     color: var(--accent-color) !important;
     background: transparent !important;
 }

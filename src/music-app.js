@@ -95,6 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
 
     let playlist = [];
+    // 标志：是否已从文件夹构建过播放列表。
+    // 设为 true 后，后续切歌不再用文件夹内容覆盖用户精选列表。
+    let folderPlaylistLoaded = false;
 
     // --- VBR→CBR 代理流状态 ---
     let vbrProxyActive = false;     // 当前是否使用 CBR 代理流
@@ -426,12 +429,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             playlist = savedPlaylist;
             currentSongIndex = songIndex;
+            // 若 localStorage 中已有多首歌曲，说明用户有精选播放列表，不应从文件夹重建
+            if (savedPlaylist.length > 1) {
+                folderPlaylistLoaded = true;
+            }
             initPlaylist();
             loadSong(currentSongIndex);
 
         } else if (savedPlaylist.length > 0) {
             playlist = savedPlaylist;
             currentSongIndex = 0;
+            // 若有多首保存的歌曲，标记文件夹列表已加载，不再重建
+            if (savedPlaylist.length > 1) {
+                folderPlaylistLoaded = true;
+            }
             initPlaylist();
             loadSong(currentSongIndex);
         } else {
@@ -2229,8 +2240,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // If this is the first time a song is played (not from a folder load), fetch the folder playlist
-        if (!fromFolderLoad) {
+        // 仅在首次加载时从文件夹获取播放列表（folderPlaylistLoaded 防止重复构建，保护用户的精选列表）
+        if (!fromFolderLoad && !folderPlaylistLoaded) {
             try {
                 // Extract relative path and mediaDir from the song's src
                 const url = new URL(song.src, window.location.origin);
@@ -2258,6 +2269,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         playlist = newPlaylist;
                         currentSongIndex = (newIndex !== -1) ? newIndex : 0;
+
+                        // 标记文件夹列表已构建，后续切歌不再重建
+                        folderPlaylistLoaded = true;
 
                         // Re-initialize the playlist UI and reload the song from the new context
                         initPlaylist();
@@ -4069,6 +4083,33 @@ document.addEventListener('DOMContentLoaded', () => {
     playPauseBtn.addEventListener('click', playPause);
     prevBtn.addEventListener('click', playPrev);
     nextBtn.addEventListener('click', playNext);
+
+    // 监听其他标签页（如 index.html）通过 localStorage 添加歌曲
+    window.addEventListener('storage', function (e) {
+        if (e.key === 'musicPlaylist' && e.newValue) {
+            try {
+                const newStoredPlaylist = JSON.parse(e.newValue) || [];
+                const currentSrcs = new Set(playlist.map(s => s.src));
+                const addedSongs = newStoredPlaylist.filter(s => !currentSrcs.has(s.src));
+                if (addedSongs.length > 0) {
+                    playlist.push(...addedSongs);
+                    // 同步写回 localStorage，确保两端数据一致
+                    localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+                    initPlaylist();
+                    updatePlaylistUI();
+                    // 若控制按钮因单曲模式被隐藏，重新显示
+                    if (playlist.length > 1) {
+                        prevBtn.style.display = 'block';
+                        nextBtn.style.display = 'block';
+                        modeBtn.style.display = 'block';
+                    }
+                    showToast(`已添加 ${addedSongs.length} 首歌曲到播放列表`);
+                }
+            } catch (err) {
+                console.error('[storage] 同步播放列表失败:', err);
+            }
+        }
+    });
     progressBar.addEventListener('input', seek);
     volumeSlider.addEventListener('input', setVolume);
     volumeSlider.addEventListener('input', handleVolumeSliderInteraction);
