@@ -3,6 +3,7 @@
 /launcher/src-tauri/target
 /launcher/target
 /launcher/dist
+launcher_settings.json
 /models
 /src/models
 /src/__pycache__

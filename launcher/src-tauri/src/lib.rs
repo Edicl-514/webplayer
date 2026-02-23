@@ -211,6 +211,29 @@ impl Default for Config {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct LauncherSettings {
+    #[serde(default)]
+    auto_start_node: bool,
+    #[serde(default)]
+    auto_start_python: bool,
+    #[serde(default)]
+    start_minimized: bool,
+    #[serde(default)]
+    auto_start_on_boot: bool,
+}
+
+impl Default for LauncherSettings {
+    fn default() -> Self {
+        Self {
+            auto_start_node: false,
+            auto_start_python: false,
+            start_minimized: false,
+            auto_start_on_boot: false,
+        }
+    }
+}
+
 // ─────────────────────────── App State ───────────────────────────────────────
 
 #[derive(Default)]
@@ -645,6 +668,48 @@ fn save_config(config: Config) -> Result<(), String> {
     fs::write(&config_path, json).map_err(|e| e.to_string())
 }
 
+fn launcher_settings_path() -> PathBuf {
+    PathBuf::from("./launcher_settings.json")
+}
+
+#[tauri::command]
+fn load_launcher_settings() -> LauncherSettings {
+    let path = launcher_settings_path();
+    if path.exists() {
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        LauncherSettings::default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_autostart(enable: bool) -> Result<(), String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let run_path = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    let (key, _) = hkcu.create_subkey(run_path).map_err(|e| e.to_string())?;
+    if enable {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_str = exe_path.to_string_lossy().to_string();
+        key.set_value("Launcher", &exe_str).map_err(|e| e.to_string())?;
+    } else {
+        let _ = key.delete_value("Launcher");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_launcher_settings(settings: LauncherSettings) -> Result<(), String> {
+    let path = launcher_settings_path();
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    apply_autostart(settings.auto_start_on_boot)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn run_environment_checks(app: AppHandle) {
     let items = vec![
@@ -1064,8 +1129,182 @@ fn create_template_config() -> Config {
 
 // ───────────────────────────── Entry Point ────────────────────────────────────
 
+/// Windows下显示消息框
+#[cfg(target_os = "windows")]
+fn show_message_box(title: &str, message: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    
+    let title_wide: Vec<u16> = std::ffi::OsStr::new(title)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let message_wide: Vec<u16> = std::ffi::OsStr::new(message)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    
+    unsafe {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *mut std::ffi::c_void,
+                lptext: *const u16,
+                lpcaption: *const u16,
+                utype: u32,
+            ) -> i32;
+        }
+        
+        // MB_OK | MB_ICONINFORMATION
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message_wide.as_ptr(),
+            title_wide.as_ptr(),
+            0x40,
+        );
+    }
+}
+
+/// Windows上使用命名互斥体进行单实例检测
+#[cfg(target_os = "windows")]
+fn check_single_instance() -> Result<(), String> {
+    let mutex_name = "Global\\WebPlayerLauncher_SingleInstance";
+    
+    unsafe {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateMutexW(
+                lpMutexAttributes: *mut std::ffi::c_void,
+                bInitialOwner: i32,
+                lpName: *const u16,
+            ) -> *mut std::ffi::c_void;
+            
+            fn GetLastError() -> u32;
+            
+            fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+        }
+        
+        const ERROR_ALREADY_EXISTS: u32 = 183;
+        
+        // 将互斥体名称转换为宽字符
+        use std::os::windows::ffi::OsStrExt;
+        let mutex_name_wide: Vec<u16> = std::ffi::OsStr::new(mutex_name)
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        
+        // 创建互斥体，bInitialOwner=1 表示立即获取所有权
+        let mutex_handle = CreateMutexW(
+            std::ptr::null_mut(),
+            1,
+            mutex_name_wide.as_ptr(),
+        );
+        
+        if mutex_handle.is_null() {
+            return Err("创建互斥体失败".to_string());
+        }
+        
+        // 检查互斥体是否已存在
+        let error = GetLastError();
+        if error == ERROR_ALREADY_EXISTS {
+            // 互斥体已存在，说明已有其他实例在运行
+            CloseHandle(mutex_handle);
+            return Err("启动器已经在运行中".to_string());
+        }
+        
+        // 成功创建互斥体，保存handle以保持互斥体的生命周期
+        // 使用全局静态变量保存handle，防止互斥体被释放
+        static mut MUTEX_HANDLE: *mut std::ffi::c_void = std::ptr::null_mut();
+        MUTEX_HANDLE = mutex_handle;
+        
+        Ok(())
+    }
+}
+
+/// 非Windows平台的实现
+#[cfg(not(target_os = "windows"))]
+fn check_single_instance() -> Result<(), String> {
+    use std::io::Write;
+    
+    // 在非Windows平台上使用文件锁
+    let lock_dir = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config/webplayer_launcher")
+    } else if let Ok(temp) = std::env::var("TEMP") {
+        PathBuf::from(temp)
+    } else {
+        PathBuf::from(".")
+    };
+    
+    let _ = fs::create_dir_all(&lock_dir);
+    
+    let lock_file = lock_dir.join("launcher.lock");
+    let pid = std::process::id();
+    
+    // 检查是否存在锁文件，如果存在则检查对应进程是否仍在运行
+    if lock_file.exists() {
+        if let Ok(content) = fs::read_to_string(&lock_file) {
+            if let Ok(old_pid) = content.trim().parse::<u32>() {
+                let mut system = System::new_all();
+                system.refresh_all();
+                if system.process(sysinfo::Pid::from(old_pid as usize)).is_some() {
+                    return Err("启动器已经在运行中".to_string());
+                }
+            }
+        }
+        let _ = fs::remove_file(&lock_file);
+    }
+    
+    // 创建新的锁文件
+    if let Ok(mut file) = fs::File::create(&lock_file) {
+        let _ = writeln!(file, "{}", pid);
+        Ok(())
+    } else {
+        Err("无法创建锁文件".to_string())
+    }
+}
+
+/// 清理启动器锁文件（仅非Windows平台需要）
+#[cfg(not(target_os = "windows"))]
+fn cleanup_lock_file() {
+    let lock_dir = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config/webplayer_launcher")
+    } else if let Ok(temp) = std::env::var("TEMP") {
+        PathBuf::from(temp)
+    } else {
+        PathBuf::from(".")
+    };
+    
+    let lock_file = lock_dir.join("launcher.lock");
+    let _ = fs::remove_file(&lock_file);
+}
+
+/// Windows平台互斥体无需手动清理（进程退出时自动释放）
+#[cfg(target_os = "windows")]
+fn cleanup_lock_file() {
+    // 互斥体会在进程退出时自动被操作系统释放
+}
+
 pub fn run() {
+    // 检查单实例
+    if let Err(error_msg) = check_single_instance() {
+        // 显示错误信息并退出
+        #[cfg(target_os = "windows")]
+        {
+            // Windows下使用MessageBox显示错误
+            let title = "启动器提示";
+            show_message_box(&title, &error_msg);
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            eprintln!("{}", error_msg);
+        }
+        
+        return;
+    }
+    
     tauri::Builder::default()
+
+
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             get_server_status,
@@ -1077,6 +1316,8 @@ pub fn run() {
             restart_python_server,
             load_config,
             save_config,
+            load_launcher_settings,
+            save_launcher_settings,
             run_environment_checks,
             run_network_checks,
         ])
@@ -1169,6 +1410,44 @@ pub fn run() {
             // Set initial tray menu
             update_tray_menu(app.handle());
 
+            // Apply launcher settings on startup
+            let startup_settings = load_launcher_settings();
+            if startup_settings.start_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            if startup_settings.auto_start_node {
+                let state: State<AppState> = app.state();
+                let state_clone = Arc::clone(&state.node_server);
+                let app_clone = app.handle().clone();
+                thread::spawn(move || {
+                    spawn_process(
+                        "node",
+                        &["server.js"],
+                        Some("./src"),
+                        app_clone,
+                        state_clone,
+                        "Node",
+                    );
+                });
+            }
+            if startup_settings.auto_start_python {
+                let state: State<AppState> = app.state();
+                let state_clone = Arc::clone(&state.python_server);
+                let app_clone = app.handle().clone();
+                thread::spawn(move || {
+                    spawn_process(
+                        "python",
+                        &["subtitle_process_backend.py"],
+                        Some("./src"),
+                        app_clone,
+                        state_clone,
+                        "Python",
+                    );
+                });
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -1188,6 +1467,9 @@ pub fn run() {
                 let state: State<AppState> = app_handle.state();
                 stop_process(Arc::clone(&state.node_server), "Node", app_handle);
                 stop_process(Arc::clone(&state.python_server), "Python", app_handle);
+                
+                // 清理锁文件
+                cleanup_lock_file();
             }
             _ => {}
         });

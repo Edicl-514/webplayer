@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Config,
+  LauncherSettings,
   Model,
   TranscriberModel,
   defaultModel,
@@ -17,6 +18,8 @@ import { useI18n } from "../I18nContext";
 interface Props {
   config: Config;
   onSaved: (c: Config) => void;
+  launcherSettings: LauncherSettings;
+  onSavedLauncher: (s: LauncherSettings) => void;
 }
 
 function Section({
@@ -532,18 +535,22 @@ function TranscriberEditor({
   );
 }
 
-export default function SettingsTab({ config: initialConfig, onSaved }: Props) {
+export default function SettingsTab({ config: initialConfig, onSaved, launcherSettings: initialLauncherSettings, onSavedLauncher }: Props) {
   const { t } = useI18n();
   const [config, setConfig] = useState<Config>(initialConfig);
+  const [launcherSettings, setLauncherSettings] = useState<LauncherSettings>(initialLauncherSettings);
   const [saveMsg, setSaveMsg] = useState("");
 
   const upd = (patch: Partial<Config>) => setConfig((c) => ({ ...c, ...patch }));
+  const updLauncher = (patch: Partial<LauncherSettings>) => setLauncherSettings((s) => ({ ...s, ...patch }));
 
   async function handleSave() {
     try {
       await invoke("save_config", { config });
+      await invoke("save_launcher_settings", { settings: launcherSettings });
       setSaveMsg(t("configSaved"));
       onSaved(config);
+      onSavedLauncher(launcherSettings);
     } catch (e) {
       setSaveMsg(`${t("error")}${e}`);
     }
@@ -556,6 +563,29 @@ export default function SettingsTab({ config: initialConfig, onSaved }: Props) {
         <button className="btn primary" onClick={handleSave}>{t("saveConfig")}</button>
         {saveMsg && <span style={{ color: saveMsg.startsWith(t("error")) ? "#f38ba8" : "#a6e3a1" }}>{saveMsg}</span>}
       </div>
+
+      <Section title={t("launcherSettings")} defaultOpen={false}>
+        <CheckInput
+          label={t("autoStartNode")}
+          value={launcherSettings.auto_start_node}
+          onChange={(v) => updLauncher({ auto_start_node: v })}
+        />
+        <CheckInput
+          label={t("autoStartPython")}
+          value={launcherSettings.auto_start_python}
+          onChange={(v) => updLauncher({ auto_start_python: v })}
+        />
+        <CheckInput
+          label={t("startMinimized")}
+          value={launcherSettings.start_minimized}
+          onChange={(v) => updLauncher({ start_minimized: v })}
+        />
+        <CheckInput
+          label={t("autoStartOnBoot")}
+          value={launcherSettings.auto_start_on_boot}
+          onChange={(v) => updLauncher({ auto_start_on_boot: v })}
+        />
+      </Section>
 
       <Section title={t("apiKeys")}>
         <LabelInput label="MusicBrainz Client ID" value={config.api_keys.musicbrainz.client_id} onChange={(v) => upd({ api_keys: { ...config.api_keys, musicbrainz: { ...config.api_keys.musicbrainz, client_id: v } } })} />

@@ -96,6 +96,12 @@ const translations = {
     optTaskTranslate: "Translate",
     other: "Other",
     customValue: "Custom value",
+    launcherSettings: "Launcher Settings",
+    autoStartNode: "Auto-start Node Server",
+    autoStartPython: "Auto-start Python Server",
+    startMinimized: "Start Minimized",
+    autoStartOnBoot: "Start on System Boot",
+    launcherSettingsSaved: "Launcher settings saved.",
   },
   zh: {
     launcherTab: "启动器",
@@ -192,6 +198,12 @@ const translations = {
     optTaskTranslate: "翻译",
     other: "其他",
     customValue: "自定义值",
+    launcherSettings: "启动器设置",
+    autoStartNode: "自动启动 Node 服务",
+    autoStartPython: "自动启动 Python 服务",
+    startMinimized: "以最小化方式启动",
+    autoStartOnBoot: "开机自动运行",
+    launcherSettingsSaved: "启动器设置已保存。",
   }
 };
 

@@ -78,6 +78,22 @@ export interface Config {
   transcriber_models: TranscriberModel[];
 }
 
+export interface LauncherSettings {
+  auto_start_node: boolean;
+  auto_start_python: boolean;
+  start_minimized: boolean;
+  auto_start_on_boot: boolean;
+}
+
+export function defaultLauncherSettings(): LauncherSettings {
+  return {
+    auto_start_node: false,
+    auto_start_python: false,
+    start_minimized: false,
+    auto_start_on_boot: false,
+  };
+}
+
 export interface ServerStatus {
   node: string;
   python: string;

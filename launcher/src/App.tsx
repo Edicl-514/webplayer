@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Config } from "./types";
+import { Config, LauncherSettings, defaultLauncherSettings } from "./types";
 import LauncherTab from "./components/LauncherTab";
 import SettingsTab from "./components/SettingsTab";
 import EnvCheckTab from "./components/EnvCheckTab";
@@ -15,12 +15,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("launcher");
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string>("");
+  const [launcherSettings, setLauncherSettings] = useState<LauncherSettings>(defaultLauncherSettings());
   const { t, lang, setLang } = useI18n();
 
   useEffect(() => {
     invoke<Config>("load_config")
       .then(setConfig)
       .catch((e) => setConfigError(String(e)));
+
+    invoke<LauncherSettings>("load_launcher_settings")
+      .then(setLauncherSettings)
+      .catch(() => {});
 
     // Listen for server-status-changed to trigger re-fetch in LauncherTab
     const unlisten = listen("server-status-changed", () => { });
@@ -73,6 +78,8 @@ export default function App() {
           <SettingsTab
             config={config}
             onSaved={(c) => setConfig(c)}
+            launcherSettings={launcherSettings}
+            onSavedLauncher={(s) => setLauncherSettings(s)}
           />
         )}
         {activeTab === "settings" && !config && (
