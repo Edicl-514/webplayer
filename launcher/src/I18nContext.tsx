@@ -59,7 +59,7 @@ const translations = {
     chatFormat: "Chat Format",
     useRawPrompt: "Use Raw Prompt for Translation",
     addModel: "Add Model",
-    transcriberModels: "Transcriber Models",    modelSource: "Model Source",    source: "Source",
+    transcriberModels: "Transcriber Models", modelSource: "Model Source", source: "Source",
     model: "Model",
     language: "Language",
     task: "Task",
@@ -109,7 +109,7 @@ const translations = {
     stop: "停止",
     restart: "重启",
     statusTitle: "运行状态",
-    notStarted: "未启动...",
+    notStarted: "未启动",
     running: "运行中",
     stopped: "已停止",
     logsTitle: "终端日志",
@@ -205,7 +205,7 @@ interface I18nContextType {
 
 const I18nContext = createContext<I18nContextType>({
   lang: "en",
-  setLang: () => {},
+  setLang: () => { },
   t: (key) => translations.en[key] || String(key),
 });
 

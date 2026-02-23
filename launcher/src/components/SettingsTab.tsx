@@ -23,17 +23,24 @@ function Section({
   title,
   children,
   defaultOpen = false,
+  headerAction,
 }: {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  headerAction?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="collapsible">
       <div className="collapsible-header" onClick={() => setOpen(!open)}>
         <span className={`collapsible-arrow${open ? " open" : ""}`}>▶</span>
-        {title}
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        {headerAction && (
+          <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            {headerAction}
+          </div>
+        )}
       </div>
       {open && <div className="collapsible-body">{children}</div>}
     </div>
@@ -51,28 +58,37 @@ function LabelInput({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  width?: number;
+  width?: number | string;
   multiline?: boolean;
   rows?: number;
 }) {
+  if (multiline) {
+    return (
+      <div className="setting-item" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
+        <div className="setting-label" style={{ paddingRight: 0 }}>{label}</div>
+        <div className="setting-control" style={{ width: "100%" }}>
+          <textarea
+            rows={rows}
+            style={{ width: "100%", fontFamily: "inherit", resize: "vertical" }}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="row" style={{ marginBottom: 4 }}>
-      <label style={{ color: "#a6adc8", minWidth: 160, textAlign: "right" }}>{label}:</label>
-      {multiline ? (
-        <textarea
-          rows={rows}
-          style={{ width }}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : (
+    <div className="setting-item">
+      <div className="setting-label">{label}</div>
+      <div className="setting-control">
         <input
           type="text"
           style={{ width }}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
-      )}
+      </div>
     </div>
   );
 }
@@ -93,17 +109,19 @@ function NumInput({
   step?: number;
 }) {
   return (
-    <div className="row" style={{ marginBottom: 4 }}>
-      <label style={{ color: "#a6adc8", minWidth: 160, textAlign: "right" }}>{label}:</label>
-      <input
-        type="number"
-        style={{ width: 90 }}
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+    <div className="setting-item">
+      <div className="setting-label">{label}</div>
+      <div className="setting-control">
+        <input
+          type="number"
+          style={{ width: 100 }}
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+      </div>
     </div>
   );
 }
@@ -124,18 +142,22 @@ function SliderInput({
   step?: number;
 }) {
   return (
-    <div className="row" style={{ marginBottom: 4 }}>
-      <label style={{ color: "#a6adc8", minWidth: 160, textAlign: "right" }}>{label}:</label>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: 140 }}
-      />
-      <span style={{ minWidth: 40, color: "#a6adc8" }}>{value.toFixed(2)}</span>
+    <div className="setting-item">
+      <div className="setting-label">{label}</div>
+      <div className="setting-control">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          style={{ width: 140 }}
+        />
+        <span style={{ minWidth: 40, color: "#89b4fa", fontWeight: 500, fontSize: 13, textAlign: "right" }}>
+          {value.toFixed(2)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -150,13 +172,16 @@ function CheckInput({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="row" style={{ marginBottom: 4 }}>
-      <label style={{ color: "#a6adc8", minWidth: 160, textAlign: "right" }}>{label}:</label>
-      <input
-        type="checkbox"
-        checked={value}
-        onChange={(e) => onChange(e.target.checked)}
-      />
+    <div className="setting-item" style={{ cursor: "pointer" }} onClick={() => onChange(!value)}>
+      <div className="setting-label">{label}</div>
+      <div className="setting-control">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
     </div>
   );
 }
@@ -174,40 +199,42 @@ function SelectInput({
   onChange: (v: string) => void;
   options: { label?: string; labelKey?: string; value: string }[];
   allowCustom?: boolean;
-  width?: number;
+  width?: number | string;
 }) {
   const { t } = useI18n();
   const isValueInOptions = options.some(opt => opt.value === value);
   const showOther = allowCustom && !isValueInOptions;
 
   return (
-    <div className="row" style={{ marginBottom: 4 }}>
-      <label style={{ color: "#a6adc8", minWidth: 160, textAlign: "right" }}>{label}:</label>
-      <select
-        style={{ width }}
-        value={showOther ? "__custom__" : value}
-        onChange={(e) => {
-          if (e.target.value === "__custom__") {
-            onChange("");
-          } else {
-            onChange(e.target.value);
-          }
-        }}
-      >
-        {options.map(opt => (
-          <option key={opt.value} value={opt.value}>{opt.labelKey ? t(opt.labelKey as any) : opt.label}</option>
-        ))}
-        {allowCustom && <option value="__custom__">{showOther ? value : t("other")}</option>}
-      </select>
-      {showOther && allowCustom && (
-        <input
-          type="text"
-          style={{ width: 120, marginLeft: 8 }}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={t("customValue")}
-        />
-      )}
+    <div className="setting-item">
+      <div className="setting-label">{label}</div>
+      <div className="setting-control">
+        <select
+          style={{ width }}
+          value={showOther ? "__custom__" : value}
+          onChange={(e) => {
+            if (e.target.value === "__custom__") {
+              onChange("");
+            } else {
+              onChange(e.target.value);
+            }
+          }}
+        >
+          {options.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.labelKey ? t(opt.labelKey as any) : opt.label}</option>
+          ))}
+          {allowCustom && <option value="__custom__">{showOther ? value : t("other")}</option>}
+        </select>
+        {showOther && allowCustom && (
+          <input
+            type="text"
+            style={{ width: 120 }}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={t("customValue")}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -237,12 +264,16 @@ function ModelEditor({
   };
 
   return (
-    <Section title={getDisplayName(model.model_path)}>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <button className="btn small" onClick={onMoveUp}>↑</button>
-        <button className="btn small" onClick={onMoveDown}>↓</button>
-        <button className="btn small danger" onClick={onRemove}>{t("remove")}</button>
-      </div>
+    <Section
+      title={getDisplayName(model.model_path)}
+      headerAction={
+        <>
+          <button className="btn small" onClick={onMoveUp}>↑</button>
+          <button className="btn small" onClick={onMoveDown}>↓</button>
+          <button className="btn small danger" onClick={onRemove}>{t("remove")}</button>
+        </>
+      }
+    >
 
       <LabelInput label={t("modelPath")} value={model.model_path} onChange={(v) => upd({ model_path: v })} />
       <SelectInput
@@ -460,16 +491,17 @@ function TranscriberEditor({
   const title = `${model["model-source"]}: ${getDisplayName(model.model)}`;
 
   return (
-    <Section title={title}>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <button className="btn small" onClick={onMoveUp}>↑</button>
-        <button className="btn small" onClick={onMoveDown}>↓</button>
-        <button className="btn small danger" onClick={onRemove}>{t("remove")}</button>
-      </div>
-      <div className="row" style={{ marginBottom: 4 }}>
-        <label style={{ color: "#a6adc8", minWidth: 80 }}>{t("modelPath")}:</label>
-        <input type="text" style={{ width: 220 }} value={model.model} onChange={(e) => upd({ model: e.target.value })} placeholder={t("model")} />
-      </div>
+    <Section
+      title={title}
+      headerAction={
+        <>
+          <button className="btn small" onClick={onMoveUp}>↑</button>
+          <button className="btn small" onClick={onMoveDown}>↓</button>
+          <button className="btn small danger" onClick={onRemove}>{t("remove")}</button>
+        </>
+      }
+    >
+      <LabelInput label={t("modelPath")} value={model.model} onChange={(v) => upd({ model: v })} width="100%" />
       <SelectInput
         label={t("modelSource")}
         value={model["model-source"]}
@@ -492,18 +524,10 @@ function TranscriberEditor({
         options={TASK_OPTIONS}
         width={120}
       />
-      <div className="row" style={{ marginBottom: 4 }}>
-        <input type="checkbox" checked={model.vad_filter} onChange={(e) => upd({ vad_filter: e.target.checked })} />
-        <label style={{ color: "#a6adc8" }}>{t("vadFilter")}</label>
-        <input type="checkbox" style={{ marginLeft: 16 }} checked={model.condition_on_previous_text} onChange={(e) => upd({ condition_on_previous_text: e.target.checked })} />
-        <label style={{ color: "#a6adc8" }}>{t("conditionPreviousText")}</label>
-      </div>
-      <div className="row" style={{ marginBottom: 4 }}>
-        <label style={{ color: "#a6adc8", minWidth: 80 }}>{t("maxCharsLine")}:</label>
-        <input type="number" style={{ width: 80 }} value={model["max-chars-per-line"]} min={0} onChange={(e) => upd({ "max-chars-per-line": Number(e.target.value) })} />
-        <input type="checkbox" style={{ marginLeft: 16 }} checked={model["dense-subtitles"]} onChange={(e) => upd({ "dense-subtitles": e.target.checked })} />
-        <label style={{ color: "#a6adc8" }}>{t("denseSubtitles")}</label>
-      </div>
+      <CheckInput label={t("vadFilter")} value={model.vad_filter} onChange={(v) => upd({ vad_filter: v })} />
+      <CheckInput label={t("conditionPreviousText")} value={model.condition_on_previous_text} onChange={(v) => upd({ condition_on_previous_text: v })} />
+      <NumInput label={t("maxCharsLine")} value={model["max-chars-per-line"]} min={0} onChange={(v) => upd({ "max-chars-per-line": v })} />
+      <CheckInput label={t("denseSubtitles")} value={model["dense-subtitles"]} onChange={(v) => upd({ "dense-subtitles": v })} />
     </Section>
   );
 }
@@ -542,36 +566,42 @@ export default function SettingsTab({ config: initialConfig, onSaved }: Props) {
       </Section>
 
       <Section title={t("mediaDirs")}>
-        {config.media_directories.map((dir, i) => (
-          <div key={i} className="row" style={{ marginBottom: 6 }}>
-            <label style={{ color: "#a6adc8" }}>{t("alias")}:</label>
-            <input type="text" style={{ width: 90 }} value={dir.alias} onChange={(e) => {
-              const dirs = [...config.media_directories];
-              dirs[i] = { ...dirs[i], alias: e.target.value };
-              upd({ media_directories: dirs });
-            }} />
-            <label style={{ color: "#a6adc8" }}>{t("path")}:</label>
-            <input type="text" style={{ width: 200 }} value={dir.path} onChange={(e) => {
-              const dirs = [...config.media_directories];
-              dirs[i] = { ...dirs[i], path: e.target.value };
-              upd({ media_directories: dirs });
-            }} />
-            <button className="btn small" onClick={() => {
-              const dirs = [...config.media_directories];
-              if (i > 0) { [dirs[i - 1], dirs[i]] = [dirs[i], dirs[i - 1]]; upd({ media_directories: dirs }); }
-            }}>↑</button>
-            <button className="btn small" onClick={() => {
-              const dirs = [...config.media_directories];
-              if (i < dirs.length - 1) { [dirs[i], dirs[i + 1]] = [dirs[i + 1], dirs[i]]; upd({ media_directories: dirs }); }
-            }}>↓</button>
-            <button className="btn small danger" onClick={() => {
-              upd({ media_directories: config.media_directories.filter((_, j) => j !== i) });
-            }}>{t("remove")}</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {config.media_directories.map((dir, i) => (
+            <div key={i} className="setting-item" style={{ marginBottom: 0 }}>
+              <div className="setting-control" style={{ flex: 1, justifyContent: "flex-start", gap: 8 }}>
+                <input type="text" style={{ width: 100 }} value={dir.alias} placeholder={t("alias")} onChange={(e) => {
+                  const dirs = [...config.media_directories];
+                  dirs[i] = { ...dirs[i], alias: e.target.value };
+                  upd({ media_directories: dirs });
+                }} />
+                <input type="text" style={{ flex: 1, minWidth: 150 }} value={dir.path} placeholder={t("path")} onChange={(e) => {
+                  const dirs = [...config.media_directories];
+                  dirs[i] = { ...dirs[i], path: e.target.value };
+                  upd({ media_directories: dirs });
+                }} />
+              </div>
+              <div className="setting-control">
+                <button className="btn small" onClick={() => {
+                  const dirs = [...config.media_directories];
+                  if (i > 0) { [dirs[i - 1], dirs[i]] = [dirs[i], dirs[i - 1]]; upd({ media_directories: dirs }); }
+                }}>↑</button>
+                <button className="btn small" onClick={() => {
+                  const dirs = [...config.media_directories];
+                  if (i < dirs.length - 1) { [dirs[i], dirs[i + 1]] = [dirs[i + 1], dirs[i]]; upd({ media_directories: dirs }); }
+                }}>↓</button>
+                <button className="btn small danger" onClick={() => {
+                  upd({ media_directories: config.media_directories.filter((_, j) => j !== i) });
+                }}>{t("remove")}</button>
+              </div>
+            </div>
+          ))}
+          <div style={{ display: "flex", marginTop: 4 }}>
+            <button className="btn primary small" onClick={() => upd({ media_directories: [...config.media_directories, { alias: "New Alias", path: "New Path" }] })}>
+              {t("addDir")}
+            </button>
           </div>
-        ))}
-        <button className="btn" style={{ marginTop: 6 }} onClick={() => upd({ media_directories: [...config.media_directories, { alias: "New Alias", path: "New Path" }] })}>
-          {t("addDir")}
-        </button>
+        </div>
       </Section>
 
       <Section title={t("models")}>
@@ -596,9 +626,11 @@ export default function SettingsTab({ config: initialConfig, onSaved }: Props) {
             }}
           />
         ))}
-        <button className="btn" style={{ marginTop: 6 }} onClick={() => upd({ models: [...config.models, defaultModel()] })}>
-          {t("addModel")}
-        </button>
+        <div style={{ display: "flex", marginTop: 4 }}>
+          <button className="btn primary small" onClick={() => upd({ models: [...config.models, defaultModel()] })}>
+            {t("addModel")}
+          </button>
+        </div>
       </Section>
 
       <Section title={t("transcriberModels")}>
@@ -623,9 +655,11 @@ export default function SettingsTab({ config: initialConfig, onSaved }: Props) {
             }}
           />
         ))}
-        <button className="btn" style={{ marginTop: 6 }} onClick={() => upd({ transcriber_models: [...config.transcriber_models, defaultTranscriberModel()] })}>
-          {t("addTranscriberModel")}
-        </button>
+        <div style={{ display: "flex", marginTop: 4 }}>
+          <button className="btn primary small" onClick={() => upd({ transcriber_models: [...config.transcriber_models, defaultTranscriberModel()] })}>
+            {t("addTranscriberModel")}
+          </button>
+        </div>
       </Section>
     </div>
   );

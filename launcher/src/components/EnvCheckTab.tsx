@@ -72,10 +72,10 @@ export default function EnvCheckTab() {
         {t("runChecks")}
       </button>
 
-      <div className="check-grid">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {categories.map((cat) => (
-          <div key={cat} style={{ display: "contents" }}>
-            <div className="check-category">
+          <div key={cat} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div className="check-category" style={{ marginBottom: 4, marginTop: 8, borderBottom: "1px solid rgba(255, 255, 255, 0.05)" }}>
               {(cat === "Commands" && t("commands")) ||
                 (cat === "Process" && t("process")) ||
                 (cat === "File Dependencies" && t("fileDependencies")) ||
@@ -84,9 +84,9 @@ export default function EnvCheckTab() {
             {items
               .filter((i) => i.category === cat)
               .map((item) => (
-                <div key={item.name} style={{ display: "contents" }}>
-                  <span style={{ color: "#cdd6f4" }}>{item.name}</span>
-                  <span className={statusClass(item.status)}>{statusLabel(item.status, t)}</span>
+                <div key={item.name} className="setting-item" style={{ marginBottom: 0, padding: "8px 14px" }}>
+                  <span className="setting-label" style={{ color: "#cdd6f4" }}>{item.name}</span>
+                  <span className={`status-badge ${statusClass(item.status)}`}>{statusLabel(item.status, t)}</span>
                 </div>
               ))}
           </div>

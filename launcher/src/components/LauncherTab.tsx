@@ -123,58 +123,54 @@ export default function LauncherTab() {
     <div>
       <h2>{t("serviceLauncher")}</h2>
 
-      {/* Controls */}
-      <table style={{ borderCollapse: "collapse", marginBottom: 12 }}>
-        <tbody>
-          <tr>
-            <td style={{ paddingRight: 10, color: "#a6adc8" }}>{t("nodeServer")}</td>
-            <td style={{ display: "flex", gap: 6, paddingBottom: 6 }}>
-              <button className="btn small" onClick={() => invoke("start_node_server")}>{t("start")}</button>
-              <button className="btn small" onClick={() => invoke("stop_node_server")}>{t("stop")}</button>
-              <button className="btn small" onClick={() => invoke("restart_node_server")}>{t("restart")}</button>
-            </td>
-          </tr>
-          <tr>
-            <td style={{ paddingRight: 10, color: "#a6adc8" }}>{t("pythonBackend")}</td>
-            <td style={{ display: "flex", gap: 6 }}>
-              <button className="btn small" onClick={() => invoke("start_python_server")}>{t("start")}</button>
-              <button className="btn small" onClick={() => invoke("stop_python_server")}>{t("stop")}</button>
-              <button className="btn small" onClick={() => invoke("restart_python_server")}>{t("restart")}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      {/* Status */}
-      <hr className="separator" />
-      <h3>{t("statusTitle")}</h3>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <span style={{ color: "#a6adc8" }}>{t("nodeServer")}</span>
-        <span className={`status-badge ${statusClass(status.node)}`}>
-          {statusText(status.node)}
-        </span>
+      <div className="setting-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 12, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600, color: "#cdd6f4", fontSize: 14 }}>
+            {t("nodeServer")}
+          </div>
+          <span className={`status-badge ${statusClass(status.node)}`}>
+            {statusText(status.node)}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn small primary" onClick={() => invoke("start_node_server")}>{t("start")}</button>
+          <button className="btn small danger" onClick={() => invoke("stop_node_server")}>{t("stop")}</button>
+          <button className="btn small" onClick={() => invoke("restart_node_server")}>{t("restart")}</button>
+        </div>
       </div>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <span style={{ color: "#a6adc8" }}>{t("pythonBackend")}</span>
-        <span className={`status-badge ${statusClass(status.python)}`}>
-          {statusText(status.python)}
-        </span>
+
+      <div className="setting-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 12, padding: 16, marginTop: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600, color: "#cdd6f4", fontSize: 14 }}>
+            {t("pythonBackend")}
+          </div>
+          <span className={`status-badge ${statusClass(status.python)}`}>
+            {statusText(status.python)}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn small primary" onClick={() => invoke("start_python_server")}>{t("start")}</button>
+          <button className="btn small danger" onClick={() => invoke("stop_python_server")}>{t("stop")}</button>
+          <button className="btn small" onClick={() => invoke("restart_python_server")}>{t("restart")}</button>
+        </div>
       </div>
 
       {/* Logs */}
-      <hr className="separator" />
-      <div className="row" style={{ marginBottom: 6 }}>
-        <h3 style={{ margin: 0 }}>{t("logsTitle")}</h3>
-        <button
-          className="btn small"
-          onClick={() => {
-            setLogs([]);
-            setLineCount(0);
-          }}
-        >
-          {t("clearLogs")}
-        </button>
-        <span className="muted">{t("lines")}: {lineCount}</span>
+      <hr className="separator" style={{ margin: "20px 0 16px" }} />
+      <div className="setting-item" style={{ background: "transparent", border: "none", padding: 0, marginBottom: 8, pointerEvents: "none" }}>
+        <h3 style={{ margin: 0, fontSize: 14 }}>{t("logsTitle")}</h3>
+        <div className="setting-control" style={{ gap: 12, pointerEvents: "auto" }}>
+          <span className="muted" style={{ fontSize: 12 }}>{t("lines")}: {lineCount}</span>
+          <button
+            className="btn small"
+            onClick={() => {
+              setLogs([]);
+              setLineCount(0);
+            }}
+          >
+            {t("clearLogs")}
+          </button>
+        </div>
       </div>
 
       <div

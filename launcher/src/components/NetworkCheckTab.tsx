@@ -79,11 +79,11 @@ export default function NetworkCheckTab() {
         {t("runNetworkChecks")}
       </button>
 
-      <div className="check-grid">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {items.map((item) => (
-          <div key={item.url} style={{ display: "contents" }}>
-            <span style={{ color: "#a6adc8", fontSize: 12 }}>{item.url}</span>
-            <span className={statusClass(item.status)}>{statusLabel(item, t)}</span>
+          <div key={item.url} className="setting-item" style={{ marginBottom: 0, padding: "8px 14px" }}>
+            <span className="setting-label" style={{ color: "#cdd6f4", fontSize: 13, userSelect: "text" }}>{item.url}</span>
+            <span className={`status-badge ${statusClass(item.status)}`}>{statusLabel(item, t)}</span>
           </div>
         ))}
       </div>
