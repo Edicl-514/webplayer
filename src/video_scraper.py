@@ -98,6 +98,13 @@ except ImportError:
     print("警告: 未安装 cloudscraper 库，Hanime 刮削功能将不可用。", file=sys.stderr)
     cloudscraper = None
 
+# 新增 DrissionPage 导入
+try:
+    from DrissionPage import ChromiumPage, ChromiumOptions
+except ImportError:
+    print("警告: 未安装 DrissionPage 库，JavDB 刮削可能受限。", file=sys.stderr)
+    ChromiumPage = None
+
 # 禁用因 verify=False 引发的 InsecureRequestWarning 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 自定义 JSON 编码器以处理特殊对象
@@ -1176,108 +1183,134 @@ class Scraper:
         return data
 
     def scrape_javdb(self, info):
-        """刮削 JAVDB 信息"""
+        """刮削 JAVDB 信息 (使用 DrissionPage 绕过 Cloudflare)"""
+        if not ChromiumPage:
+            return {"error": "DrissionPage 库未安装，无法使用高效 JavDB 刮削功能。"}
+        
         jav_id = info.get('id', info.get('title'))
         if not jav_id:
             return {"error": "文件名中未解析出番号"}
 
-        base_url = "https://javdb.com"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-        }
+        # JavDB 可能有多个镜像
+        base_urls = ["https://javdb.com"]
+        
+        last_error = ""
+        
+        # 初始化浏览器选项
+        co = ChromiumOptions()
+        # 1. 设置加载模式为 'eager'，不等待图片和子资源加载完成，只要 DOM 好了就继续
+        co.set_load_mode('eager')
+        # 2. 禁止加载图片，进一步提速
+        co.set_argument('--blink-settings=imagesEnabled=false')
+        
+        # 用户可能手动去掉了 headless，这里保持现状或根据需要开启
+        co.set_argument('--headless') 
+        co.set_argument('--no-sandbox')
+        co.set_argument('--disable-gpu')
+        co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36')
 
+        page = None
         try:
-            session = requests.Session()
-            session.headers.update(headers)
+            page = ChromiumPage(co)
+            # 设置较短的默认等待时间，防止找不到元素时卡死
+            page.set.timeouts(base=5) 
+            
+            for base_url in base_urls:
+                try:
+                    search_url = f"{base_url}/search?q={urllib.parse.quote(jav_id)}&f=all"
+                    page.get(search_url)
+                    
+                    # 检查是否被拦截
+                    if "Cloudflare" in page.title and "Just a moment" in page.html:
+                        page.wait.title_change("Just a moment", timeout=10)
 
-            # 搜索影片
-            search_url = f"{base_url}/search?q={urllib.parse.quote(jav_id)}&f=all"
-            search_response = session.get(search_url, timeout=15)
-            search_response.raise_for_status()
-            
-            search_soup = BeautifulSoup(search_response.text, 'html.parser')
-            
-            search_results = search_soup.find_all('a', class_='box')
-            if not search_results:
-                return {"error": f"在 JavDB 未找到番号: {jav_id}"}
-            
-            detail_link = search_results[0].get('href')
-            if not detail_link.startswith('/'):
-                detail_link = '/' + detail_link
-            
-            detail_url = base_url + detail_link
-            response = session.get(detail_url, timeout=15)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # --- 解析页面信息 ---
-            data = {"type": "JAV", "source": "JavDB"}
+                    # 自动处理年龄确认
+                    over18_btn = page.ele('text:是,我已滿18歲', timeout=3)
+                    if over18_btn:
+                        over18_btn.click()
 
-            title_elem = soup.find('h2', class_='title')
-            if title_elem:
-                data['title'] = title_elem.text.strip()
-
-            # 封面图片
-            cover_img = soup.find('img', class_='video-cover')
-            if cover_img and cover_img.get('src'):
-                data['poster_url'] = cover_img['src']
-            
-            meta_panel = soup.find('div', class_='video-meta-panel')
-            if meta_panel:
-                panel_blocks = meta_panel.find_all('div', class_='panel-block')
-                for block in panel_blocks:
-                    strong_elem = block.find('strong')
-                    if not strong_elem:
+                    # 查找结果列表
+                    search_results = page.eles('.box')
+                    if not search_results:
+                        if "沒有您要的結果" in page.html or "Not Found" in page.html:
+                            return {"error": f"在 JavDB 未找到番号: {jav_id}"}
                         continue
                     
-                    label = strong_elem.text.strip().rstrip(':')
-                    value_elem = block.find('span', class_='value')
+                    # 总是取第一个最匹配的
+                    detail_link = search_results[0].attr('href')
+                    detail_url = detail_link if detail_link.startswith('http') else base_url + detail_link
+                        
+                    # 跳转到详情页
+                    page.get(detail_url)
                     
-                    if value_elem:
-                        if label == '番號':
-                            data['id'] = value_elem.text.strip()
-                        elif label == '日期':
-                            data['release_date'] = value_elem.text.strip()
-                        elif label == '時長':
-                            data['duration'] = value_elem.text.strip()
-                        elif label == '導演':
-                            director_link = value_elem.find('a')
-                            if director_link:
-                                data['director'] = director_link.text.strip()
-                        elif label == '片商':
-                            maker_link = value_elem.find('a')
-                            if maker_link:
-                                data['studio'] = maker_link.text.strip()
-                        elif label == '評分':
-                            data['rating_text'] = value_elem.text.strip()
-                        elif label == '類別':
-                            data['genres'] = [a.text.strip() for a in value_elem.find_all('a')]
-                        elif label == '演員':
-                             data['actors'] = [a.text.strip().replace(' ♀', '').replace(' ♂', '') for a in value_elem.find_all('a')]
+                    # 解析详情
+                    data = {"type": "JAV", "source": "JavDB", "url": detail_url}
+                    
+                    # 标题解析 - 尝试多种可能的选择器
+                    title_elem = page.ele('css:h2.title')
+                    if title_elem:
+                        data['title'] = title_elem.text.strip()
 
-            # 样品图像
-            preview_images = []
-            preview_container = soup.find('div', class_='preview-images')
-            if preview_container:
-                img_elements = preview_container.find_all('a', class_='tile-item')
-                for img in img_elements:
-                    if img.get('href'):
-                        preview_images.append(img['href'])
-            if preview_images:
-                data['sample_images'] = preview_images
-            
-            return data
+                    # 封面图片 (虽然禁用了加载，但 DOM 里通常还是有 src 的)
+                    cover_img = page.ele('.video-cover')
+                    if cover_img:
+                        data['poster_url'] = cover_img.attr('src')
+                    
+                    # 元数据解析优化
+                    meta_panel = page.ele('.video-meta-panel')
+                    if meta_panel:
+                        panel_blocks = meta_panel.eles('.panel-block')
+                        for block in panel_blocks:
+                            strong_tag = block.ele('tag:strong', timeout=0)
+                            if not strong_tag: continue
+                            
+                            label = strong_tag.text.strip().rstrip(':')
+                            value_tag = block.ele('.value', timeout=0)
+                            if not value_tag: continue
+                            
+                            text_val = value_tag.text.strip()
+                            
+                            if label == '番號':
+                                data['id'] = text_val
+                            elif label == '日期':
+                                data['release_date'] = text_val
+                            elif label == '時長':
+                                data['duration'] = text_val
+                            elif label == '導演':
+                                data['director'] = text_val
+                            elif label == '片商':
+                                data['studio'] = text_val
+                            elif label == '評分':
+                                data['rating_text'] = text_val
+                            elif label == '類別':
+                                data['genres'] = [a.text.strip() for a in value_tag.eles('tag:a', timeout=0)]
+                            elif label == '演員':
+                                data['actors'] = [a.text.strip().replace(' ♀', '').replace(' ♂', '') for a in value_tag.eles('tag:a', timeout=0)]
 
-        except requests.exceptions.RequestException as e:
-            return {"error": f"访问 JavDB 时网络错误: {e}"}
+                    # 如果没抓到 ID，尝试从标题、URL 或查询参数中补全以防匹配度为 0
+                    if not data.get('id'):
+                        id_match = re.search(r'([a-zA-Z]{2,5}-\d{2,5})', data.get('title', ''))
+                        url_match = re.search(r'([a-zA-Z]{2,5}-\d{2,5})', detail_url)
+                        if id_match:
+                            data['id'] = id_match.group(1).upper()
+                        elif url_match:
+                            data['id'] = url_match.group(1).upper()
+                        else:
+                            data['id'] = jav_id.upper()
+                    
+                    return data
+
+                except Exception as mirror_e:
+                    last_error = str(mirror_e)
+                    continue
+
         except Exception as e:
-            return {"error": f"解析 JAVDB 页面时发生错误: {e}"}
+            return {"error": f"JavDB 刮削器执行异常: {e}"}
+        finally:
+            if page:
+                page.quit()
+                
+        return {"error": f"访问或解析 JavDB 时发生错误: {last_error}"}
 
     def scrape_fc2(self, info):
         """
