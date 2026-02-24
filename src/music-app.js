@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // const uploadLrcBtn = document.getElementById('upload-lrc-btn');
     // const lrcFileInput = document.getElementById('lrc-file-input');
     const closePlaylistBtn = document.getElementById('close-playlist-btn');
+    const clearPlaylistBtn = document.getElementById('clear-playlist-btn');
     const networkBtn = document.getElementById('network-btn');
     const fetchLyricsBtn = document.getElementById('fetch-lyrics-btn');
     const fetchCoverLocalBtn = document.getElementById('fetch-cover-local-btn');
@@ -2655,9 +2656,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 更新播放列表和localStorage中的元数据
                 let updated = false;
                 if (!song.userModified) {
-                    if (!song.title && songTitle.textContent) { song.title = songTitle.textContent; updated = true; }
-                    if (!song.artist && songArtist.textContent) { song.artist = songArtist.textContent; updated = true; }
-                    if (!song.album && songAlbum.textContent) { song.album = songAlbum.textContent; updated = true; }
+                    if (song.titleFromFilename) {
+                        // 标题来自文件名解析，用 API 返回的真实元数据覆盖
+                        if (info.title) { song.title = info.title; updated = true; }
+                        if (info.artist) { song.artist = info.artist; updated = true; }
+                        if (info.album) { song.album = info.album; updated = true; }
+                    } else {
+                        // 已有正规元数据，只补全空字段
+                        if (!song.title && songTitle.textContent) { song.title = songTitle.textContent; updated = true; }
+                        if (!song.artist && songArtist.textContent) { song.artist = songArtist.textContent; updated = true; }
+                        if (!song.album && songAlbum.textContent) { song.album = songAlbum.textContent; updated = true; }
+                    }
 
                     // 如果成功获取到元数据，标记标题不再是从文件名生成的
                     if (info.title || info.artist || info.album) {
@@ -3349,11 +3358,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (currentSongIndex === indexToRemove) {
             if (playlist.length === 0) {
-                // 播放列表为空的处理
-                if (sound) sound.stop();
+                if (sound) {
+                    sound.unload();
+                }
+                isPlaying = false;
+                playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+                albumCover.style.animationPlayState = 'paused';
+                if (typeof lyricRAF !== 'undefined') cancelAnimationFrame(lyricRAF);
+                if (typeof visualizerRAF !== 'undefined') cancelAnimationFrame(visualizerRAF);
                 songTitle.textContent = '播放列表为空';
                 songArtist.textContent = '';
+                songAlbum.textContent = '';
                 albumCover.src = 'cover.jpg';
+                progressBar.value = 0;
+                currentTimeEl.textContent = '00:00';
+                durationEl.textContent = '00:00';
                 return;
             }
             currentSongIndex = indexToRemove >= playlist.length ? playlist.length - 1 : indexToRemove;
@@ -3366,6 +3385,38 @@ document.addEventListener('DOMContentLoaded', () => {
         // 更新后续项目的事件监听器和索引
         updatePlaylistEventListeners();
         updatePlaylistUI();
+    }
+
+    function clearPlaylist() {
+        if (playlist.length === 0) return;
+
+        if (confirm('确定要清空播放列表吗？')) {
+            playlist = [];
+            localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
+            playlistUl.innerHTML = '';
+
+            if (sound) {
+                sound.unload();
+            }
+            isPlaying = false;
+            playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+            albumCover.style.animationPlayState = 'paused';
+
+            if (typeof lyricRAF !== 'undefined') cancelAnimationFrame(lyricRAF);
+            if (typeof visualizerRAF !== 'undefined') cancelAnimationFrame(visualizerRAF);
+
+            songTitle.textContent = '播放列表为空';
+            songArtist.textContent = '';
+            songAlbum.textContent = '';
+            albumCover.src = 'cover.jpg';
+            currentSongIndex = -1;
+
+            progressBar.value = 0;
+            currentTimeEl.textContent = '00:00';
+            durationEl.textContent = '00:00';
+
+            updatePlaylistUI();
+        }
     }
 
     function handleDrop(oldIndex, newIndex) {
@@ -4158,6 +4209,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // uploadLrcBtn.addEventListener('click', () => lrcFileInput.click());
     // lrcFileInput.addEventListener('change', handleLrcFileSelect);
     closePlaylistBtn.addEventListener('click', togglePlaylist);
+    if (clearPlaylistBtn) {
+        clearPlaylistBtn.addEventListener('click', clearPlaylist);
+    }
 
     // --- 网络功能事件监听 ---
     // --- Setup Lyrics Menu ---

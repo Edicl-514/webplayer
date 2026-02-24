@@ -667,6 +667,9 @@ body {
     margin-bottom: 20px;
     padding-bottom: 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 #playlist-ul {
@@ -1086,13 +1089,26 @@ body {
 #close-playlist-btn {
     display: none;
     /* 默认隐藏 */
-    float: right;
     cursor: pointer;
     transition: color 0.2s;
 }
 
-#close-playlist-btn:hover {
+#clear-playlist-btn {
+    cursor: pointer;
+    transition: color 0.2s;
+    font-size: 16px;
+    color: inherit;
+}
+
+#close-playlist-btn:hover,
+#clear-playlist-btn:hover {
     color: var(--accent-color);
+}
+
+.playlist-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
 }
 
 @media (max-width: 768px) {
@@ -1106,6 +1122,10 @@ body {
         display: inline-block;
         /* 在移动端显示 */
         font-size: 22px;
+    }
+
+    #clear-playlist-btn {
+        font-size: 20px;
     }
 }
 
