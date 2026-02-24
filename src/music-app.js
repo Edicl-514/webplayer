@@ -450,15 +450,26 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchPlaylist();
         }
 
+        updateControlButtonsVisibility();
+    }
+
+    // 统一管理控制按钮的可见性，避免竞态问题
+    function updateControlButtonsVisibility() {
+        // playlistBtn 在有歌曲时显示（在移动端通过 CSS 的 mobile-only 类控制可见性）
+        if (playlist.length > 0) {
+            // 重置样式为默认值，让 CSS 中的 mobile-only 类控制移动端显示
+            playlistBtn.style.display = '';
+        } else {
+            // 播放列表为空时才隐藏
+            playlistBtn.style.display = 'none';
+        }
+
+        // prevBtn, nextBtn, modeBtn 只在多曲模式下显示
         if (playlist.length > 1) {
-            // 播放列表按钮只在移动端显示，通过CSS的mobile-only类控制
-            // playlistBtn在HTML中已有mobile-only类，不需要手动设置display
             prevBtn.style.display = 'block';
             nextBtn.style.display = 'block';
             modeBtn.style.display = 'block';
         } else {
-            // 单曲模式下隐藏所有控制按钮
-            playlistBtn.style.display = 'none';
             prevBtn.style.display = 'none';
             nextBtn.style.display = 'none';
             modeBtn.style.display = 'none';
@@ -494,6 +505,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             initPlaylist();
             loadSong(currentSongIndex);
+            // 加载完播放列表后，确保按钮可见性是最新的
+            updateControlButtonsVisibility();
         } catch (error) {
             console.error('Failed to fetch playlist:', error);
         }
@@ -2278,6 +2291,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         initPlaylist();
                         // Call loadSong again, but this time with fromFolderLoad=true to prevent an infinite loop
                         loadSong(currentSongIndex, true, true);
+                        // 更新按钮可见性，确保内容加载后正常显示
+                        updateControlButtonsVisibility();
                         return; // Exit this execution, the recursive call will handle playback
                     }
                 }
@@ -3373,6 +3388,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 progressBar.value = 0;
                 currentTimeEl.textContent = '00:00';
                 durationEl.textContent = '00:00';
+                updateControlButtonsVisibility();
                 return;
             }
             currentSongIndex = indexToRemove >= playlist.length ? playlist.length - 1 : indexToRemove;
@@ -3385,6 +3401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 更新后续项目的事件监听器和索引
         updatePlaylistEventListeners();
         updatePlaylistUI();
+        updateControlButtonsVisibility();
     }
 
     function clearPlaylist() {
@@ -3416,6 +3433,7 @@ document.addEventListener('DOMContentLoaded', () => {
             durationEl.textContent = '00:00';
 
             updatePlaylistUI();
+            updateControlButtonsVisibility();
         }
     }
 
@@ -4148,12 +4166,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     localStorage.setItem('musicPlaylist', JSON.stringify(playlist));
                     initPlaylist();
                     updatePlaylistUI();
-                    // 若控制按钮因单曲模式被隐藏，重新显示
-                    if (playlist.length > 1) {
-                        prevBtn.style.display = 'block';
-                        nextBtn.style.display = 'block';
-                        modeBtn.style.display = 'block';
-                    }
+                    // 更新按钮可见性
+                    updateControlButtonsVisibility();
                     showToast(`已添加 ${addedSongs.length} 首歌曲到播放列表`);
                 }
             } catch (err) {

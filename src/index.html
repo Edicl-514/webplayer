@@ -73,7 +73,8 @@
         }
 
         #backButton,
-        #homeButton {
+        #homeButton,
+        #quickPlayButton {
             margin-right: 10px;
             padding: 10px 20px;
             border: none;
@@ -86,16 +87,22 @@
         }
 
         #backButton:hover,
-        #homeButton:hover {
+        #homeButton:hover,
+        #quickPlayButton:hover {
             background-color: #0066cc;
             transform: scale(1.03);
             box-shadow: 0 6px 12px rgba(51, 133, 204, 0.6);
         }
 
         #backButton:active,
-        #homeButton:active {
+        #homeButton:active,
+        #quickPlayButton:active {
             transform: scale(0.97);
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        #quickPlayButton {
+            background: linear-gradient(to right, #28a745, #218838);
         }
 
         /* 搜索区域样式 */
@@ -583,7 +590,8 @@
         }
 
         .mobile #backButton,
-        .mobile #homeButton {
+        .mobile #homeButton,
+        .mobile #quickPlayButton {
             padding: 0;
             font-size: 0;
             /* Hide the text */
@@ -595,26 +603,34 @@
         }
 
         .mobile #backButton::before,
-        .mobile #homeButton::before {
+        .mobile #homeButton::before,
+        .mobile #quickPlayButton::before {
             content: '';
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-size: 24px;
+            font-size: 20px;
             /* Icon size */
             color: white;
             line-height: 1;
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
         }
 
         .mobile #backButton::before {
-            content: '↩';
-            /* Back icon */
+            content: '\f060';
+            /* Font Awesome arrow-left icon */
         }
 
         .mobile #homeButton::before {
-            content: '⌂';
-            /* Home icon */
+            content: '\f015';
+            /* Font Awesome home icon */
+        }
+
+        .mobile #quickPlayButton::before {
+            content: '\f04b';
+            /* Font Awesome play icon */
         }
 
         /* 移动端排序下拉菜单调整 */
@@ -1217,6 +1233,7 @@
         <div class="path-navigation">
             <button id="backButton">返回上一级</button>
             <button id="homeButton">返回主目录</button>
+            <button id="quickPlayButton" class="hidden">播放</button>
             <span id="currentPath">/</span>
             <div class="sorting-controls">
                 <!-- 排序设置下拉菜单 -->
@@ -1353,6 +1370,7 @@
             const currentPathSpan = document.getElementById('currentPath');
             const backButton = document.getElementById('backButton');
             const homeButton = document.getElementById('homeButton');
+            const quickPlayButton = document.getElementById('quickPlayButton');
             const videoPlayerContainer = document.getElementById('videoPlayerContainer');
             const videoPlayer = document.getElementById('videoPlayer');
             const playingFileNameSpan = document.getElementById('playingFileName');
@@ -1362,6 +1380,21 @@
             let currentMediaDir = null;
             let currentFiles = []; // 保存当前目录的文件列表
             let scrollPositions = {}; // 保存每个路径的滚动位置
+
+            function isAudioFileName(name) {
+                const extension = (name && name.includes('.') && name.lastIndexOf('.') > 0) ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
+                return ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a'].includes(extension);
+            }
+
+            function getFirstMusicFile() {
+                return (currentFiles || []).find(file => !file.isDirectory && isAudioFileName(file.name));
+            }
+
+            function updateQuickPlayButtonVisibility() {
+                if (!quickPlayButton) return;
+                const hasMusic = !!getFirstMusicFile();
+                quickPlayButton.classList.toggle('hidden', !hasMusic);
+            }
 
             const closeImagePreviewIfOpen = () => {
                 if (window.$ && $.fancybox && $.fancybox.getInstance()) {
@@ -1423,6 +1456,7 @@
                     fileGrid.innerHTML = ''; // 清空文件网格
                     backButton.classList.add('hidden');
                     homeButton.classList.add('hidden');
+                    quickPlayButton.classList.add('hidden');
                     currentPathSpan.textContent = '根目录';
 
                     // 清空现有内容
@@ -1634,6 +1668,7 @@
 
                     // Step 2: Display the sorted files
                     displayFiles(currentFiles);
+                    updateQuickPlayButtonVisibility();
 
                     // Step 3: Update the sidebar based on the new sort order and settings
                     const sidebar = document.getElementById('sidebar');
@@ -1666,6 +1701,7 @@
                     backButton.classList.add('hidden');
                     homeButton.classList.remove('hidden'); // 在根目录也显示返回主目录按钮
                 }
+                updateQuickPlayButtonVisibility();
 
                 files.forEach(file => {
                     // 创建网格项容器
@@ -2028,6 +2064,16 @@
                 fetchRootDirs();
                 // 更新浏览器历史记录
                 history.replaceState({ path: 'root' }, '', '#');
+            };
+
+            quickPlayButton.onclick = () => {
+                const firstMusic = getFirstMusicFile();
+                if (!firstMusic) {
+                    quickPlayButton.classList.add('hidden');
+                    return;
+                }
+                localStorage.setItem('musicPlaylist', JSON.stringify([]));
+                playMusic(firstMusic.name);
             };
 
             function updatePathDisplay() {
