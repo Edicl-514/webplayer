@@ -22,6 +22,7 @@ python find_subtitle.py <video_path> [media_dir] [--all]
 1. video_path (必需) - 视频文件的路径
 2. media_dir (可选) - 媒体目录路径，用于生成相对URL
 3. --all (可选) - 查找目录中所有字幕文件，而不仅仅是同名字幕
+4. --strict (可选) - 严格模式：只返回缓存目录中与视频MD5前8位匹配的字幕
 
 输出格式：
 ----------
@@ -39,11 +40,17 @@ JSON对象，包含以下字段：
 1. 查找指定视频的同名字幕：
    python find_subtitle.py "/path/to/video.mp4"
    
-2. 查找指定视频的所有字幕：
+2. 查找指定视频的所有字幕（普通模式）：
    python find_subtitle.py "/path/to/video.mp4" --all
    
 3. 指定媒体目录：
    python find_subtitle.py "/path/to/video.mp4" "/media/dir" --all
+   
+4. 严格模式 - 仅返回缓存目录中与视频MD5匹配的字幕：
+   python find_subtitle.py "/path/to/video.mp4" --strict
+   
+5. 严格模式加上查找所有字幕：
+   python find_subtitle.py "/path/to/video.mp4" "/media/dir" --all --strict
 """
 
 import sys
@@ -222,7 +229,7 @@ def get_converted_vtt_path(original_path, cache_dir=None):
     # Return path to the converted VTT file in the cache directory
     return os.path.join(cache_dir, f"{basename}_{file_hash}.vtt")
 
-def find_subtitles(video_path, media_dir=None, find_all=False):
+def find_subtitles(video_path, media_dir=None, find_all=False, strict_mode=False):
     """
     Finds subtitle files. If find_all is False, it looks for subtitles with the
     same base name as the video file. If find_all is True, it finds all subtitles
@@ -233,6 +240,7 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
         video_path (str): Path to the video file
         media_dir (str, optional): Media directory path
         find_all (bool): If True, find all subtitles in the directory
+        strict_mode (bool): If True, only return cached subtitles matching video's MD5 hash (first 8 chars)
         
     Returns:
         list: List of subtitle dictionaries with url, lang, and name
@@ -242,6 +250,19 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
 
     # Normalize paths
     video_path = os.path.normpath(video_path)
+    
+    # If strict mode is enabled, compute the video file's MD5 hash (first 8 chars)
+    video_hash = None
+    if strict_mode:
+        try:
+            with open(video_path, 'rb') as f:
+                video_md5 = hashlib.md5()
+                for chunk in iter(lambda: f.read(4096), b''):
+                    video_md5.update(chunk)
+                video_hash = video_md5.hexdigest()[:8]
+        except Exception as e:
+            print(f"Warning: Could not compute video hash for strict mode: {str(e)}", file=sys.stderr)
+            video_hash = None
     
     # Get video directory and base name
     video_dir = os.path.dirname(video_path)
@@ -291,6 +312,12 @@ def find_subtitles(video_path, media_dir=None, find_all=False):
                     if re.search(r'_[0-9a-fA-F]{32}$', basename):
                         # Skip hashed cache VTT files
                         continue
+                    
+                    # In strict mode, only keep subtitles that contain the video's 8-char hash
+                    if strict_mode and video_hash:
+                        if video_hash not in filename.lower():
+                            # This cached subtitle doesn't match the video hash, skip it
+                            continue
                 # Check if it's a supported subtitle format
                 if ext.lower() in ['.vtt', '.ass', '.srt', '.lrc']:
                     is_cache_dir = os.path.abspath(directory) == os.path.abspath(cache_dir)
@@ -410,14 +437,16 @@ def main():
     video_file_path = sys.argv[1]
     media_dir = sys.argv[2] if len(sys.argv) > 2 else None
     find_all = '--all' in sys.argv
+    strict_mode = '--strict' in sys.argv
     
     try:
-        subtitles = find_subtitles(video_file_path, media_dir, find_all=find_all)
+        subtitles = find_subtitles(video_file_path, media_dir, find_all=find_all, strict_mode=strict_mode)
         result = {
             'success': True,
             'subtitles': subtitles,
             'video_path': video_file_path,
-            'media_dir': media_dir
+            'media_dir': media_dir,
+            'strict_mode': strict_mode
         }
         print(json.dumps(result))
     except Exception as e:

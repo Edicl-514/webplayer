@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchResultsLimitInput = document.getElementById('search-results-limit');
     const forceMatchSelect = document.getElementById('force-match');
     const autoGainSelect = document.getElementById('auto-gain');
+    const localSubtitleMatchingSelect = document.getElementById('local-subtitle-matching');
     const subtitleBtn = document.getElementById('subtitle-btn');
     const localSubtitleList = document.querySelector('.local-subtitle-list');
     const transcribeModelList = document.querySelector('.transcribe-model-list');
@@ -2336,7 +2337,16 @@ document.addEventListener('DOMContentLoaded', () => {
         currentLyrics = [];
         renderLyrics();
 
-        // 如果歌曲已有歌词,先加载现有歌词
+        // 判断是否是非音乐文件（用于本地字幕重新查询）
+        const isNonMusicFile = !isSongWorthSearching(song);
+
+        // 对于非音乐文件，清除旧的 song.lrc，强制重新通过 find-subtitles api 查询
+        if (isNonMusicFile && song.lrc) {
+            console.log('[AUTO] Non-music file detected. Clearing old subtitle to re-query with current settings.');
+            delete song.lrc;
+        }
+
+        // 如果歌曲已有歌词,先加载现有歌词（除非是非音乐文件，此时已被清除）
         if (song.lrc) {
             loadLyrics(song.lrc);
         } else {
@@ -2716,6 +2726,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 params.append('mediaDir', mediaDir);
             }
 
+            // 添加 strict 参数（根据设置）
+            const matchingMode = localSubtitleMatchingSelect.value || 'fast';
+            if (matchingMode === 'strict') {
+                params.append('strict', 'true');
+            }
+
             const response = await fetch(`/api/find-music-subtitles?${params.toString()}`);
             const result = await response.json();
 
@@ -2816,15 +2832,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     parseLrc(info.lyrics);
                     showToast('歌词加载成功', 'success');
                 } else {
-                    // 没有找到歌词
+                    // 没有找到歌词，尝试查找本地字幕（对于非音乐文件）
                     if (!song.lrc) {
-                        lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">未找到歌词</div>';
+                        console.log('No online lyrics found. Trying local subtitles...');
+                        await tryLoadLocalSubtitle(musicPath, mediaDir);
                     }
                 }
             } else {
-                // 请求失败
+                // 请求失败，尝试查找本地字幕（对于非音乐文件）
                 if (!song.lrc) {
-                    lyricsWrapper.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">未找到歌词</div>';
+                    console.log('Failed to fetch info. Trying local subtitles...');
+                    await tryLoadLocalSubtitle(musicPath, mediaDir);
                 }
             }
         } catch (error) {
@@ -4267,7 +4285,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lyricsType: lyricsTypeSelect.value,
             searchResultsLimit: searchResultsLimitInput.value,
             forceMatch: forceMatchSelect.value,
-            autoGain: autoGainSelect.value
+            autoGain: autoGainSelect.value,
+            localSubtitleMatching: localSubtitleMatchingSelect.value
         };
         localStorage.setItem('playerSettings', JSON.stringify(settings));
     }
@@ -4281,6 +4300,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchResultsLimitInput.value = settings.searchResultsLimit || '5';
         forceMatchSelect.value = settings.forceMatch || 'false';
         autoGainSelect.value = settings.autoGain || 'auto';
+        localSubtitleMatchingSelect.value = settings.localSubtitleMatching || 'fast';
     }
 
     function getSettings() {
@@ -4301,6 +4321,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lyricsTypeSelect.addEventListener('change', saveSettings);
     searchResultsLimitInput.addEventListener('change', saveSettings);
     forceMatchSelect.addEventListener('change', saveSettings);
+    localSubtitleMatchingSelect.addEventListener('change', saveSettings);
     autoGainSelect.addEventListener('change', () => {
         saveSettings();
         if (currentTrackLufs !== null) {
@@ -4633,6 +4654,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (mediaDir) {
                 params.append('mediaDir', mediaDir);
+            }
+
+            // 添加 strict 参数（根据设置）
+            const matchingMode = localSubtitleMatchingSelect.value || 'fast';
+            if (matchingMode === 'strict') {
+                params.append('strict', 'true');
             }
 
             const response = await fetch(`/api/find-music-subtitles?${params.toString()}`);

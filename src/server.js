@@ -1408,7 +1408,8 @@ const requestHandler = async (req, res) => {
     if (pathname === '/api/find-subtitles' && req.method === 'GET') {
         const videoSrc = parsedUrl.query.src;
         const findAll = parsedUrl.query.all === 'true';
-        //console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}, findAll: ${findAll}`);
+        const strict = parsedUrl.query.strict === 'true';
+        //console.log(`[Subtitles] Received find-subtitles request. Raw src: ${videoSrc}, mediaDir: ${parsedUrl.query.mediaDir}, findAll: ${findAll}, strict: ${strict}`);
 
         if (!videoSrc) {
             res.statusCode = 400;
@@ -1423,7 +1424,7 @@ const requestHandler = async (req, res) => {
         const fullVideoPath = path.join(requestedMediaDir, decodedVideoSrc);
         //console.log(`[Subtitles] Searching for subtitles for video path: ${fullVideoPath}`);
 
-        findSubtitles(fullVideoPath, requestedMediaDir, findAll)
+        findSubtitles(fullVideoPath, requestedMediaDir, findAll, strict)
             .then(result => {
                 //console.log(`[Subtitles] Subtitles found successfully for ${fullVideoPath}. Result:`, JSON.stringify(result, null, 2));
                 res.statusCode = 200;
@@ -1442,6 +1443,7 @@ const requestHandler = async (req, res) => {
     if (pathname === '/api/find-music-subtitles' && req.method === 'GET') {
         const musicSrc = parsedUrl.query.src;
         const findAll = parsedUrl.query.all === 'true';
+        const strict = parsedUrl.query.strict === 'true';
 
         if (!musicSrc) {
             res.statusCode = 400;
@@ -1453,7 +1455,7 @@ const requestHandler = async (req, res) => {
         const decodedMusicSrc = decodeURIComponent(musicSrc);
         const fullMusicPath = path.join(requestedMediaDir, decodedMusicSrc);
 
-        findSubtitles(fullMusicPath, requestedMediaDir, findAll)
+        findSubtitles(fullMusicPath, requestedMediaDir, findAll, strict)
             .then(result => {
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
@@ -3041,7 +3043,7 @@ const requestHandler = async (req, res) => {
                             // 检查文件是否已有字幕或歌词，有则跳过
                             let hasSubtitles = false;
                             try {
-                                const subtitleResult = await findSubtitles(fileTask.path, mediaDir);
+                                const subtitleResult = await findSubtitles(fileTask.path, mediaDir, false, true);
                                 if (subtitleResult && subtitleResult.subtitles && subtitleResult.subtitles.length > 0) {
                                     hasSubtitles = true;
                                 }
@@ -3652,7 +3654,7 @@ async function getFilesRecursively(dir, baseDir = null) {
 }
 
 // 新增：处理字幕请求的API
-function findSubtitles(videoPath, mediaDir, findAll = false) {
+function findSubtitles(videoPath, mediaDir, findAll = false, strict = false) {
     return new Promise((resolve, reject) => {
         const pythonPath = 'python';
         const scriptPath = path.join(__dirname, 'find_subtitle.py');
@@ -3665,6 +3667,10 @@ function findSubtitles(videoPath, mediaDir, findAll = false) {
 
         if (findAll) {
             args.push('--all');
+        }
+
+        if (strict) {
+            args.push('--strict');
         }
 
         //console.log(`[Subtitles] Spawning find_subtitle.py with args: ${args.join(' ')}`);
