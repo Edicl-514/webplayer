@@ -693,7 +693,8 @@ fn apply_autostart(enable: bool) -> Result<(), String> {
     if enable {
         let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe_str = exe_path.to_string_lossy().to_string();
-        key.set_value("Launcher", &exe_str).map_err(|e| e.to_string())?;
+        key.set_value("Launcher", &exe_str)
+            .map_err(|e| e.to_string())?;
     } else {
         let _ = key.delete_value("Launcher");
     }
@@ -907,7 +908,11 @@ fn update_tray_menu(app: &AppHandle) {
     } else {
         "启动 Node 服务"
     };
-    let node_toggle_id = if node_running { "node_stop" } else { "node_start" };
+    let node_toggle_id = if node_running {
+        "node_stop"
+    } else {
+        "node_start"
+    };
     let node_toggle =
         match MenuItem::with_id(app, node_toggle_id, node_toggle_text, true, None::<&str>) {
             Ok(v) => v,
@@ -1133,7 +1138,7 @@ fn create_template_config() -> Config {
 #[cfg(target_os = "windows")]
 fn show_message_box(title: &str, message: &str) {
     use std::os::windows::ffi::OsStrExt;
-    
+
     let title_wide: Vec<u16> = std::ffi::OsStr::new(title)
         .encode_wide()
         .chain(Some(0))
@@ -1142,7 +1147,7 @@ fn show_message_box(title: &str, message: &str) {
         .encode_wide()
         .chain(Some(0))
         .collect();
-    
+
     unsafe {
         #[link(name = "user32")]
         extern "system" {
@@ -1153,7 +1158,7 @@ fn show_message_box(title: &str, message: &str) {
                 utype: u32,
             ) -> i32;
         }
-        
+
         // MB_OK | MB_ICONINFORMATION
         MessageBoxW(
             std::ptr::null_mut(),
@@ -1168,7 +1173,7 @@ fn show_message_box(title: &str, message: &str) {
 #[cfg(target_os = "windows")]
 fn check_single_instance() -> Result<(), String> {
     let mutex_name = "Global\\WebPlayerLauncher_SingleInstance";
-    
+
     unsafe {
         #[link(name = "kernel32")]
         extern "system" {
@@ -1177,32 +1182,28 @@ fn check_single_instance() -> Result<(), String> {
                 bInitialOwner: i32,
                 lpName: *const u16,
             ) -> *mut std::ffi::c_void;
-            
+
             fn GetLastError() -> u32;
-            
+
             fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
         }
-        
+
         const ERROR_ALREADY_EXISTS: u32 = 183;
-        
+
         // 将互斥体名称转换为宽字符
         use std::os::windows::ffi::OsStrExt;
         let mutex_name_wide: Vec<u16> = std::ffi::OsStr::new(mutex_name)
             .encode_wide()
             .chain(Some(0))
             .collect();
-        
+
         // 创建互斥体，bInitialOwner=1 表示立即获取所有权
-        let mutex_handle = CreateMutexW(
-            std::ptr::null_mut(),
-            1,
-            mutex_name_wide.as_ptr(),
-        );
-        
+        let mutex_handle = CreateMutexW(std::ptr::null_mut(), 1, mutex_name_wide.as_ptr());
+
         if mutex_handle.is_null() {
             return Err("创建互斥体失败".to_string());
         }
-        
+
         // 检查互斥体是否已存在
         let error = GetLastError();
         if error == ERROR_ALREADY_EXISTS {
@@ -1210,12 +1211,12 @@ fn check_single_instance() -> Result<(), String> {
             CloseHandle(mutex_handle);
             return Err("启动器已经在运行中".to_string());
         }
-        
+
         // 成功创建互斥体，保存handle以保持互斥体的生命周期
         // 使用全局静态变量保存handle，防止互斥体被释放
         static mut MUTEX_HANDLE: *mut std::ffi::c_void = std::ptr::null_mut();
         MUTEX_HANDLE = mutex_handle;
-        
+
         Ok(())
     }
 }
@@ -1224,7 +1225,7 @@ fn check_single_instance() -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn check_single_instance() -> Result<(), String> {
     use std::io::Write;
-    
+
     // 在非Windows平台上使用文件锁
     let lock_dir = if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".config/webplayer_launcher")
@@ -1233,26 +1234,29 @@ fn check_single_instance() -> Result<(), String> {
     } else {
         PathBuf::from(".")
     };
-    
+
     let _ = fs::create_dir_all(&lock_dir);
-    
+
     let lock_file = lock_dir.join("launcher.lock");
     let pid = std::process::id();
-    
+
     // 检查是否存在锁文件，如果存在则检查对应进程是否仍在运行
     if lock_file.exists() {
         if let Ok(content) = fs::read_to_string(&lock_file) {
             if let Ok(old_pid) = content.trim().parse::<u32>() {
                 let mut system = System::new_all();
                 system.refresh_all();
-                if system.process(sysinfo::Pid::from(old_pid as usize)).is_some() {
+                if system
+                    .process(sysinfo::Pid::from(old_pid as usize))
+                    .is_some()
+                {
                     return Err("启动器已经在运行中".to_string());
                 }
             }
         }
         let _ = fs::remove_file(&lock_file);
     }
-    
+
     // 创建新的锁文件
     if let Ok(mut file) = fs::File::create(&lock_file) {
         let _ = writeln!(file, "{}", pid);
@@ -1272,7 +1276,7 @@ fn cleanup_lock_file() {
     } else {
         PathBuf::from(".")
     };
-    
+
     let lock_file = lock_dir.join("launcher.lock");
     let _ = fs::remove_file(&lock_file);
 }
@@ -1293,18 +1297,23 @@ pub fn run() {
             let title = "启动器提示";
             show_message_box(&title, &error_msg);
         }
-        
+
         #[cfg(not(target_os = "windows"))]
         {
             eprintln!("{}", error_msg);
         }
-        
+
         return;
     }
-    
+
+    #[cfg(not(debug_assertions))]
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let _ = std::env::set_current_dir(parent);
+        }
+    }
+
     tauri::Builder::default()
-
-
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             get_server_status,
@@ -1353,7 +1362,8 @@ pub fn run() {
                     "node_stop" => {
                         let state: State<AppState> = app.state();
                         stop_process(Arc::clone(&state.node_server), "Node", app);
-                        app.emit("server-status-changed", serde_json::json!({})).ok();
+                        app.emit("server-status-changed", serde_json::json!({}))
+                            .ok();
                     }
                     "python_start" => {
                         let state: State<AppState> = app.state();
@@ -1375,7 +1385,8 @@ pub fn run() {
                     "python_stop" => {
                         let state: State<AppState> = app.state();
                         stop_process(Arc::clone(&state.python_server), "Python", app);
-                        app.emit("server-status-changed", serde_json::json!({})).ok();
+                        app.emit("server-status-changed", serde_json::json!({}))
+                            .ok();
                     }
                     "quit" => {
                         let state: State<AppState> = app.state();
@@ -1467,7 +1478,7 @@ pub fn run() {
                 let state: State<AppState> = app_handle.state();
                 stop_process(Arc::clone(&state.node_server), "Node", app_handle);
                 stop_process(Arc::clone(&state.python_server), "Python", app_handle);
-                
+
                 // 清理锁文件
                 cleanup_lock_file();
             }

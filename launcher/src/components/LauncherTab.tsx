@@ -11,6 +11,10 @@ interface LogLine {
 }
 
 let logIdCounter = 0;
+let globalLogs: LogLine[] = [];
+let globalLineCount = 0;
+let globalLogListenerSet = false;
+let globalLogListeners: ((logs: LogLine[], lineCount: number) => void)[] = [];
 
 // Parse ANSI escape codes into HTML spans
 function ansiToHtml(raw: string): string {
@@ -53,12 +57,36 @@ function escHtml(s: string) {
 
 const MAX_LOG_LINES = 1000;
 
+function setupGlobalLogListener() {
+  if (globalLogListenerSet) return;
+  globalLogListenerSet = true;
+  listen<{ line: string }>("log-message", (event) => {
+    const raw = event.payload.line;
+    const html = ansiToHtml(raw);
+    const newLine = { id: logIdCounter++, html, raw };
+    globalLogs.push(newLine);
+    if (globalLogs.length > MAX_LOG_LINES) {
+      globalLogs = globalLogs.slice(globalLogs.length - MAX_LOG_LINES);
+    }
+    globalLineCount++;
+    globalLogListeners.forEach((l) => l([...globalLogs], globalLineCount));
+  }).catch(console.error);
+}
+
+setupGlobalLogListener();
+
+export function clearGlobalLogs() {
+  globalLogs = [];
+  globalLineCount = 0;
+  globalLogListeners.forEach((l) => l([], 0));
+}
+
 export default function LauncherTab() {
   const [status, setStatus] = useState<ServerStatus>({ node: "", python: "" });
-  const [logs, setLogs] = useState<LogLine[]>([]);
+  const [logs, setLogs] = useState<LogLine[]>(globalLogs);
   const logAreaRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
-  const [lineCount, setLineCount] = useState(0);
+  const [lineCount, setLineCount] = useState(globalLineCount);
   const { t } = useI18n();
 
   // Fetch initial status
@@ -68,22 +96,21 @@ export default function LauncherTab() {
 
   // Listen for log messages
   useEffect(() => {
-    const unlistenLog = listen<{ line: string }>("log-message", (event) => {
-      const raw = event.payload.line;
-      const html = ansiToHtml(raw);
-      setLogs((prev) => {
-        const next = [...prev, { id: logIdCounter++, html, raw }];
-        return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
-      });
-      setLineCount((c) => c + 1);
-    });
+    const listener = (newLogs: LogLine[], newCount: number) => {
+      setLogs(newLogs);
+      setLineCount(newCount);
+    };
+    globalLogListeners.push(listener);
+
+    setLogs([...globalLogs]);
+    setLineCount(globalLineCount);
 
     const unlistenStatus = listen("server-status-changed", () => {
       invoke<ServerStatus>("get_server_status").then(setStatus).catch(console.error);
     });
 
     return () => {
-      unlistenLog.then((f) => f());
+      globalLogListeners = globalLogListeners.filter((l) => l !== listener);
       unlistenStatus.then((f) => f());
     };
   }, []);
@@ -163,10 +190,7 @@ export default function LauncherTab() {
           <span className="muted" style={{ fontSize: 12 }}>{t("lines")}: {lineCount}</span>
           <button
             className="btn small"
-            onClick={() => {
-              setLogs([]);
-              setLineCount(0);
-            }}
+            onClick={clearGlobalLogs}
           >
             {t("clearLogs")}
           </button>
