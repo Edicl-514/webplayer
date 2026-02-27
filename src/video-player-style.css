@@ -643,7 +643,7 @@ a .fab {
 .dplayer-quality-label,
 .dplayer-speed-icon,
 .dplayer-speed-label {
-    color: var(--primary-text) !important;
+    color: #FFFFFF !important;
     transition: all 0.2s ease;
 }
 
@@ -657,6 +657,12 @@ a .fab {
 .dplayer-speed-label:hover {
     color: var(--accent-color) !important;
     background: transparent !important;
+}
+
+/* 确保DPlayer菜单文本始终为白色，不受动态主题影响 */
+.dplayer-quality-list,
+.dplayer-setting .dplayer-setting-box {
+    color: #FFFFFF !important;
 }
 
 .dplayer-setting .dplayer-setting-box .dplayer-setting-item.dplayer-setting-item-active {
