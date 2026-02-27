@@ -68,20 +68,13 @@
     
     如果您的计算机拥有支持 CUDA 的 NVIDIA 显卡，可以按以下步骤安装部分库的 GPU 版本以获得显著的性能提升。
     
-    在进行以下步骤前，请确保您安装了正确版本的 NVIDIA 显卡驱动、 CUDA Toolkit、 cuDNN 和 Visual Studio（用于编译llama-cpp-python）
+    在进行以下步骤前，请确保您安装了正确版本的 NVIDIA 显卡驱动、 CUDA Toolkit、 cuDNN
     
     *   **PyTorch**:
         `requirements.txt` 中的 `torch` 是 CPU 版本。请访问 [PyTorch 官网](https://pytorch.org/get-started/locally/)，根据您的 CUDA 版本获取并运行正确的安装命令。
     
     *   **llama-cpp-python**:
-        要启用 `llama.cpp` 的 GPU 加速，您需要先卸载 CPU 版本，然后设置特定的环境变量重新安装：
-        ```bash
-        pip uninstall llama-cpp-python
-        # 设置环境变量以启用 CUDA 支持
-        set CMAKE_ARGS="-DLLAMA_CUBLAS=on"
-        # 强制重新安装并从源码编译
-        pip install --force-reinstall --no-cache-dir llama-cpp-python
-        ```
+        要启用 `llama.cpp` 的 GPU 加速，您需要先卸载 CPU 版本，然后设置特定的环境变量重新安装。如果您的 CUDA 版本是下列之一，可以直接使用预编译版本：12.1, 12.2, 12.3, 12.4, 12.5。否则，可能需要安装 Visual Studio（或单独的 C++ 编译环境），用于编译安装，具体方法请参考[官方文档](https://github.com/abetlen/llama-cpp-python?tab=readme-ov-file#supported-backends)
 
 
 5.  **基础配置**
@@ -145,4 +138,4 @@
 - **兼容性**:
     -   文件搜索功能依赖的 Everything 工具 **仅支持 Windows**。
     -   对于浏览器不支持的格式（例如 .avi 封装的视频、VBR 编码的音频等），程序使用 FFmpeg 实时转码播放，可能会消耗较多 CPU 资源，建议提前转换为浏览器支持的格式。
-    -   请确保您的文件命名尽可能规范，以便 `guessit` 和刮削器能更准确地识别信息。
+    -   请确保您的文件命名尽可能规范，以便 `guessit` 和刮削器能更准确地识别信息，对于音乐文件，请确保包含了正确的 ID3 信息。

@@ -1,3 +1,7 @@
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+llama-cpp-python==0.3.2
 requests
 beautifulsoup4
 subliminal
@@ -10,7 +14,6 @@ musicbrainzngs
 Pillow
 torch
 transformers
-llama-cpp-python
 langdetect
 openai
 tenacity
