@@ -32,7 +32,7 @@
 //       而是导入 initSync，待接收主线程的 WASM ArrayBuffer 后再手动初始化
 // ============================================================
 
-import { initSync, LufsMeter } from './audio_processor/pkg/audio_processor.js';
+import { initSync, LufsMeter } from '/audio_processor/pkg/audio_processor.js';
 
 // ============================================================
 // LufsMeterProcessor —— AudioWorkletProcessor 实现

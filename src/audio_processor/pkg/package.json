@@ -1,0 +1,16 @@
+{
+  "name": "audio-processor",
+  "type": "module",
+  "description": "WASM audio processing module: ITU-R BS.1770 LUFS metering for Web Audio API",
+  "version": "0.1.0",
+  "files": [
+    "audio_processor_bg.wasm",
+    "audio_processor.js",
+    "audio_processor.d.ts"
+  ],
+  "main": "audio_processor.js",
+  "types": "audio_processor.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

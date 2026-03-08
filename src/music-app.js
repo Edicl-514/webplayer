@@ -2143,12 +2143,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!audioContext.audioWorklet) {
                     throw new Error('AudioWorklet unavailable: page must be served over HTTPS or localhost (current origin: ' + location.origin + ')');
                 }
-                await audioContext.audioWorklet.addModule('lufs-meter-processor.js');
+                await audioContext.audioWorklet.addModule('/lufs-meter-processor.js');
 
                 // 在主线程加载 WASM（AudioWorklet 中无网络 API），再传给 Worklet
                 let wasmBuffer = null;
                 try {
-                    const wasmResp = await fetch('audio_processor/pkg/audio_processor_bg.wasm');
+                    const wasmResp = await fetch('/audio_processor/pkg/audio_processor_bg.wasm');
                     wasmBuffer = await wasmResp.arrayBuffer();
                 } catch (e) {
                     console.warn('[LUFS Worklet] Failed to preload WASM, will attempt to use initSync:', e);
